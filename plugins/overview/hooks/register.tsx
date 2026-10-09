@@ -263,8 +263,6 @@ export const agentDetail = (agent: Agent, x: AgentExtra | undefined, at: number)
 
 const git = atom({ plugin: 'overview', key: 'git' } as const, null)
 const gh = atom({ plugin: 'overview', key: 'gh' } as const, null)
-const GIT_MS = 5_000
-const GH_MS = 30_000
 const GIT_FILES = 4
 const GIT_PRS = 3
 
@@ -459,8 +457,6 @@ const loadGh = async ($: EngineInterface, info: GitInfo): Promise<GhInfo> => {
 let gitBusy = false
 let gitAgain = false
 let ghBusy = false
-let gitTimer: Timer | undefined
-let ghTimer: Timer | undefined
 
 /** Re-read git; a call made while one runs queues one more run after it. */
 const refreshGit = async ($: EngineInterface): Promise<void> => {
@@ -476,7 +472,7 @@ const refreshGit = async ($: EngineInterface): Promise<void> => {
       if (!same(await read($, git), fresh)) await update($, git, () => fresh)
       const cached = await read($, gh)
       // A new repo (the session cd'd) shouldn't show the old repo's PRs.
-      if (fresh.ok && cached?.root !== fresh.root) void refreshGh($).catch(() => undefined)
+      if (fresh.ok && cached?.root !== fresh.root) stale.gh = true
     } while (gitAgain)
   } finally {
     gitBusy = false
@@ -496,13 +492,6 @@ const refreshGh = async ($: EngineInterface): Promise<void> => {
   } finally {
     ghBusy = false
   }
-}
-
-const startGitTimers = ($: EngineInterface) => {
-  gitTimer?.cancel()
-  ghTimer?.cancel()
-  gitTimer = $.clock.every(GIT_MS, () => void refreshGit($).catch(() => undefined))
-  ghTimer = $.clock.every(GH_MS, () => void refreshGh($).catch(() => undefined))
 }
 
 const FILE_TOOLS = ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']
@@ -594,7 +583,8 @@ const refreshAgents = async ($: EngineInterface): Promise<void> => {
   if (JSON.stringify(before) !== JSON.stringify(fresh)) await update($, agents, () => fresh)
   const running = fresh.some(a => a.status === 'running' || a.status === 'pending')
   if (running) {
-    await update($, now, () => Date.now())
+    // Elapsed times move only where someone can see them.
+    if (await isShown($)) await update($, now, () => Date.now())
     ticker ??= $.clock.every(TICK_MS, () => void refreshAgents($).catch(() => undefined))
   } else if (ticker) {
     ticker.cancel()
@@ -642,10 +632,13 @@ export const countTurn = (a: Activity, ms: number, usage: ModelUsage | undefined
   return { ...a, turns: a.turns + 1, turnLog: [...a.turnLog, point].slice(-TURN_LOG) }
 }
 
-const refresh = async ($: EngineInterface) => {
+export const refresh = async ($: EngineInterface) => {
   const usage = await $.session.usage({ breakdown: 'summary' })
   const b = usage.context.breakdown
-  if (b) await update($, snapshot, () => toSnapshot(b))
+  if (b) {
+    const fresh = toSnapshot(b)
+    if (!same(await read($, snapshot), fresh)) await update($, snapshot, () => fresh)
+  }
   await storeLimits($, usage.rateLimits ?? [])
   const percent = b?.percentage ?? usage.context.percent
   await update($, activity, a => {
@@ -657,7 +650,60 @@ const refresh = async ($: EngineInterface) => {
   })
 }
 
-let sessionClock: Timer | undefined
+// ---- When to work ------------------------------------------------------------
+// Nothing runs while the pane isn't shown: events only mark what went stale,
+// and one timer reads it again, at most so often, while the pane is on screen.
+
+let shownAt = 0
+let shown = false
+
+/** Whether the overview pane is the one shown and placed; asked at most every 2 s. */
+const isShown = async ($: EngineInterface): Promise<boolean> => {
+  if (Date.now() - shownAt < 2_000) return shown
+  shownAt = Date.now()
+  try {
+    shown = (await $.ui.panes()).some(p => p.id === PANE && p.isShown && p.isPlaced)
+  } catch {
+    shown = false
+  }
+  return shown
+}
+
+const stale = { usage: true, git: true, gh: true }
+const last = { usage: 0, git: 0, gh: 0, clock: 0 }
+// Even with nothing marked stale, read again this often while shown.
+const EVERY = { usage: 60_000, git: 60_000, gh: 180_000, clock: 60_000 }
+// And never more often than this, however much happens.
+const AT_MOST = { usage: 3_000, git: 3_000, gh: 20_000 }
+let worker: Timer | undefined
+
+export const due = (kind: 'usage' | 'git' | 'gh', t: number) =>
+  t - last[kind] >= (stale[kind] ? AT_MOST[kind] : EVERY[kind])
+
+const tick = async ($: EngineInterface) => {
+  if (!(await isShown($))) return
+  const t = Date.now()
+  if (due('usage', t)) {
+    stale.usage = false
+    last.usage = t
+    await refresh($)
+  }
+  if (due('git', t)) {
+    stale.git = false
+    last.git = t
+    await refreshGit($)
+  }
+  if (due('gh', t)) {
+    stale.gh = false
+    last.gh = t
+    await refreshGh($)
+  }
+  // The session's elapsed time moves even when nothing else does.
+  if (t - last.clock >= EVERY.clock) {
+    last.clock = t
+    await update($, now, () => t)
+  }
+}
 
 const HELPERS: Helpers = { colorOf, limitLabel, resetIn, buildTree }
 
@@ -670,31 +716,25 @@ export const register: Register = on => {
       name: 'overview',
       description: 'Open the session overview pane: context, cost, turns, tools, agents, limits and git',
     })
-    void refresh($).catch(() => undefined)
     void refreshAgents($).catch(() => undefined)
-    void refreshGit($).catch(() => undefined)
-    startGitTimers($)
-    // The session's elapsed time moves even when nothing else does.
-    sessionClock?.cancel()
-    sessionClock = $.clock.every(30_000, () => void update($, now, () => Date.now()).catch(() => undefined))
+    worker?.cancel()
+    worker = $.clock.every(3_000, () => void tick($).catch(() => undefined))
     void $.ui.open({ id: PANE, title: 'Overview' })
 
     return next(e)
   })
 
-  // A tool that may have changed files (or pushed, or opened a PR) re-reads git;
-  // a gh or push command re-reads the PRs too.
+  // A tool that may have changed files (or pushed, or opened a PR) marks git stale;
+  // a gh or push command marks the PRs stale too. Nothing waits on the bookkeeping.
   on('tool.call', async ($, e, next) => {
     const ran = await next(e)
     if (!('deny' in ran && ran.deny)) {
       const path = editedPath(e.tool, e as { file_path?: unknown; notebook_path?: unknown })
-      await update($, activity, a => countTool(a, e.tool, Boolean(ran.isError), path))
+      void update($, activity, a => countTool(a, e.tool, Boolean(ran.isError), path)).catch(() => undefined)
     }
     if (FILE_TOOLS.includes(e.tool)) {
-      void refreshGit($).catch(() => undefined)
-      if (e.tool === 'Bash' && /\bgh pr\b|\bgit (push|commit|checkout|switch)\b/.test(e.command)) {
-        void refreshGh($).catch(() => undefined)
-      }
+      stale.git = true
+      if (e.tool === 'Bash' && /\bgh pr\b|\bgit (push|commit|checkout|switch)\b/.test(e.command)) stale.gh = true
     }
     return ran
   })
@@ -718,7 +758,7 @@ export const register: Register = on => {
   // Each run of a subagent's loop is one turn; its end carries duration and usage.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    void refreshGit($).catch(() => undefined)
+    stale.git = true
     const id = e.agentId
     if (id) {
       await update($, agentExtra, all => {
@@ -729,12 +769,16 @@ export const register: Register = on => {
       })
       void refreshAgents($).catch(() => undefined)
     } else {
-      await update($, activity, a => countTurn(a, e.durationMs, e.usage))
+      void update($, activity, a => countTurn(a, e.durationMs, e.usage)).catch(() => undefined)
     }
     return done
   })
 
   on('command.run', { command: 'overview' }, async $ => {
+    // Opened by the person: read everything now rather than on the next tick.
+    shownAt = 0
+    stale.usage = stale.git = stale.gh = true
+    last.usage = last.git = last.gh = 0
     await refresh($)
     await $.ui.open({ id: PANE, title: 'Overview' })
 
@@ -744,7 +788,8 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     const result = await next(e)
     if (e.changed.includes('rateLimits')) await storeLimits($, e.rateLimits)
-    await refresh($)
+    // The breakdown is worked out on the next tick, if the pane is shown.
+    stale.usage = true
 
     return result
   })

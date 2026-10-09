@@ -2,6 +2,12 @@ import type { SessionContextBreakdown } from 'claude-code'
 import { describe, expect, test } from 'claude-code/testing'
 import type { TestBody } from 'claude-code/testing'
 
+/** `/overview`, as the person runs it: reads everything at once and opens the pane. */
+const openPane = async ($: Parameters<TestBody>[0], on: Parameters<TestBody>[1]) => {
+  on('ui.open', () => ({ value: { isPlaced: true } }) as never)
+  await $.command.run({ command: 'overview', args: '', origin: { kind: 'composer' } } as never)
+}
+
 const breakdown: SessionContextBreakdown = {
   categories: [
     { name: 'System prompt', tokens: 3_000, color: 'promptBorder', isDeferred: false, kind: 'used' },
@@ -29,8 +35,7 @@ describe('pane', () => {
   test('after a measurement, draws the percent, a row per non-empty category and the details', async ($, on) => {
     const context = { tokens: 17_000, window: 200_000, percent: 9 }
     on('session.usage', () => ({ value: { startedAt: 0, context: { ...context, breakdown }, rateLimits: [] } }))
-    on('session.measure', () => ({ changed: ['context'] }))
-    await $.session.measure({ context, rateLimits: [], changed: ['context'] })
+    await openPane($, on)
 
     const ui = await mount($, 'terminal')
     expect(await ui.find({ type: 'Text', text: '9%' })).toBeDefined()
@@ -51,8 +56,7 @@ describe('pane', () => {
         cost: { usd: 1.5 },
       },
     }))
-    on('session.measure', () => ({ changed: ['context'] }))
-    await $.session.measure({ context, rateLimits: [], changed: ['context'] })
+    await openPane($, on)
 
     const ui = await mount($, 'desktop')
     expect(await ui.find({ type: 'Text', text: /^◕ 9%$/ })).toBeDefined()
