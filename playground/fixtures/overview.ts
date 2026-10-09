@@ -15,7 +15,7 @@ const snapshot = (total: number, messages: number) => ({
     { name: 'Memory files', tokens: 2_300, kind: 'used' },
     { name: 'Skills', tokens: 3_900, kind: 'used' },
     { name: 'Messages', tokens: messages, kind: 'used' },
-    { name: 'Free space', tokens: 200_000 - total - 33_000, kind: 'free' },
+    { name: 'Free space', tokens: Math.max(0, 200_000 - total - 33_000), kind: 'free' },
     { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
   ],
   memory: [{ label: 'CLAUDE.md (User)', tokens: 1_400 }],

@@ -87,9 +87,10 @@ export const toSnapshot = (b: SessionContextBreakdown): Snapshot => {
  * non-empty used segment gets at least one cell, taken from free space.
  */
 export const layoutBar = (segments: Segment[], max: number, width: number): number[] => {
-  const sum = segments.reduce((n, s) => n + s.tokens, 0)
+  // A negative count (free space past the window) draws as nothing, never as a negative run.
+  const sum = segments.reduce((n, s) => n + Math.max(0, s.tokens), 0)
   const scale = Math.max(max, sum, 1)
-  const exact = segments.map(s => (s.tokens / scale) * width)
+  const exact = segments.map(s => (Math.max(0, s.tokens) / scale) * width)
   const cells = exact.map(Math.floor)
   let left = width - cells.reduce((n, c) => n + c, 0)
   const byRemainder = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r)

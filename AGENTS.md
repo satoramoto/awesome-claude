@@ -10,7 +10,8 @@ Read [`README.md`](README.md) first. Edit `mods/` and `kit/`, never `plugins/`
 | `claude plugin test plugins/<mod>` | the mod's `*.test.ts` against the engine | after building a mod you changed |
 | `bun test kit` | the kit's own tests | any change under `kit/` |
 | `tsc -p plugins/<mod>` | the compiled mod type-checks (needs the engine's types, laid in `plugins/<mod>/.claude-plugin/types/` once the mod has loaded) | any `.ts`/`.tsx` change |
-| `bun run playground` | the mods drawn in the browser; runs the build and `claude plugin test` on each save | while designing a mod |
+| `bun run playground` | whole mods drawn in the browser from their own render hooks and sample data; runs the build and `claude plugin test` on each save | while wiring up a mod |
+| `bun run storybook` | each kit component, and each mod scenario, as a story with controls; surface, theme and width in the toolbar | while designing how something looks |
 
 Every agent commit ends with a blank line and a co-author trailer naming the agent
 that made it, for example `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.

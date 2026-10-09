@@ -72,6 +72,12 @@ describe('layoutBar', () => {
     const cells = layoutBar([seg('a', 300), seg('b', 100)], 200, 40)
     expect(cells).toEqual([30, 10])
   })
+
+  test('a negative count draws as no cells, never a negative run', () => {
+    const cells = layoutBar([seg('a', 150), seg('Free', -20, 'free'), seg('Buffer', 50, 'buffer')], 200, 40)
+    expect(cells.every(c => c >= 0)).toBe(true)
+    expect(cells.reduce((n, c) => n + c, 0)).toBe(40)
+  })
 })
 
 describe('colorOf', () => {
