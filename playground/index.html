@@ -1,0 +1,133 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Mod playground</title>
+    <style>
+      :root {
+        --bg: #e9e9ec;
+        --fg: #1d1d1f;
+        --chrome: #ffffff;
+        --line: rgba(0, 0, 0, 0.08);
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme='light']) {
+          --bg: #141416;
+          --fg: #ececec;
+          --chrome: #1f1f22;
+          --line: rgba(255, 255, 255, 0.08);
+        }
+      }
+      body {
+        margin: 0;
+        background: var(--bg);
+        color: var(--fg);
+        font: 13px/1.4 -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+      }
+      #bar {
+        position: sticky;
+        top: 0;
+        z-index: 1;
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px 18px;
+        align-items: center;
+        padding: 10px 16px;
+        background: var(--chrome);
+        border-bottom: 1px solid var(--line);
+      }
+      #bar label {
+        display: flex;
+        gap: 6px;
+        align-items: center;
+      }
+      #check {
+        margin-left: auto;
+        font-variant-numeric: tabular-nums;
+      }
+      #check.ok {
+        color: #30a46c;
+      }
+      #check.bad {
+        color: #e5484d;
+      }
+      #stage {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 16px;
+        align-items: flex-start;
+        padding: 16px;
+      }
+      .pane {
+        border-radius: 10px;
+        overflow: hidden;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
+      }
+      .pane header {
+        display: flex;
+        justify-content: space-between;
+        gap: 16px;
+        padding: 6px 12px;
+        font-size: 11px;
+        opacity: 0.6;
+      }
+      .pane .body {
+        padding: 4px 12px 12px;
+        overflow: hidden;
+        line-height: 19px;
+      }
+      .pane.light {
+        background: #fbfbfa;
+        color: #1d1d1f;
+        color-scheme: light;
+      }
+      .pane.dark {
+        background: #1f1f1e;
+        color: #ececec;
+        color-scheme: dark;
+      }
+      .pane.terminal {
+        background: #101014;
+        color: #d8d8d8;
+      }
+      .pane.terminal .body {
+        font: 13px/1.25 'SF Mono', Menlo, monospace;
+      }
+      .link {
+        color: #6e8efb;
+      }
+      .button {
+        font: inherit;
+        color: inherit;
+        background: none;
+        border: 1px solid currentColor;
+        border-radius: 4px;
+        padding: 0 4px;
+        cursor: pointer;
+      }
+      .button.plain {
+        border: none;
+        padding: 0;
+      }
+      .error {
+        color: #e5484d;
+        white-space: pre-wrap;
+        font-size: 11px;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="bar">
+      <label>Mod <select id="mod"></select></label>
+      <label>Scenario <select id="scenario"></select></label>
+      <label>Width <input id="columns" type="range" min="28" max="140" /> <span id="columns-label"></span></label>
+      <label><input type="checkbox" name="pane" value="desktop-light" /> Desktop light</label>
+      <label><input type="checkbox" name="pane" value="desktop-dark" /> Desktop dark</label>
+      <label><input type="checkbox" name="pane" value="terminal" /> Terminal</label>
+      <span id="check">engine checks run on save</span>
+    </div>
+    <main id="stage"></main>
+    <script type="module" src="./main.ts"></script>
+  </body>
+</html>

@@ -1,0 +1,15 @@
+{
+  "name": "awesome-claude",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "bun build.ts",
+    "watch": "bun build.ts --watch",
+    "playground": "vite playground --port ${PORT:-5173} --strictPort",
+    "test": "bun test kit playground"
+  },
+  "devDependencies": {
+    "typescript": "5.6.3",
+    "vite": "5.4.10"
+  }
+}

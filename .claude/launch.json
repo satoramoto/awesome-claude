@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "playground",
+      "runtimeExecutable": "bun",
+      "runtimeArgs": ["--cwd", "/Users/ryan/Code/satoramoto/awesome-claude", "run", "playground"],
+      "port": 5173
+    }
+  ]
+}

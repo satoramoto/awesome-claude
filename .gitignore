@@ -1,0 +1,4 @@
+node_modules/
+# Laid by the engine beside a mod it loads.
+.claude-plugin/types/
+.DS_Store

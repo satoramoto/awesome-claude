@@ -1,0 +1,7 @@
+{
+  "name": "overview",
+  "version": "0.4.0",
+  "description": "A session overview pane: context, cost, time, turns, tools, files, subagents, limits and git; cells in the terminal, charts in the desktop app",
+  "author": { "name": "Ryan Gavin" },
+  "types": "./types/index.d.ts"
+}
