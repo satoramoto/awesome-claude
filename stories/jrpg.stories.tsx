@@ -40,6 +40,128 @@ const hpColor = (left: number, greens = ['#48d16f', '#f2c94c', '#eb5757']) => (l
 const statusOf = (status: string) =>
   status === 'running' ? { tag: 'RUN', color: '#f2994a' } : status === 'completed' ? { tag: 'OK', color: '#48d16f' } : status === 'failed' ? { tag: 'KO', color: '#eb5757' } : { tag: '—', color: '#9b9b9b' }
 
+// ---- 0. Sleek: modern JRPG status screens (Octopath, Xenoblade 3, Metaphor) ---------
+// Thin gauges, hairlines, short uppercase labels, right-aligned figures, one accent
+// per section, a slim rail for status. Text takes the page's own colour.
+
+const SLEEK = {
+  frame: 'rgba(128,128,128,0.28)',
+  hair: 'rgba(128,128,128,0.22)',
+  track: 'rgba(128,128,128,0.16)',
+  hp: '#4fd1a5',
+  mp: '#6aa7ff',
+  gold: '#e8b64c',
+  warn: '#f2a65a',
+  bad: '#f06a7a',
+  violet: '#a98bff',
+}
+
+const Hair = () => <Box height={0.06} backgroundColor={SLEEK.hair} marginY={0.35} />
+
+/** A thin gauge: `value` of `max`. */
+const Thin = (p: { value: number; max: number; color: string }) => <Gauge value={p.value} max={p.max} color={p.color} track={SLEEK.track} height={0.22} />
+
+/** LABEL ─── gauge ─── figure, on one line. */
+const Meter = (p: { label: string; value: number; max: number; color: string; figure: string; sub?: string }) => (
+  <Box flexDirection="row" alignItems="center" gap={1}>
+    <Box width={3} flexShrink={0}>
+      <Text color={p.color} bold>
+        {p.label}
+      </Text>
+    </Box>
+    <Thin value={p.value} max={p.max} color={p.color} />
+    <Box minWidth={6} flexDirection="row" justifyContent="flex-end">
+      <Text bold>{p.figure}</Text>
+      {p.sub ? <Text dimColor>{p.sub}</Text> : null}
+    </Box>
+  </Box>
+)
+
+/** ◆ LABEL ··· right, a section's head. */
+const Head = (p: { label: string; color: string; right?: string }) => (
+  <Box flexDirection="row" justifyContent="space-between" marginTop={0.5}>
+    <Text>
+      <Text color={p.color}>{'◆ '}</Text>
+      <Text bold dimColor>
+        {p.label}
+      </Text>
+    </Text>
+    {p.right ? <Text dimColor>{p.right}</Text> : null}
+  </Box>
+)
+
+/** A row with a slim coloured rail on the left: an agent, its type, its figures. */
+const Railed = (p: { color: string; name: string; type: string; figure: string; indent?: number }) => (
+  <Box flexDirection="row" gap={1} marginTop={0.25} paddingLeft={p.indent ?? 0}>
+    <Box width={0.3} backgroundColor={p.color} flexShrink={0} />
+    <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
+      <Text wrap="truncate">
+        {p.name}
+        <Text dimColor>{`  ${p.type}`}</Text>
+      </Text>
+      <Text dimColor>{p.figure}</Text>
+    </Box>
+  </Box>
+)
+
+export const Sleek: StoryObj = {
+  render: (_, ctx) => {
+    const extra = s.agentExtra as Record<string, { tokens?: number; durationMs?: number; startedAt?: number }>
+    const tools = Object.entries(s.activity.tools).sort((a, b) => b[1].n - a[1].n).slice(0, 4)
+    const max = Math.max(...tools.map(([, t]) => t.n))
+    return show(
+      <Box flexDirection="column" borderStyle="round" borderColor={SLEEK.frame} paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center">
+          <Text bold>Claude</Text>
+          <Text>
+            <Text dimColor>{'LV '}</Text>
+            <Text bold>{String(s.activity.turns)}</Text>
+            <Text dimColor>{'   '}</Text>
+            <Text color={SLEEK.gold} bold>{money(s.activity.cost)}</Text>
+            <Text dimColor>{`   ${elapsed}`}</Text>
+          </Text>
+        </Box>
+        <Meter label="HP" value={ctxLeft} max={100} color={ctxLeft > 20 ? SLEEK.hp : SLEEK.bad} figure={`${ctxLeft}`} sub="%" />
+        <Meter label="MP" value={100 - fiveHour.percent} max={100} color={SLEEK.mp} figure={`${100 - fiveHour.percent}`} sub="%" />
+        <Meter label="WK" value={100 - weekly.percent} max={100} color={weekly.percent > 75 ? SLEEK.warn : SLEEK.violet} figure={`${100 - weekly.percent}`} sub="%" />
+        <Hair />
+        <Head label="PARTY" color={SLEEK.warn} right={`${s.agents.filter(a => a.status === 'running').length} active`} />
+        {s.agents.map(a => {
+          const x = extra[a.id]
+          const color = a.status === 'running' ? SLEEK.warn : a.status === 'completed' ? SLEEK.hp : a.status === 'failed' ? SLEEK.bad : SLEEK.track
+          const time = x?.durationMs ? short(x.durationMs) : x?.startedAt ? short(Date.now() - x.startedAt) : ''
+          const figure = [x?.tokens !== undefined ? tokens(x.tokens) : '', time].filter(Boolean).join(' · ')
+          return <Railed color={color} name={a.description} type={a.type} figure={figure} indent={a.parentId ? 2 : 0} />
+        })}
+        <Hair />
+        <Head label="SKILLS" color={SLEEK.violet} right={`${toolCalls} used`} />
+        {tools.map(([name, t]) => (
+          <Box flexDirection="row" alignItems="center" gap={1} marginTop={0.15}>
+            <Box width={8} flexShrink={0}>
+              <Text wrap="truncate">{name.split('__').pop() ?? name}</Text>
+            </Box>
+            <Thin value={t.n} max={max} color={SLEEK.violet} />
+            <Box minWidth={6} flexDirection="row" justifyContent="flex-end">
+              {t.err ? <Text color={SLEEK.bad}>{`${t.err}✕ `}</Text> : null}
+              <Text bold>{String(t.n)}</Text>
+            </Box>
+          </Box>
+        ))}
+        <Hair />
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text dimColor>{`⎇ ${s.git.branch}`}</Text>
+          <Text>
+            <Text color={SLEEK.hp}>{`+${s.git.insertions}`}</Text>
+            <Text color={SLEEK.bad}>{` −${s.git.deletions}`}</Text>
+            <Text dimColor>{`  ${s.gh.prs.length} PR`}</Text>
+          </Text>
+        </Box>
+      </Box>,
+      ctx,
+    )
+  },
+}
+
 // ---- 1. Pokémon party -------------------------------------------------------------
 
 const POKE = { panel: '#e8f4ff', panelBorder: '#5b8fd6', ink: '#203040', member: '#fff6e0', memberBorder: '#e0a84a', track: 'rgba(32,48,64,0.15)' }
