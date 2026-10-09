@@ -1,7 +1,9 @@
 import type { RenderElement, RenderSurface } from 'claude-code'
 
-import { pct } from './format'
-import { MUTED, TRACK } from './tokens'
+import { pct, short } from './format'
+import { ms } from './perf'
+import type { PerfRow, PerfSnapshot } from './perf'
+import { C, MUTED, TRACK } from './tokens'
 
 /**
  * The shared components. Each draws for the surface it is given: on the app
@@ -225,7 +227,33 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart }
+  /**
+   * A debug footer: what the mod cost, from a `createPerf()` snapshot. One dim
+   * line per row's worth: the costliest things in the last minute first, each
+   * as its average time and how often it ran; amber past 1 s a minute or a
+   * render over 16 ms, red past 5 s a minute.
+   */
+  const perfFooter = (snap: PerfSnapshot, opts: { max?: number } = {}) => {
+    const rows = snap.rows.slice(0, opts.max ?? 6)
+    const tone = (r: PerfRow) =>
+      r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
+    return (
+      <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={terminal ? 1 : 0.6}>
+        <Text dimColor>{`⏱ ${short(snap.sinceMs)}`}</Text>
+        {rows.map(r => {
+          const color = tone(r)
+          const timing = r.avgMs > 0 ? `${ms(r.avgMs)}·` : ''
+          return (
+            <Text key={`perf-${r.name}`} dimColor={!color} color={color}>
+              {`${r.name} ${timing}${r.perMin}/m`}
+            </Text>
+          )
+        })}
+      </Box>
+    )
+  }
+
+  return { bar, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

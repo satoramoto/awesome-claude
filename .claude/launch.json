@@ -4,8 +4,9 @@
     {
       "name": "playground",
       "runtimeExecutable": "bun",
-      "runtimeArgs": ["--cwd", "/Users/ryan/Code/satoramoto/awesome-claude", "run", "playground"],
-      "port": 5173
+      "runtimeArgs": ["run", "playground"],
+      "port": 5173,
+      "autoPort": true
     }
   ]
 }

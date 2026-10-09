@@ -27,6 +27,8 @@ import type {
   TreeRow,
   TurnPoint,
 } from '../types'
+import { createPerf } from '../kit/perf'
+
 import { renderDesktop } from './desktop'
 import type { AppElements, Helpers } from './desktop'
 
@@ -585,7 +587,7 @@ const refreshAgents = async ($: EngineInterface): Promise<void> => {
   if (running) {
     // Elapsed times move only where someone can see them.
     if (await isShown($)) await update($, now, () => Date.now())
-    ticker ??= $.clock.every(TICK_MS, () => void refreshAgents($).catch(() => undefined))
+    ticker ??= $.clock.every(TICK_MS, () => void perf.time('agents', () => refreshAgents($)).catch(() => undefined))
   } else if (ticker) {
     ticker.cancel()
     ticker = undefined
@@ -686,17 +688,17 @@ const tick = async ($: EngineInterface) => {
   if (due('usage', t)) {
     stale.usage = false
     last.usage = t
-    await refresh($)
+    await perf.time('usage', () => refresh($))
   }
   if (due('git', t)) {
     stale.git = false
     last.git = t
-    await refreshGit($)
+    await perf.time('git', () => refreshGit($))
   }
   if (due('gh', t)) {
     stale.gh = false
     last.gh = t
-    await refreshGh($)
+    await perf.time('gh', () => refreshGh($))
   }
   // The session's elapsed time moves even when nothing else does.
   if (t - last.clock >= EVERY.clock) {
@@ -706,6 +708,9 @@ const tick = async ($: EngineInterface) => {
 }
 
 const HELPERS: Helpers = { colorOf, limitLabel, resetIn, buildTree }
+
+/** What this mod costs, drawn in the pane's debug footer. */
+export const perf = createPerf()
 
 /** The app mode's sections the person folded; kept for the session. */
 const collapsed = atom({ plugin: 'overview', key: 'collapsed' } as const, [])
@@ -718,7 +723,7 @@ export const register: Register = on => {
     })
     void refreshAgents($).catch(() => undefined)
     worker?.cancel()
-    worker = $.clock.every(3_000, () => void tick($).catch(() => undefined))
+    worker = $.clock.every(3_000, () => void perf.time('tick', () => tick($)).catch(() => undefined))
     void $.ui.open({ id: PANE, title: 'Overview' })
 
     return next(e)
@@ -730,7 +735,7 @@ export const register: Register = on => {
     const ran = await next(e)
     if (!('deny' in ran && ran.deny)) {
       const path = editedPath(e.tool, e as { file_path?: unknown; notebook_path?: unknown })
-      void update($, activity, a => countTool(a, e.tool, Boolean(ran.isError), path)).catch(() => undefined)
+      void perf.time('tool.call', () => update($, activity, a => countTool(a, e.tool, Boolean(ran.isError), path))).catch(() => undefined)
     }
     if (FILE_TOOLS.includes(e.tool)) {
       stale.git = true
@@ -817,8 +822,9 @@ export const register: Register = on => {
           void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
         columns: e.props.bodyColumns,
         at: Date.now(),
+        perf: perf.snapshot(),
       }
-      return renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS)
+      return perf.time('render', () => renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS))
     }
     const { Box, Text } = $.ui.resolve(e)
     const docked = e.props.placement === 'dock'

@@ -80,7 +80,9 @@ export default defineConfig({
       '@kit': resolve(ROOT, 'kit'),
     },
   },
-  esbuild: { jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment' },
+  // A string here stops Vite reading each mod's tsconfig.json, which extends the
+  // types the engine lays down only once a mod has loaded.
+  esbuild: { jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment', tsconfigRaw: '{ "compilerOptions": {} }' },
   server: { fs: { allow: [ROOT] } },
   plugins: [checks()],
 })

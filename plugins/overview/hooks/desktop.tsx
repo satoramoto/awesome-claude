@@ -1,6 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { duration, money, short, tokens } from '../kit/format'
+import type { PerfSnapshot } from '../kit/perf'
 import { C, GLYPH, MUTED, PALETTE, levelColor } from '../kit/tokens'
 import { kit } from '../kit/ui'
 
@@ -23,6 +24,8 @@ export type DesktopData = {
   toggle: (id: string) => void
   /** The pane's width in cells. */
   columns: number
+  /** What the mod cost, for the debug footer. */
+  perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
   at: number
 }
@@ -215,6 +218,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     <Box flexDirection="column">
       {top}
       {k.grid([context, turns, tools, agents, limits, renderGit(els, k, d, fold)].filter((s): s is RenderElement => s !== null))}
+      {k.perf(d.perf)}
     </Box>
   )
 }
