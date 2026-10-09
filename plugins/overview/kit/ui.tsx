@@ -11,8 +11,9 @@ import { C, MUTED, TRACK } from './tokens'
  * any width; in the terminal as cells, `columns` wide.
  *
  * What the desktop accepts (2.1.293): whole percentages only, `flexGrow` up to
- * 10000, fractional heights and margins; no `hover`. No SVG: the page scales
- * it as an image and it blurs.
+ * 10000, fractional heights and margins; no `hover`. Borders `round` (rounded
+ * corners), single, double, bold and classic draw; `dashed` doesn't. No SVG:
+ * the page scales it as an image and it blurs.
  */
 
 /** The element constructors the kit draws with. `Button` is needed only for collapsible sections. */
@@ -62,6 +63,27 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       </Box>
     )
   }
+
+  /**
+   * A card: a rounded border (`round`, which the desktop draws with rounded
+   * corners and the terminal with ╭╮╰╯), an optional tinted fill, and padding.
+   * Borders the desktop draws: round, single, double, bold, classic; not dashed.
+   */
+  const card = (key: string, children: RenderElement | (RenderElement | null)[], opts: { color?: string; fill?: string; border?: 'round' | 'single' | 'double' | 'bold' } = {}) => (
+    <Box key={key} flexDirection="column" borderStyle={opts.border ?? 'round'} borderColor={opts.color ?? TRACK} backgroundColor={opts.fill} paddingX={1}>
+      {children}
+    </Box>
+  )
+
+  /** A rounded pill: a short colored figure, like a count or a state. */
+  const pill = (key: string, color: string, text: string) =>
+    terminal ? (
+      <Text key={key} color={color}>{`(${text})`}</Text>
+    ) : (
+      <Box key={key} borderStyle="round" borderColor={color} paddingX={0.5}>
+        <Text color={color}>{text}</Text>
+      </Box>
+    )
 
   /** A small square of color. */
   const swatch = (color: string) => (terminal ? <Text color={color}>■</Text> : <Box width={1} height={0.7} backgroundColor={color} />)
@@ -253,7 +275,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { bar, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

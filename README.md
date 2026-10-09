@@ -60,5 +60,7 @@ whole mod with the engine's checks running.
 
 What the desktop accepts (Claude Code 2.1.293), found by probing the engine's
 validator: whole percentages only (`25.5%` is refused); `flexGrow` up to
-10000; fractional heights and margins; no Box `hover`. SVG is drawn as an image
+10000; fractional heights and margins; no Box `hover`. Borders: `round` draws
+rounded corners, and `single`, `double`, `bold` and `classic` draw; `dashed`
+doesn't. SVG is drawn as an image
 the page scales, so it blurs as the pane resizes: draw with boxes and text.

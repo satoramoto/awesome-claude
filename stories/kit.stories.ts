@@ -90,6 +90,47 @@ export const Section: Story = {
   },
 }
 
+export const Card: Story = {
+  args: { border: 'round', color: C.blue, tinted: true },
+  argTypes: {
+    border: { control: 'select', options: ['round', 'single', 'double', 'bold'] },
+    color: { control: 'color' },
+  },
+  render: (args, ctx) => {
+    const k = kitFor(ctx)
+    return show(
+      k.card(
+        'demo',
+        [
+          k.flow([k.stat(GLYPH.context, C.ok, '31%'), k.stat(GLYPH.cost, C.ok, '4.82'), k.stat(GLYPH.turns, C.blue, '23')]),
+          k.bar([{ value: 31, color: C.blue }], 100),
+        ],
+        { border: args.border, color: args.color, fill: args.tinted ? 'rgba(122,162,247,0.10)' : undefined },
+      ),
+      ctx,
+    )
+  },
+}
+
+export const Pills: Story = {
+  render: (_, ctx) => {
+    const k = kitFor(ctx)
+    return show(
+      k.flow(
+        [
+          k.pill('ok', C.ok, '✓ 3'),
+          k.pill('bad', C.bad, '✕ 1 failing'),
+          k.pill('warn', C.warn, '◌ 2 pending'),
+          k.pill('run', C.warn, '2 running'),
+          k.pill('merged', C.purple, 'merged'),
+        ],
+        1,
+      ),
+      ctx,
+    )
+  },
+}
+
 export const Grid: Story = {
   args: { sections: 4, minWidth: 34 },
   argTypes: { sections: { control: { type: 'range', min: 1, max: 6 } }, minWidth: { control: { type: 'range', min: 16, max: 60 } } },

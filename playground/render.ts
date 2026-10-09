@@ -50,7 +50,13 @@ const boxStyle = (surface: Surface, p: Record<string, any>) => {
       const base = k.startsWith('margin') ? 'margin' : 'padding'
       s[`${base}Top`] = s[`${base}Bottom`] = unit(surface, k, v)
     } else if (k === 'backgroundColor') s.background = THEME[v] ?? v
-    else if (k === 'borderStyle') s.border = `1px solid ${THEME[p.borderColor] ?? p.borderColor ?? 'currentColor'}`
+    else if (k === 'borderStyle') {
+      // The desktop draws these; `dashed` it ignores.
+      if (v === 'dashed') continue
+      const width = v === 'bold' ? 2 : v === 'double' ? 3 : 1
+      s.border = `${width}px ${v === 'double' ? 'double' : 'solid'} ${THEME[p.borderColor] ?? p.borderColor ?? 'currentColor'}`
+      if (v === 'round') s.borderRadius = surface === 'terminal' ? '0.4em' : '8px'
+    }
     else if (k === 'borderColor') continue
     else if (/^(flexGrow|flexShrink)$/.test(k)) s[k] = String(v)
     else if (/^(flexDirection|flexWrap|alignItems|alignSelf|justifyContent|overflow|position)$/.test(k)) s[k] = String(v)
