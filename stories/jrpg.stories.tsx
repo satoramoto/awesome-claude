@@ -1,0 +1,290 @@
+import type { Meta, StoryObj } from '@storybook/html'
+
+import { money, short, tokens } from '@kit/format'
+
+import { busy } from '../playground/fixtures/overview'
+import { show } from './show'
+
+// Three looks for the kit, drawn from the overview's sample session, to pick from.
+// Plain boxes and text only: what the desktop draws.
+
+const meta: Meta = { title: 'Looks/JRPG' }
+export default meta
+
+// The element names, as a mod gets them from $.ui.resolve(e).
+const Box = 'Box'
+const Text = 'Text'
+
+const s = busy
+const ctxLeft = 100 - s.snapshot.percent
+const fiveHour = s.limits[0]!
+const weekly = s.limits[1]!
+const toolCalls = Object.values(s.activity.tools).reduce((n, t) => n + t.n, 0)
+const elapsed = short(Date.now() - s.activity.startedAt)
+
+/** A bar filled `value` of `max`, in a track; grow factors keep it exact at any width. */
+const Gauge = (p: { value: number; max: number; color: string; track: string; height?: number }) => {
+  const f = Math.max(0, Math.min(1, p.value / Math.max(p.max, 1))) * 1000
+  const height = p.height ?? 0.45
+  return (
+    <Box flexDirection="row" flexGrow={1} height={height} backgroundColor={p.track} overflow="hidden">
+      {f > 0 ? <Box flexGrow={f} width={0} height={height} backgroundColor={p.color} /> : null}
+      {f < 1000 ? <Box flexGrow={1000 - f} width={0} /> : null}
+    </Box>
+  )
+}
+
+/** Green while healthy, yellow under half, red under a fifth: as HP bars do. */
+const hpColor = (left: number, greens = ['#48d16f', '#f2c94c', '#eb5757']) => (left > 50 ? greens[0]! : left > 20 ? greens[1]! : greens[2]!)
+
+const statusOf = (status: string) =>
+  status === 'running' ? { tag: 'RUN', color: '#f2994a' } : status === 'completed' ? { tag: 'OK', color: '#48d16f' } : status === 'failed' ? { tag: 'KO', color: '#eb5757' } : { tag: '—', color: '#9b9b9b' }
+
+// ---- 1. Pokémon party -------------------------------------------------------------
+
+const POKE = { panel: '#e8f4ff', panelBorder: '#5b8fd6', ink: '#203040', member: '#fff6e0', memberBorder: '#e0a84a', track: 'rgba(32,48,64,0.15)' }
+
+const PartyMember = (p: { name: string; type: string; status: string; tokens?: number; time: string; lead?: boolean }) => {
+  const st = statusOf(p.status)
+  const hp = p.status === 'failed' ? 0 : p.status === 'completed' ? 100 : 62
+  return (
+    <Box borderStyle="round" borderColor={p.lead ? POKE.panelBorder : POKE.memberBorder} backgroundColor={p.lead ? '#ffffff' : POKE.member} paddingX={1} flexDirection="column" marginTop={0.3}>
+      <Box flexDirection="row" justifyContent="space-between" gap={1}>
+        <Text color={POKE.ink} bold wrap="truncate">
+          {p.name}
+        </Text>
+        <Box borderStyle="round" borderColor={st.color} backgroundColor={st.color} paddingX={0.5}>
+          <Text color="#ffffff" bold>
+            {st.tag}
+          </Text>
+        </Box>
+      </Box>
+      <Box flexDirection="row" alignItems="center" gap={1}>
+        <Text color={POKE.ink} dimColor>
+          {p.type}
+        </Text>
+        <Text color="#e0a84a" bold>
+          HP
+        </Text>
+        <Gauge value={hp} max={100} color={hpColor(hp)} track={POKE.track} />
+        <Text color={POKE.ink}>{[p.tokens !== undefined ? tokens(p.tokens) : '', p.time].filter(Boolean).join(' ')}</Text>
+      </Box>
+    </Box>
+  )
+}
+
+export const PokemonParty: StoryObj = {
+  render: (_, ctx) =>
+    show(
+      <Box flexDirection="column" borderStyle="round" borderColor={POKE.panelBorder} backgroundColor={POKE.panel} paddingX={1}>
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text color={POKE.ink} bold>
+            ◓ SESSION
+          </Text>
+          <Text color={POKE.ink}>
+            <Text bold>{`₽${money(s.activity.cost).slice(1)}`}</Text>
+            <Text dimColor>{`  ${elapsed}`}</Text>
+          </Text>
+        </Box>
+        <Box flexDirection="row" alignItems="center" gap={1}>
+          <Text color="#e0a84a" bold>
+            HP
+          </Text>
+          <Gauge value={ctxLeft} max={100} color={hpColor(ctxLeft)} track={POKE.track} height={0.55} />
+          <Text color={POKE.ink} bold>{`${ctxLeft}/100`}</Text>
+        </Box>
+        <Box flexDirection="row" alignItems="center" gap={1}>
+          <Text color="#5b8fd6" bold>
+            PP
+          </Text>
+          <Gauge value={100 - fiveHour.percent} max={100} color="#5b8fd6" track={POKE.track} />
+          <Text color={POKE.ink}>{`${100 - fiveHour.percent}%`}</Text>
+        </Box>
+        <Text color={POKE.ink} dimColor>{`Lv.${s.activity.turns}  ·  ${toolCalls} moves  ·  ${s.activity.files.length} items`}</Text>
+        {s.agents.map((a, i) => {
+          const x = (s.agentExtra as Record<string, { tokens?: number; durationMs?: number; startedAt?: number }>)[a.id]
+          const time = x?.durationMs ? short(x.durationMs) : x?.startedAt ? short(Date.now() - x.startedAt) : ''
+          return <PartyMember name={a.description} type={a.type} status={a.status} tokens={x?.tokens} time={time} lead={i === 0} />
+        })}
+      </Box>,
+      ctx,
+    ),
+}
+
+// ---- 2. Dragon Quest window --------------------------------------------------------
+
+const DQ = { bg: '#0b0b1a', border: '#ffffff', ink: '#ffffff', dim: '#9aa3c7', track: 'rgba(255,255,255,0.15)' }
+
+const DqWindow = (p: { title?: string; children: unknown }) => (
+  <Box flexDirection="column" borderStyle="round" borderColor={DQ.border} backgroundColor={DQ.bg} paddingX={1} marginTop={0.3}>
+    {p.title ? (
+      <Text color={DQ.dim} bold>
+        {p.title}
+      </Text>
+    ) : null}
+    {p.children}
+  </Box>
+)
+
+const DqRow = (p: { label: string; value: string; color?: string; cursor?: boolean }) => (
+  <Box flexDirection="row" justifyContent="space-between">
+    <Text color={DQ.ink}>
+      <Text color={p.cursor ? DQ.ink : DQ.bg}>{'▶ '}</Text>
+      {p.label}
+    </Text>
+    <Text color={p.color ?? DQ.ink} bold>
+      {p.value}
+    </Text>
+  </Box>
+)
+
+export const DragonQuestWindow: StoryObj = {
+  render: (_, ctx) =>
+    show(
+      <Box flexDirection="column">
+        <Box flexDirection="row" gap={1}>
+          <Box flexGrow={1} width={0} flexDirection="column">
+            <DqWindow title="CLAUDE">
+              <DqRow label="HP" value={`${ctxLeft}`} color={ctxLeft <= 20 ? '#ff6b6b' : DQ.ink} />
+              <DqRow label="MP" value={`${100 - fiveHour.percent}`} />
+              <DqRow label="Lv" value={`${s.activity.turns}`} />
+              <DqRow label="G" value={money(s.activity.cost).slice(1)} color="#ffd75e" />
+            </DqWindow>
+          </Box>
+          <Box flexGrow={1} width={0} flexDirection="column">
+            <DqWindow title="COMMAND">
+              {Object.entries(s.activity.tools)
+                .slice(0, 4)
+                .map(([name, t], i) => (
+                  <DqRow label={name.split('__').pop() ?? name} value={String(t.n)} cursor={i === 0} color={t.err ? '#ff6b6b' : DQ.ink} />
+                ))}
+            </DqWindow>
+          </Box>
+        </Box>
+        <DqWindow>
+          {s.agents.map(a => (
+            <Text color={a.status === 'failed' ? '#ff6b6b' : DQ.ink} wrap="truncate">
+              {a.status === 'running' ? `${a.description} is casting…` : a.status === 'failed' ? `${a.description} was defeated.` : `${a.description} is done!`}
+            </Text>
+          ))}
+        </DqWindow>
+        <DqWindow>
+          <Box flexDirection="row" alignItems="center" gap={1}>
+            <Text color={DQ.dim}>5H</Text>
+            <Gauge value={fiveHour.percent} max={100} color="#ffffff" track={DQ.track} />
+            <Text color={DQ.dim}>WK</Text>
+            <Gauge value={weekly.percent} max={100} color={weekly.percent > 75 ? '#ffd75e' : '#ffffff'} track={DQ.track} />
+          </Box>
+        </DqWindow>
+      </Box>,
+      ctx,
+    ),
+}
+
+// ---- 3. EarthBound flavours --------------------------------------------------------
+
+const FLAVOURS = {
+  plain: { bg: '#f4f1e8', border: '#2d2a32', ink: '#2d2a32', accent: '#3a6ea5' },
+  mint: { bg: '#d9f5e5', border: '#1f6f50', ink: '#163b2d', accent: '#1f9e6e' },
+  strawberry: { bg: '#ffe0ea', border: '#b0305c', ink: '#4a1427', accent: '#e0457b' },
+  banana: { bg: '#fff4c2', border: '#a07a00', ink: '#4a3a00', accent: '#d9a400' },
+  peanut: { bg: '#f1dfc8', border: '#7a4e24', ink: '#3d2610', accent: '#b5713a' },
+} as const
+
+/** Digits in little rounded boxes, like EarthBound's rolling HP meter. */
+const Odometer = (p: { value: number; color: string; ink: string }) => (
+  <Box flexDirection="row" gap={0.3}>
+    {String(p.value)
+      .padStart(3, '0')
+      .split('')
+      .map(d => (
+        <Box borderStyle="round" borderColor={p.color} paddingX={0.4}>
+          <Text color={p.ink} bold>
+            {d}
+          </Text>
+        </Box>
+      ))}
+  </Box>
+)
+
+export const EarthBoundFlavours: StoryObj<{ flavour: keyof typeof FLAVOURS }> = {
+  args: { flavour: 'mint' },
+  argTypes: { flavour: { control: 'inline-radio', options: Object.keys(FLAVOURS) } },
+  render: (args, ctx) => {
+    const f = FLAVOURS[args.flavour]
+    const card = (children: unknown) => (
+      <Box flexDirection="column" borderStyle="round" borderColor={f.border} backgroundColor={f.bg} paddingX={1} marginTop={0.3}>
+        {children}
+      </Box>
+    )
+    return show(
+      <Box flexDirection="column">
+        {card(
+          <Box flexDirection="row" justifyContent="space-between" alignItems="center">
+            <Box flexDirection="column">
+              <Text color={f.ink} bold>
+                Claude
+              </Text>
+              <Text color={f.ink} dimColor>{`Lv ${s.activity.turns} · ${elapsed}`}</Text>
+            </Box>
+            <Box flexDirection="column" alignItems="flex-end">
+              <Box flexDirection="row" alignItems="center" gap={0.5}>
+                <Text color={f.accent} bold>
+                  HP
+                </Text>
+                <Odometer value={ctxLeft} color={f.border} ink={f.ink} />
+              </Box>
+              <Box flexDirection="row" alignItems="center" gap={0.5} marginTop={0.2}>
+                <Text color={f.accent} bold>
+                  PP
+                </Text>
+                <Odometer value={100 - fiveHour.percent} color={f.border} ink={f.ink} />
+              </Box>
+            </Box>
+          </Box>,
+        )}
+        {card(
+          [
+            <Text color={f.ink} bold>
+              Goods
+            </Text>,
+            ...Object.entries(s.activity.tools)
+              .slice(0, 5)
+              .map(([name, t]) => (
+                <Box flexDirection="row" justifyContent="space-between">
+                  <Text color={f.ink}>{`♦ ${name.split('__').pop() ?? name}`}</Text>
+                  <Text color={t.err ? '#c0392b' : f.accent} bold>{`×${t.n}`}</Text>
+                </Box>
+              )),
+          ],
+        )}
+        {card(
+          [
+            <Text color={f.ink} bold>
+              Party
+            </Text>,
+            ...s.agents.map(a => {
+              const st = statusOf(a.status)
+              return (
+                <Box flexDirection="row" justifyContent="space-between" gap={1}>
+                  <Text color={f.ink} wrap="truncate">{`★ ${a.description}`}</Text>
+                  <Text color={st.color} bold>
+                    {st.tag}
+                  </Text>
+                </Box>
+              )
+            }),
+          ],
+        )}
+        {card(
+          <Box flexDirection="row" justifyContent="space-between">
+            <Text color={f.ink}>{`$${money(s.activity.cost).slice(1)}`}</Text>
+            <Text color={f.ink}>{`${s.gh.prs.length} letters`}</Text>
+            <Text color={f.ink}>{`${s.activity.files.length} items`}</Text>
+          </Box>,
+        )}
+      </Box>,
+      ctx,
+    )
+  },
+}

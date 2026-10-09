@@ -5,12 +5,12 @@
 export type Node = { type: string; props: Record<string, any>; children: Child[] }
 type Child = Node | string | number | null | undefined | false | Child[]
 
-/** The JSX factory the mods compile against. */
-export const h = (type: string, props: Record<string, any> | null, ...children: Child[]): Node => ({
-  type,
-  props: props ?? {},
-  children: children.flat(Infinity as 1) as Child[],
-})
+/** The JSX factory the mods compile against. A function as the tag is called with its props and children. */
+export const h = (type: string | ((props: any) => Node), props: Record<string, any> | null, ...children: Child[]): Node => {
+  const kids = children.flat(Infinity as 1) as Child[]
+  if (typeof type === 'function') return type({ ...(props ?? {}), children: kids })
+  return { type, props: props ?? {}, children: kids }
+}
 
 export type Surface = 'desktop' | 'terminal'
 

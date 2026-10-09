@@ -5,7 +5,7 @@ import type { StorybookConfig } from '@storybook/html-vite'
 const ROOT = resolve(__dirname, '..')
 
 const config: StorybookConfig = {
-  stories: ['../stories/**/*.stories.ts'],
+  stories: ['../stories/**/*.stories.@(ts|tsx)'],
   addons: ['@storybook/addon-essentials'],
   framework: { name: '@storybook/html-vite', options: {} },
   core: { disableTelemetry: true },
