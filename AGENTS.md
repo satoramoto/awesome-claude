@@ -7,16 +7,17 @@ Read [`README.md`](README.md) first. Edit `mods/` and `kit/`, never `plugins/`
 | --- | --- | --- |
 | `bun build.ts` | the mods compile into `plugins/` | after any change under `mods/` or `kit/` |
 | `claude plugin validate plugins/<mod>` | the engine accepts the compiled mod | after building a mod you changed |
-| `claude plugin test plugins/<mod>` | the mod's `*.test.ts` against the engine | after building a mod you changed |
-| `bun test kit` | the kit's own tests | any change under `kit/` |
 | `tsc -p plugins/<mod>` | the compiled mod type-checks (needs the engine's types, laid in `plugins/<mod>/.claude-plugin/types/` once the mod has loaded) | any `.ts`/`.tsx` change |
-| `bun run playground` | whole mods drawn in the browser from their own render hooks and sample data; runs the build and `claude plugin test` on each save | while wiring up a mod |
+| `bun run playground` | whole mods drawn in the browser from their own render hooks and sample data; runs the build and `claude plugin validate` on each save | while wiring up a mod |
 | `bun run storybook` | each kit component, and each mod scenario, as a story with controls; surface, theme and width in the toolbar | while designing how something looks |
 
+No unit tests for now: they only restated the code. The plan is snapshot tests of
+what mods draw; until then, the checks are the build and validate.
+
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR: the
-build (and fails if `plugins/` wasn't rebuilt and committed), `bun test kit`, and
-`claude plugin validate` and `claude plugin test` for every mod. Work on a branch,
-open a PR, and let CI be the final check; `main` takes PRs only.
+build (and fails if `plugins/` wasn't rebuilt and committed) and `claude plugin
+validate` for every mod. Work on a branch, open a PR, and let CI be the final
+check; `main` takes PRs only.
 
 Every agent commit ends with a blank line and a co-author trailer naming the agent
 that made it, for example `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.

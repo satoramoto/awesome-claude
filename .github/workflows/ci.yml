@@ -18,16 +18,10 @@ jobs:
       - name: plugins/ is up to date with mods/ and kit/
         run: git diff --exit-code -- plugins
 
-      - name: Kit tests
-        run: bun test kit
-
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.296
-      - name: Validate and test each mod
+      - name: Validate each mod
         run: |
           for dir in plugins/*/; do
-            echo "::group::$dir"
             claude plugin validate "$dir"
-            claude plugin test "$dir"
-            echo "::endgroup::"
           done
