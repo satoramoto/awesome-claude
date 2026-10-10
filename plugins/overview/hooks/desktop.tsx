@@ -199,7 +199,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
               [0, 0.25, 0.5, 0.75, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
             )}
           </Box>,
-          <Box key="legend" marginTop={SPACE.block}>
+          <Box key="legend" marginTop={SPACE.block} width="100%">
             {k.legend(
               'ctx',
               parts.map(p => ({ label: p.label!, color: p.color, figure: tokens(p.value) })),
@@ -277,7 +277,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
                 ticks.map(i => ({ at: (i + 0.5) / SLOTS, text: String(first + i).padStart(2, '0') })),
               )}
             </Box>,
-            <Box key="legend" marginTop={SPACE.block}>
+            <Box key="legend" marginTop={SPACE.block} width="100%">
               {k.legend('act', [
                 ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n) })),
                 ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount) }] : []),
