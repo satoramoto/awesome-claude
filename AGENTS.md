@@ -13,5 +13,10 @@ Read [`README.md`](README.md) first. Edit `mods/` and `kit/`, never `plugins/`
 | `bun run playground` | whole mods drawn in the browser from their own render hooks and sample data; runs the build and `claude plugin test` on each save | while wiring up a mod |
 | `bun run storybook` | each kit component, and each mod scenario, as a story with controls; surface, theme and width in the toolbar | while designing how something looks |
 
+CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR: the
+build (and fails if `plugins/` wasn't rebuilt and committed), `bun test kit`, and
+`claude plugin validate` and `claude plugin test` for every mod. Work on a branch,
+open a PR, and let CI be the final check; `main` takes PRs only.
+
 Every agent commit ends with a blank line and a co-author trailer naming the agent
 that made it, for example `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
