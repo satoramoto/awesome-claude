@@ -1,29 +1,23 @@
 import type { Elements, RenderElement } from 'claude-code'
 
-import { bytes, duration, money, short, tokens } from '@kit/format'
+import { bytes, money, short, tokens } from '@kit/format'
 import type { PerfSnapshot } from '@kit/perf'
-import { C, GLYPH, MUTED, TRACK, levelColor } from '@kit/tokens'
-import { kit } from '@kit/ui'
+import { C, GLYPH, INK, MUTED, RAMP, TRACK, levelColor } from '@kit/tokens'
+import { SPACE, kit } from '@kit/ui'
 
 import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
 
-/**
- * The session's share of the machine: CPU, memory, disk and network, each ours
- * against the system's. Ours turns amber or red when it's a big share.
+/*
+ * The app mode: a properties inspector for the session, drawn as an instrument.
+ *
+ * The rules it keeps (kit/tokens.ts and kit/ui.tsx hold the values):
+ * - Colour: each hue one meaning (grey labels, slate quantity, blue live, amber
+ *   near a limit, red failed, green done well, purple merged). Icons are muted.
+ * - Type: values plain, labels and units dim, bold only for section titles and
+ *   the context %, uppercase only for captions and a branch's state word.
+ * - Spacing: the kit's SPACE scale and INSET; nothing else.
+ * - Each fact once: calls and time in the header, failures in Events, cost in Accounting.
  */
-const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[] => {
-  if (!r) return []
-  const hot = (part: number, whole: number) => (whole > 0 && part / whole > 0.5 ? C.bad : whole > 0 && part / whole > 0.25 ? C.warn : undefined)
-  const pctOf = (n: number) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`
-  // Tight on purpose: the footer is one row. Rates are per second; the disk is the system's.
-  return [
-    k.share('cpu', '⚙', C.blue, pctOf(r.cpu), pctOf(r.cpuAll), hot(r.cpu, r.cpuAll)),
-    k.share('mem', '▦', C.purple, bytes(r.mem), bytes(r.memAll), hot(r.mem, r.memAll)),
-    k.share('net', '⇅', C.cyan, r.net === null ? '–' : bytes(r.net), bytes(r.netAll), r.net === null ? undefined : hot(r.net, r.netAll)),
-    k.share('disk', '⛁', C.orchid, bytes(r.diskAll), ''),
-    k.share('procs', '⑂', C.slate, String(r.procs), ''),
-  ]
-}
 
 /** The elements the app mode draws with: the desktop and VS Code have these. */
 export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button' | 'Svg'>
@@ -50,7 +44,7 @@ export type DesktopData = {
   branches: BranchView[]
   /** The branch a PR is being created for, if any. */
   creating: string | null
-  /** The ✕ on a branch. */
+  /** Hide a branch. */
   hideBranch: (branch: string) => void
   /** Create PR on a branch without one. */
   createPr: (branch: string) => void
@@ -71,18 +65,18 @@ export type Helpers = {
 }
 
 /**
- * A context category's short name and colour. One cool family for what is
- * fixed, amber for messages: the part that grows, and the one to watch.
+ * A context category's short name and colour: the fixed overhead in shades of
+ * slate (it only says how much), messages in blue (the part that grows).
  */
 const CATEGORY: Record<string, { name: string; color: string }> = {
-  'System prompt': { name: 'System', color: C.slate },
-  'System tools': { name: 'Tools', color: C.blue },
-  'MCP tools': { name: 'MCP', color: C.cyan },
-  'MCP server instructions': { name: 'MCP notes', color: C.cyan },
-  'Custom agents': { name: 'Agents', color: C.purple },
-  'Memory files': { name: 'Memory', color: C.purple },
-  Skills: { name: 'Skills', color: C.orchid },
-  Messages: { name: 'Messages', color: C.warn },
+  'System prompt': { name: 'System', color: RAMP.slate[0] },
+  'System tools': { name: 'Tools', color: RAMP.slate[1] },
+  'MCP tools': { name: 'MCP', color: RAMP.slate[2] },
+  'MCP server instructions': { name: 'MCP notes', color: RAMP.slate[2] },
+  'Custom agents': { name: 'Agents', color: RAMP.slate[3] },
+  'Memory files': { name: 'Memory', color: RAMP.slate[3] },
+  Skills: { name: 'Skills', color: RAMP.slate[3] },
+  Messages: { name: 'Messages', color: C.blue },
 }
 
 /** Three letters for a context category: what the terminal layout's chips show. */
@@ -99,17 +93,34 @@ export const tagOf = (name: string): string => {
   return known[name] ?? name.slice(0, 3).toLowerCase()
 }
 
-/** A status as the colour of its rail. */
+/** An agent's status as its rail's colour: running blue, done green, failed red. */
 const statusColor = (status: string): string =>
-  status === 'running' || status === 'pending' ? C.warn : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
+  status === 'running' || status === 'pending' ? C.blue : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
+
+/** A PR's state as one colour: merged purple, closed or draft grey, else by its checks. */
+const prColor = (pr: GitPr) =>
+  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.blue : C.ok
 
 /** "2h18", "3d4h", from "resets in 2h 18m". */
 const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 
-// A properties inspector for the session, drawn as an instrument: a header of
-// the session's totals, then one collapsible section per subject, its readings
-// in one column grid (label, gauge, value, unit). The context meter, with its
-// scale and the compaction mark, is the one bold thing; the rest stays quiet.
+const shortTool = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
+
+/**
+ * The footer's lead: the session's share of the machine, ours against the
+ * system's, under muted three-letter labels; ours turns amber or red when it's a big share.
+ */
+const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[] => {
+  if (!r) return []
+  const hot = (part: number, whole: number) => (whole > 0 && part / whole > 0.5 ? C.bad : whole > 0 && part / whole > 0.25 ? C.warn : undefined)
+  const pctOf = (n: number) => `${Math.round(n)}%`
+  return [
+    k.share('cpu', 'cpu', pctOf(r.cpu), pctOf(r.cpuAll), hot(r.cpu, r.cpuAll)),
+    k.share('mem', 'mem', bytes(r.mem), bytes(r.memAll), hot(r.mem, r.memAll)),
+    k.share('net', 'net', r.net === null ? '–' : bytes(r.net), bytes(r.netAll), r.net === null ? undefined : hot(r.net, r.netAll)),
+  ]
+}
+
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
   const { Box, Text } = els
   const k = kit(els, 'desktop', d.columns)
@@ -117,47 +128,38 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
 
-  // ---- the header: the session's totals ----
+  // ---- header: the session's totals, four across ----
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
-  const toolErrors = Object.values(a.tools).reduce((n, t) => n + t.err, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
-  // A figure over its dim label, four to a row.
   const metric = (key: string, value: string, label: string) => (
     <Box key={key} width="25%" flexDirection="column">
-      <Text bold>{value}</Text>
-      <Text dimColor>{label}</Text>
+      <Text>{value}</Text>
+      {k.caption(label)}
     </Box>
   )
   const header = (
-    <Box flexDirection="column">
-      {running || toolErrors ? (
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} marginBottom={0.4}>
-          {running ? <Text color={C.warn}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : <Text color={C.ok}>● Idle</Text>}
-          {toolErrors ? <Text color={C.bad}>{`${toolErrors} failed`}</Text> : null}
-        </Box>
-      ) : null}
-      <Box flexDirection="row">
-        {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'ELAPSED')}
-        {metric('turns', String(a.turns), 'TURNS')}
-        {metric('calls', String(toolCalls), 'CALLS')}
-        {metric('files', String(a.files.length), 'FILES Δ')}
+    <Box key="header" flexDirection="column" paddingX={1}>
+      {running ? <Text color={C.blue}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : null}
+      <Box flexDirection="row" marginTop={running ? SPACE.block : 0}>
+        {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'Elapsed')}
+        {metric('turns', String(a.turns), 'Turns')}
+        {metric('calls', String(toolCalls), 'Calls')}
+        {metric('files', String(a.files.length), 'Files Δ')}
       </Box>
     </Box>
   )
 
-  // ---- events: failed tool calls ----
-  const failedTools = Object.entries(a.tools).filter(([, t]) => t.err > 0)
-  const events = failedTools.length
+  // ---- events: failed tool calls (the only place failures are counted) ----
+  const failed = Object.entries(a.tools).filter(([, t]) => t.err > 0)
+  const failures = failed.reduce((n, [, t]) => n + t.err, 0)
+  const events = failed.length
     ? k.section({
         id: 'events',
         icon: 'events',
-        color: C.bad,
         title: 'Events',
-        right: <Text color={C.bad}>{`${toolErrors} failed`}</Text>,
+        right: k.summary([[String(failures), 'failed', C.bad]]),
         ...fold('events'),
-        children: failedTools.map(([name, t]) =>
-          k.prop(`ev-${name}`, name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name, <Text color={C.bad}>{`${t.err} of ${t.n} failed`}</Text>),
-        ),
+        children: failed.map(([name, t]) => k.prop(`ev-${name}`, shortTool(name), `${t.err} of ${t.n}`)),
       })
     : null
 
@@ -165,18 +167,17 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const parts = snap
     ? snap.segments.flatMap(s => {
         const c = CATEGORY[s.name]
-        return s.kind === 'used' && s.tokens > 0 ? [{ value: s.tokens, color: c?.color ?? C.slate, label: c?.name ?? s.name }] : []
+        return s.kind === 'used' && s.tokens > 0 ? [{ value: s.tokens, color: c?.color ?? INK, label: c?.name ?? s.name }] : []
       })
     : []
   const context = k.section({
     id: 'context',
     icon: GLYPH.context,
-    color: snap ? levelColor(snap.percent) : MUTED,
     title: 'Context',
     right: snap ? (
       <Text>
         <Text bold color={levelColor(snap.percent)}>{`${snap.percent}%`}</Text>
-        <Text dimColor>{`  ${tokens(snap.total)} / ${tokens(snap.max)}`}</Text>
+        <Text dimColor>{` of ${tokens(snap.max)}`}</Text>
       </Text>
     ) : (
       <Text dimColor>measuring…</Text>
@@ -184,43 +185,29 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     ...fold('context'),
     children: snap
       ? [
-          <Box key="meter" flexDirection="column" marginTop={0.2}>
+          <Box key="meter" flexDirection="column">
             {k.bar(parts, snap.max, { height: 0.5 })}
             {k.scale(snap.compactAt ? snap.compactAt / snap.max : undefined, C.warn)}
-            {/* The scale's figures: 0, a quarter, half, three quarters, the window. */}
-            <Box flexDirection="row" justifyContent="space-between">
-              {[0, 0.25, 0.5, 0.75, 1].map(f => (
-                <Text key={`ax-${f}`} dimColor>
-                  {f === 0 ? '0' : tokens(snap.max * f)}
-                </Text>
-              ))}
-            </Box>
-          </Box>,
-          // The legend in two columns, each figure right-aligned in its column.
-          <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.4} rowGap={0.1}>
-            {parts.map((p, i) => (
-              <Box key={`legend-${p.label}`} width="50%" flexDirection="row" alignItems="center" gap={0.5} paddingRight={i % 2 === 0 ? 1.5 : 0}>
-                {k.swatch(p.color)}
-                <Box flexGrow={1} flexShrink={1}>
-                  <Text wrap="truncate">{p.label}</Text>
-                </Box>
-                <Text>{tokens(p.value)}</Text>
-              </Box>
-            ))}
-          </Box>,
-          <Box key="room" flexDirection="row" justifyContent="space-between" marginTop={0.4}>
-            {snap.compactAt ? (
-              <Text>
-                <Text dimColor>COMPACTION </Text>
-                <Text color={C.warn}>{tokens(snap.compactAt)}</Text>
-              </Text>
-            ) : (
-              <Text dimColor>NO AUTO-COMPACT</Text>
+            {k.axis(
+              'ctx-axis',
+              [0, 0.25, 0.5, 0.75, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
             )}
-            <Text>
-              <Text dimColor>HEADROOM </Text>
-              {tokens(Math.max(0, (snap.compactAt ?? snap.max) - snap.total))}
-            </Text>
+          </Box>,
+          <Box key="legend" marginTop={SPACE.block}>
+            {k.legend(
+              'ctx',
+              parts.map(p => ({ label: p.label!, color: p.color, figure: tokens(p.value) })),
+            )}
+          </Box>,
+          <Box key="room" flexDirection="row" justifyContent="space-between" marginTop={SPACE.block}>
+            <Box flexDirection="row" gap={SPACE.pair}>
+              {k.caption(snap.compactAt ? 'Compaction' : 'No auto-compact')}
+              {snap.compactAt ? <Text color={C.warn}>{tokens(snap.compactAt)}</Text> : null}
+            </Box>
+            <Box flexDirection="row" gap={SPACE.pair}>
+              {k.caption('Headroom')}
+              <Text>{tokens(Math.max(0, (snap.compactAt ?? snap.max) - snap.total))}</Text>
+            </Box>
           </Box>,
         ]
       : null,
@@ -232,9 +219,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     ? k.section({
         id: 'limits',
         icon: GLYPH.limits,
-        color: C.slate,
         title: 'Limits',
-        right: <Text dimColor>USED / RESET IN</Text>,
         ...fold('limits'),
         children: windows.map(w =>
           k.reading(`limit-${w.kind}`, {
@@ -250,107 +235,70 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   // ---- activity: tool calls per turn, each bar sliced by tool ----
-  // The session's busiest tools get a colour each, in the same order in every bar
-  // and in the legend; the rest share one grey slice as "Other".
+  // The busiest tools take shades of blue (one series, parts told apart), the rest one slate slice.
   const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
-  const TOOL_HUES = [C.blue, C.cyan, C.purple, C.orchid, C.ok, C.warn]
-  const named = allTools.slice(0, TOOL_HUES.length).map(([name], i) => ({ name, color: TOOL_HUES[i]! }))
-  const OTHER = C.slate
-  const shortName = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
-  const log = a.turnLog.slice(-16)
+  const named = allTools.slice(0, RAMP.blue.length).map(([name], i) => ({ name, color: RAMP.blue[i]! }))
+  const OTHER = RAMP.slate[1]
+  const SLOTS = 16
+  const log = a.turnLog.slice(-SLOTS)
   const first = a.turns - log.length + 1
-  const num = (n: number) => String(n).padStart(2, '0')
   const sliced = log.map(p => {
     const by = p.tools ?? {}
     const other = Object.entries(by).reduce((n, [name, c]) => n + (named.some(t => t.name === name) ? 0 : c), 0)
-    // Stacked bottom up: the busiest tool at the base. A turn without calls keeps a sliver.
-    const parts = [...named.map(t => ({ value: by[t.name] ?? 0, color: t.color })), { value: other, color: OTHER }].reverse()
-    return parts.some(x => x.value > 0) ? parts : [{ value: 0.05, color: TRACK }]
+    // Stacked bottom up, the busiest tool at the base; a turn without calls keeps a sliver.
+    const stack = [...named.map(t => ({ value: by[t.name] ?? 0, color: t.color })), { value: other, color: OTHER }].reverse()
+    return stack.some(x => x.value > 0) ? stack : [{ value: 0.05, color: TRACK }]
   })
   const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
   const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
-  const legend = [
-    ...named.map(t => ({ label: shortName(t.name), color: t.color, n: a.tools[t.name]!.n, err: a.tools[t.name]!.err })),
-    ...(otherCount ? [{ label: 'Other', color: OTHER, n: otherCount, err: allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0) }] : []),
-  ]
   const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
   const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
-  const activitySection =
-    a.turnLog.length || toolCalls
+  // Turn numbers under the first, middle and last bar.
+  const ticks = log.length ? [0, Math.floor((log.length - 1) / 2), log.length - 1].filter((v, i, xs) => xs.indexOf(v) === i) : []
+  const activity =
+    log.length || toolCalls
       ? k.section({
           id: 'activity',
           icon: GLYPH.tools,
-          color: C.blue,
           title: 'Activity',
-          right: (
-            <Box flexDirection="row" gap={1.5}>
-              <Text>
-                {String(toolCalls)}
-                <Text dimColor> calls</Text>
-              </Text>
-              <Text>
-                {`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`}
-                <Text dimColor> cached</Text>
-              </Text>
-            </Box>
-          ),
+          right: k.summary([[String(peak), 'peak'], [`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`, 'cached']]),
           ...fold('activity'),
           children: [
-            <Box key="sub" flexDirection="row" justifyContent="space-between">
-              <Text dimColor>CALLS / TURN</Text>
-              <Text>
-                {String(peak)}
-                <Text dimColor> PEAK</Text>
-              </Text>
+            <Box key="chart" flexDirection="column">
+              {k.columns(sliced, { slots: SLOTS, height: 3.5 })}
+              {k.axis(
+                'act-axis',
+                ticks.map(i => ({ at: (i + 0.5) / SLOTS, text: String(first + i).padStart(2, '0') })),
+              )}
             </Box>,
-            k.columns(sliced, { slots: 16, height: 3.5 }),
-            <Box key="axis" flexDirection="row" justifyContent="space-between">
-              <Text dimColor>{num(Math.max(1, first))}</Text>
-              {log.length > 2 ? <Text dimColor>{num(first + Math.floor(log.length / 2))}</Text> : null}
-              <Text dimColor>{num(a.turns)}</Text>
-            </Box>,
-            // The legend in two columns, like the context's: a dot, the tool, its calls (and failures).
-            <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.4} rowGap={0.1}>
-              {legend.map((t, i) => (
-                <Box key={`tl-${t.label}`} width="50%" flexDirection="row" alignItems="center" gap={0.5} paddingRight={i % 2 === 0 ? 1.5 : 0}>
-                  {k.swatch(t.color)}
-                  <Box flexGrow={1} flexShrink={1}>
-                    <Text wrap="truncate">{t.label}</Text>
-                  </Box>
-                  {t.err ? <Text color={C.bad}>{`!${t.err}`}</Text> : null}
-                  <Text>{String(t.n)}</Text>
-                </Box>
-              ))}
+            <Box key="legend" marginTop={SPACE.block}>
+              {k.legend('act', [
+                ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n) })),
+                ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount) }] : []),
+              ])}
             </Box>,
           ],
         })
       : null
-
 
   // ---- agents ----
   const agents = d.agents.length
     ? k.section({
         id: 'agents',
         icon: GLYPH.agents,
-        color: running ? C.warn : C.slate,
         title: 'Agents',
-        right: (
-          <Text>
-            {String(d.agents.length)}
-            <Text dimColor> started</Text>
-          </Text>
-        ),
+        right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
         children: fx.buildTree(d.agents).map(({ agent, depth }) => {
           const x = d.extras[agent.id]
-          const time =
-            agent.status === 'running' && x?.startedAt !== undefined
-              ? duration(d.at - x.startedAt)
-              : x?.durationMs !== undefined
-                ? duration(x.durationMs)
-                : ''
-          const figure = [x?.tokens !== undefined ? tokens(x.tokens) : '', time].filter(Boolean).join('  ')
-          return k.rail(agent.id, { color: statusColor(agent.status), text: agent.description || agent.type, note: agent.type, figure, indent: depth * 2 })
+          const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
+          return k.rail(agent.id, {
+            color: statusColor(agent.status),
+            text: agent.description || agent.type,
+            note: agent.type,
+            figure: [x?.tokens !== undefined ? tokens(x.tokens) : '', ms !== undefined ? short(ms) : ''].filter(Boolean).join(' '),
+            indent: depth * 2,
+          })
         }),
       })
     : null
@@ -359,115 +307,71 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const accounting = k.section({
     id: 'accounting',
     icon: GLYPH.cost,
-    color: C.ok,
     title: 'Accounting',
-    right: <Text>{a.cost !== undefined ? money(a.cost) : '–'}</Text>,
+    right: k.summary([[a.cost !== undefined ? money(a.cost) : '–']]),
     ...fold('accounting'),
-    children: [
-      snap ? k.prop('model', 'Model', snap.model) : null,
-      k.prop('cost', 'Cost', a.cost !== undefined ? money(a.cost) : 'not tracked here'),
-    ],
+    children: [snap ? k.prop('model', 'Model', snap.model) : k.prop('model', 'Model', '–')],
   })
 
   return k.pinned(
-    [header, events, context, limits, activitySection, agents, ...renderBranches(els, k, d, fold), accounting],
+    [header, events, context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
 }
 
-/** A PR's state as one colour: merged purple, closed or draft grey, else by its checks. */
-const prColor = (pr: GitPr) =>
-  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.warn : C.ok
-
 /**
  * Workspaces: the branches the session started, as the desktop app tracks them.
- * Each entry is two lines: the branch, its lines changed and its state; then
- * where it lives or its PR, its uncommitted changes, and CI, with Create PR,
- * Merge and hide as the actions.
+ * Each entry is two lines. First: the branch, its lines changed (dim) and its
+ * state word, the only colour. Second, dim: its PR (linked) or where it lives,
+ * one CI word, and one action.
  */
 const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
   const { Box, Text, Link, Button } = els
   const entries = d.branches.map((b, i) => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
-    const color = pr ? prColor(pr) : C.slate
-    const id = `branch-${b.branch}`
-    // Git-prompt marks: ! conflicted, + staged, ~ modified, ? untracked, ↑ ahead, ↓ behind.
-    const state: [number, string, string][] = [
-      [b.conflicted, '!', C.bad],
-      [b.staged, '+', C.ok],
-      [b.modified, '~', C.warn],
-      [b.untracked, '?', C.cyan],
-      [b.ahead, '↑', C.ok],
-      [b.behind, '↓', C.warn],
-    ]
-    const creatable = !pr && b.exists
-    // One row, before and after the PR opens: on the left where the branch lives, or
-    // its PR once it has one; on the right its changes, then Create PR or the CI.
-    const checks = pr && open ? (
-      <Box flexDirection="row" gap={1}>
-        {/* Git-prompt style, like the changes: =passed, !failed, *pending. */}
-        {pr.checks.passed ? <Text key="ok" color={C.ok}>{`=${pr.checks.passed}`}</Text> : null}
-        {pr.checks.failed ? <Text key="bad" color={C.bad}>{`!${pr.checks.failed}`}</Text> : null}
-        {pr.checks.pending ? <Text key="wait" color={C.warn}>{`*${pr.checks.pending}`}</Text> : null}
-      </Box>
-    ) : (
-      <Text color={color}>{pr?.state === 'MERGED' ? 'merged' : pr?.state === 'CLOSED' ? 'closed' : ''}</Text>
-    )
-    const row = (
-      <Box key="row" flexDirection="row" justifyContent="space-between" gap={1}>
-        <Box flexDirection="row" gap={1} flexShrink={1}>
-          {pr ? (
-            <Link href={pr.url} label={`#${pr.number}`} />
-          ) : null}
-          <Text wrap="truncate" dimColor>
-            {pr ? pr.title : b.worktree ? `${b.place} (worktree)` : b.place}
-          </Text>
-          {!b.exists ? <Text dimColor>deleted</Text> : !pr && !b.pushed ? <Text dimColor>not pushed</Text> : null}
-        </Box>
-        <Box flexDirection="row" gap={1} alignItems="center">
-          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => (
-            <Text key={`s-${glyph}`} color={c}>{`${glyph}${n}`}</Text>
-          ))}
-          {pr ? checks : null}
-          {pr && open && !pr.isDraft && Button ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} /> : null}
-          {creatable && Button ? (
-            d.creating === b.branch ? (
-              <Text dimColor>creating PR…</Text>
-            ) : (
-              <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
-            )
-          ) : null}
-        </Box>
-      </Box>
-    )
-    const failing = pr && open && pr.failing.length ? (
-      <Text key="failing" color={C.bad} wrap="truncate">
-        {pr.failing.slice(0, 3).join(', ')}
-      </Text>
-    ) : null
-    // The entry's first line: the branch, its lines changed, its state as one word.
-    const word = !b.exists ? 'DELETED' : pr ? (pr.state === 'OPEN' ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
-    const title = (
-      <Box key="title" flexDirection="row" justifyContent="space-between" gap={1}>
-        <Box flexDirection="row" gap={0.5} flexShrink={1}>
-          <Text color={color}>{GLYPH.branch}</Text>
-          <Text wrap="truncate">{b.branch}</Text>
-        </Box>
-        <Box flexDirection="row" gap={1} alignItems="center">
-          {b.insertions ? <Text color={C.ok}>{`+${b.insertions}`}</Text> : null}
-          {b.deletions ? <Text color={C.bad}>{`−${b.deletions}`}</Text> : null}
-          <Text color={color}>{word}</Text>
-          {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
-        </Box>
-      </Box>
-    )
+    const color = pr ? prColor(pr) : MUTED
+    const word = !b.exists ? 'DELETED' : pr ? (open ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
+    const ci = !pr || !open ? null : pr.checks.failed ? [`${pr.checks.failed} failing`, C.bad] : pr.checks.pending ? [`${pr.checks.pending} pending`, C.blue] : pr.checks.passed ? ['checks pass', C.ok] : null
+    const action =
+      !Button || !b.exists
+        ? null
+        : d.creating === b.branch
+          ? <Text dimColor>creating PR…</Text>
+          : !pr
+            ? <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
+            : open && !pr.isDraft
+              ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} />
+              : null
     return (
-      <Box key={id} flexDirection="column" marginTop={i === 0 ? 0 : 0.6}>
-        {title}
-        {row}
-        {failing}
+      <Box key={`branch-${b.branch}`} flexDirection="column" marginTop={i === 0 ? 0 : SPACE.block}>
+        <Box flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
+          <Text wrap="truncate">{b.branch}</Text>
+          <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
+            {b.insertions || b.deletions ? <Text dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null}
+            <Text color={color}>{word}</Text>
+            {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
+          </Box>
+        </Box>
+        <Box flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
+          <Box flexDirection="row" gap={SPACE.pair} flexShrink={1}>
+            {pr ? <Link href={pr.url} label={`#${pr.number}`} /> : null}
+            <Text dimColor wrap="truncate">
+              {pr ? pr.title : b.worktree ? `${b.place} (worktree)` : b.place}
+            </Text>
+          </Box>
+          <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
+            {b.conflicted ? <Text color={C.bad}>{`${b.conflicted} conflicted`}</Text> : null}
+            {ci ? <Text color={ci[1]}>{ci[0]}</Text> : null}
+            {action}
+          </Box>
+        </Box>
+        {pr && open && pr.failing.length ? (
+          <Text dimColor wrap="truncate">
+            {pr.failing.slice(0, 3).join(', ')}
+          </Text>
+        ) : null}
       </Box>
     )
   })
@@ -478,17 +382,10 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     k.section({
       id: 'workspaces',
       icon: GLYPH.branch,
-      color: C.slate,
       title: 'Workspaces',
-      right: (
-        <Box flexDirection="row" gap={1.5}>
-          {openPrs ? <Text color={C.ok}>{`${openPrs} open`}</Text> : null}
-          {merged ? <Text color={C.purple}>{`${merged} merged`}</Text> : null}
-        </Box>
-      ),
+      right: k.summary([openPrs ? [String(openPrs), 'open', C.blue] : null, merged ? [String(merged), 'merged', C.purple] : null]),
       ...fold('workspaces'),
       children: entries,
     }),
   ]
 }
-
