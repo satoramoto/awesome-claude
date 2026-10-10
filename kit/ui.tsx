@@ -1,6 +1,7 @@
 import type { RenderElement, RenderSurface } from 'claude-code'
 
 import { pct, short } from './format'
+import { ICON_PX, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
 import { C, MUTED, TRACK } from './tokens'
@@ -89,7 +90,17 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    */
 
   /**
-   * One rounded end: a square `px` tall, a half circle on the outside and a filled
+   * An icon at the kit's one size (ICON_PX square): the SVG drawing where the
+   * surface has SVG and the kit has one for `key`, else the glyph as text.
+   */
+  const icon = (key: string, color: string, px = ICON_PX): RenderElement => {
+    const source = Svg ? iconSvg(key, color, px) : null
+    if (!Svg || !source) return <Text color={color}>{key}</Text>
+    return <Svg source={source} alt="icon" width={px} height={px} />
+  }
+
+  /**
+   * One rounded end:a square `px` tall, a half circle on the outside and a filled
    * strip on the inside, as one shape.
    */
   const cap = (px: number, color: string, side: 'left' | 'right'): RenderElement | null => {
@@ -364,8 +375,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
                 {toggle}
               </Box>
               {s.icon ? (
-                <Box width={2} flexShrink={0}>
-                  <Text color={s.color}>{s.icon}</Text>
+                <Box width={2} flexShrink={0} flexDirection="row" alignItems="center">
+                  {icon(s.icon, s.color ?? MUTED)}
                 </Box>
               ) : null}
               <Text wrap="truncate" bold>
@@ -562,7 +573,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { pinned, share, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { icon, pinned, share, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

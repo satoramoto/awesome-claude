@@ -150,6 +150,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const events = failedTools.length
     ? k.section({
         id: 'events',
+        icon: 'events',
+        color: C.bad,
         title: 'Events',
         right: <Text color={C.bad}>{`${toolErrors} failed`}</Text>,
         ...fold('events'),
@@ -378,6 +380,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   // ---- accounting: what the session cost, and on what ----
   const accounting = k.section({
     id: 'accounting',
+    icon: GLYPH.cost,
+    color: C.ok,
     title: 'Accounting',
     right: <Text>{a.cost !== undefined ? money(a.cost) : '–'}</Text>,
     ...fold('accounting'),
