@@ -31,12 +31,14 @@ import { createPerf } from '../kit/perf'
 
 import { renderDesktop } from './desktop'
 import type { AppElements, Helpers } from './desktop'
+import { NETTOP, NET_PER_PROCESS, RESOURCES_SCRIPT, takeNettop, toResources } from './resources'
 
 const PANE = 'overview'
 const snapshot = atom({ plugin: 'overview', key: 'snapshot' } as const, null)
 const agents = atom({ plugin: 'overview', key: 'agents' } as const, [])
 const agentExtra = atom({ plugin: 'overview', key: 'agentExtra' } as const, {})
 const now = atom({ plugin: 'overview', key: 'now' } as const, 0)
+const resources = atom({ plugin: 'overview', key: 'resources' } as const, null)
 const TICK_MS = 1_000
 
 // One hue per used category, in the order /context lists them.
@@ -673,7 +675,24 @@ const isShown = async ($: EngineInterface): Promise<boolean> => {
 }
 
 const stale = { usage: true, git: true, gh: true }
-const last = { usage: 0, git: 0, gh: 0, clock: 0 }
+const last = { usage: 0, git: 0, gh: 0, clock: 0, resources: 0 }
+const RESOURCES_EVERY = 10_000
+let nettopBusy = false
+
+/** One sample of the session's share of the machine; see resources.ts. */
+const sampleResources = async ($: EngineInterface) => {
+  const run = await $.process.run(['/usr/bin/python3', '-c', RESOURCES_SCRIPT], { timeoutMs: 5_000 })
+  if (run.exitCode !== 0) return null
+  if (NET_PER_PROCESS && !nettopBusy) {
+    nettopBusy = true
+    $.process
+      .run(NETTOP, { timeoutMs: 10_000 })
+      .then(r => (r.exitCode === 0 ? takeNettop(r.stdout, Date.now()) : undefined))
+      .catch(() => undefined)
+      .finally(() => (nettopBusy = false))
+  }
+  return toResources(run.stdout, Date.now())
+}
 // Even with nothing marked stale, read again this often while shown.
 const EVERY = { usage: 60_000, git: 60_000, gh: 180_000, clock: 60_000 }
 // And never more often than this, however much happens.
@@ -700,6 +719,13 @@ const tick = async ($: EngineInterface) => {
     stale.gh = false
     last.gh = t
     await perf.time('gh', () => refreshGh($))
+  }
+  // The session's share of the machine. Each sample costs about 0.1 s of CPU (mostly
+  // Python starting), so every 10 s: about 1% of one core while the pane is shown.
+  if (t - last.resources >= RESOURCES_EVERY) {
+    last.resources = t
+    const res = await perf.time('resources', () => sampleResources($)).catch(() => null)
+    if (res) await update($, resources, () => res)
   }
   // The session's elapsed time moves even when nothing else does.
   if (t - last.clock >= EVERY.clock) {
@@ -819,6 +845,7 @@ export const register: Register = on => {
         gh: hub,
         activity: await read($, activity),
         collapsed: await read($, collapsed),
+        resources: await read($, resources),
         toggle: (id: string) =>
           void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
         columns: e.props.bodyColumns,

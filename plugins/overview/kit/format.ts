@@ -26,7 +26,18 @@ export const short = (ms: number): string => {
 }
 
 /** US dollars: $1.50, $123. */
-export const money = (usd: number) => (usd >= 100 ? `$${Math.round(usd)}` : `$${usd.toFixed(2)}`)
+/** Bytes, short: 812, 41K, 3.2M, 16G. */
+export const bytes = (n: number): string => {
+  const units = ['', 'K', 'M', 'G', 'T']
+  let i = 0
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024
+    i++
+  }
+  return `${n >= 10 || i === 0 ? Math.round(n) : n.toFixed(1)}${units[i]}`
+}
+
+export const money =(usd: number) => (usd >= 100 ? `$${Math.round(usd)}` : `$${usd.toFixed(2)}`)
 
 /** `value` as a whole percent of `max`, clamped: the desktop takes whole percentages only. */
 export const pct = (value: number, max: number) => `${Math.round(Math.max(0, Math.min(100, (value / Math.max(max, 1)) * 100)))}%`

@@ -50,6 +50,7 @@ const HEAD = '#272727'
 const PERF_LOOK: Record<string, [string, string]> = {
   render: ['▣', C.purple],
   tick: ['↻', C.blue],
+  resources: ['◎', C.slate],
   usage: ['◕', C.cyan],
   git: ['⎇', C.orchid],
   gh: ['⇡', C.ok],
@@ -480,7 +481,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * as its average time and how often it ran; amber past 1 s a minute or a
    * render over 16 ms, red past 5 s a minute.
    */
-  const perfFooter = (snap: PerfSnapshot, opts: { max?: number } = {}) => {
+  const perfFooter = (snap: PerfSnapshot, opts: { max?: number; lead?: RenderElement[] } = {}) => {
     const rows = snap.rows.slice(0, opts.max ?? 6)
     const tone = (r: PerfRow) =>
       r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
@@ -503,14 +504,32 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         )
       }),
     ]
+    const line = (key: string, row: RenderElement[]) => (
+      <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={terminal ? 2 : 1.5}>
+        {row}
+      </Box>
+    )
+    const body = [opts.lead?.length ? line('lead', opts.lead) : null, line('jobs', items)]
     if (terminal)
       return (
-        <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
-          {items}
+        <Box flexDirection="column" marginTop={1}>
+          {body}
         </Box>
       )
-    return rounded(HEAD, { flexDirection: 'row', flexWrap: 'wrap', columnGap: 1.5, paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, items)
+    return rounded(HEAD, { flexDirection: 'column', rowGap: 0.15, paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, body)
   }
+
+  /**
+   * One resource reading for a footer: a coloured glyph, our figure in bold, and
+   * the whole it's a share of, dim. `hot` tints our figure (amber, red) when it's a lot.
+   */
+  const share = (key: string, glyph: string, color: string, ours: string, whole: string, hot?: string) => (
+    <Text key={key}>
+      <Text color={color}>{glyph}</Text>
+      <Text bold color={hot}>{` ${ours}`}</Text>
+      <Text dimColor>{`/${whole}`}</Text>
+    </Text>
+  )
 
   /**
    * A pane whose footer stays on the bottom edge: `body` fills the height above it.
@@ -527,7 +546,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { pinned, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { pinned, share, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>
