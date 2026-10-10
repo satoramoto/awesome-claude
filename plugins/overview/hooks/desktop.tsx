@@ -111,7 +111,7 @@ const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 // in one column grid (label, gauge, value, unit). The context meter, with its
 // scale and the compaction mark, is the one bold thing; the rest stays quiet.
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
-  const { Box, Text } = els
+  const { Box, Text, Button } = els
   const k = kit(els, 'desktop', d.columns)
   const a = d.activity
   const snap = d.snap
@@ -121,32 +121,43 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
   const toolErrors = Object.values(a.tools).reduce((n, t) => n + t.err, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
-  const metric = (key: string, glyph: string, value: string, unit: string) => (
-    <Box key={key} flexDirection="row" gap={0.5} flexShrink={0}>
-      <Text dimColor>{glyph}</Text>
-      <Text>
-        {value}
-        <Text dimColor>{` ${unit}`}</Text>
-      </Text>
+  // A figure over its dim label, four to a row.
+  const metric = (key: string, value: string, label: string) => (
+    <Box key={key} width="25%" flexDirection="column">
+      <Text bold>{value}</Text>
+      <Text dimColor>{label}</Text>
     </Box>
   )
   const header = (
     <Box flexDirection="column">
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Text bold>{a.cost !== undefined ? money(a.cost) : '–'}</Text>
-        <Box flexDirection="row" gap={1.2}>
-          {running ? k.flag('running', C.warn, GLYPH.running, running) : null}
-          {toolErrors ? k.flag('failed', C.bad, GLYPH.failed, toolErrors) : null}
+      {running || toolErrors ? (
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1} marginBottom={0.4}>
+          {running ? <Text color={C.warn}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : <Text color={C.ok}>● Idle</Text>}
+          {toolErrors ? <Text color={C.bad}>{`${toolErrors} failed`}</Text> : null}
         </Box>
-      </Box>
-      <Box flexDirection="row" justifyContent="space-between" gap={1} marginTop={0.2}>
-        {metric('time', GLYPH.time, a.startedAt ? short(d.at - a.startedAt) : '–', '')}
-        {metric('turns', GLYPH.turns, String(a.turns), 'turns')}
-        {metric('calls', GLYPH.tools, String(toolCalls), 'calls')}
-        {metric('files', GLYPH.files, String(a.files.length), 'files')}
+      ) : null}
+      <Box flexDirection="row">
+        {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'ELAPSED')}
+        {metric('turns', String(a.turns), 'TURNS')}
+        {metric('calls', String(toolCalls), 'CALLS')}
+        {metric('files', String(a.files.length), 'FILES Δ')}
       </Box>
     </Box>
   )
+
+  // ---- events: failed tool calls ----
+  const failedTools = Object.entries(a.tools).filter(([, t]) => t.err > 0)
+  const events = failedTools.length
+    ? k.section({
+        id: 'events',
+        title: 'Events',
+        right: <Text color={C.bad}>{`${toolErrors} failed`}</Text>,
+        ...fold('events'),
+        children: failedTools.map(([name, t]) =>
+          k.prop(`ev-${name}`, name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name, <Text color={C.bad}>{`${t.err} of ${t.n} failed`}</Text>),
+        ),
+      })
+    : null
 
   // ---- context: the instrument's main meter ----
   const parts = snap
@@ -163,7 +174,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     right: snap ? (
       <Text>
         <Text bold color={levelColor(snap.percent)}>{`${snap.percent}%`}</Text>
-        <Text dimColor>{`  ${tokens(snap.total)} of ${tokens(snap.max)}`}</Text>
+        <Text dimColor>{`  ${tokens(snap.total)} / ${tokens(snap.max)}`}</Text>
       </Text>
     ) : (
       <Text dimColor>measuring…</Text>
@@ -174,24 +185,41 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           <Box key="meter" flexDirection="column" marginTop={0.2}>
             {k.bar(parts, snap.max, { height: 0.5 })}
             {k.scale(snap.compactAt ? snap.compactAt / snap.max : undefined, C.warn)}
+            {/* The scale's figures: 0, a quarter, half, three quarters, the window. */}
+            <Box flexDirection="row" justifyContent="space-between">
+              {[0, 0.25, 0.5, 0.75, 1].map(f => (
+                <Text key={`ax-${f}`} dimColor>
+                  {f === 0 ? '0' : tokens(snap.max * f)}
+                </Text>
+              ))}
+            </Box>
           </Box>,
-          <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.1}>
-            {parts.map(p => (
-              <Box key={`legend-${p.label}`} width={16} flexDirection="row" alignItems="center" gap={0.5}>
+          // The legend in two columns, each figure right-aligned in its column.
+          <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.4} rowGap={0.1}>
+            {parts.map((p, i) => (
+              <Box key={`legend-${p.label}`} width="50%" flexDirection="row" alignItems="center" gap={0.5} paddingRight={i % 2 === 0 ? 1.5 : 0}>
                 {k.swatch(p.color)}
-                <Box flexShrink={1}>
-                  <Text dimColor wrap="truncate">
-                    {p.label}
-                  </Text>
+                <Box flexGrow={1} flexShrink={1}>
+                  <Text wrap="truncate">{p.label}</Text>
                 </Box>
-                <Box flexShrink={0}>
-                  <Text>{tokens(p.value)}</Text>
-                </Box>
+                <Text>{tokens(p.value)}</Text>
               </Box>
             ))}
           </Box>,
-          k.prop('model', 'Model', snap.model),
-          snap.compactAt ? k.prop('compact', 'Compacts', <Text color={C.warn}>{`at ${tokens(snap.compactAt)}`}</Text>) : null,
+          <Box key="room" flexDirection="row" justifyContent="space-between" marginTop={0.4}>
+            {snap.compactAt ? (
+              <Text>
+                <Text dimColor>COMPACTION </Text>
+                <Text color={C.warn}>{tokens(snap.compactAt)}</Text>
+              </Text>
+            ) : (
+              <Text dimColor>NO AUTO-COMPACT</Text>
+            )}
+            <Text>
+              <Text dimColor>HEADROOM </Text>
+              {tokens(Math.max(0, (snap.compactAt ?? snap.max) - snap.total))}
+            </Text>
+          </Box>,
         ]
       : null,
   })
@@ -204,6 +232,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
         icon: GLYPH.limits,
         color: C.slate,
         title: 'Limits',
+        right: <Text dimColor>USED / RESET IN</Text>,
         ...fold('limits'),
         children: windows.map(w =>
           k.reading(`limit-${w.kind}`, {
@@ -218,7 +247,38 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
       })
     : null
 
-  // ---- turns ----
+  // ---- turns: tool calls per turn, the peak in amber ----
+  const turnsChart = () => {
+    const log = a.turnLog.slice(-14)
+    const first = a.turns - log.length + 1
+    const calls = log.map(p => p.calls ?? 0)
+    const peak = Math.max(0, ...calls)
+    const at = calls.indexOf(peak)
+    const num = (n: number) => String(n).padStart(2, '0')
+    return [
+      <Box key="sub" flexDirection="row" justifyContent="space-between">
+        <Text dimColor>CALLS / TURN</Text>
+        <Text>
+          {String(peak)}
+          <Text dimColor> PEAK</Text>
+        </Text>
+      </Box>,
+      k.columns(
+        calls.map((n, i) => [{ value: Math.max(n, 0.02 * Math.max(1, peak)), color: i === at && peak > 0 ? C.warn : C.blue }]),
+        { slots: 14, height: 3 },
+      ),
+      <Box key="axis" flexDirection="row" justifyContent="space-between">
+        <Text dimColor>{num(first)}</Text>
+        {log.length > 2 ? <Text dimColor>{num(first + Math.floor(log.length / 2))}</Text> : null}
+        <Text dimColor>{num(a.turns)}</Text>
+      </Box>,
+      peak > 0 ? (
+        <Text key="peak" dimColor>
+          {`Turn ${num(first + at)}: ${peak} calls, ${tokens(log[at]!.output)} out`}
+        </Text>
+      ) : null,
+    ]
+  }
   const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
   const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
   const turns = a.turnLog.length
@@ -240,23 +300,18 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           </Box>
         ),
         ...fold('turns'),
-        children: k.columns(
-          a.turnLog.map(p => [
-            { value: p.output, color: C.ok },
-            { value: p.input, color: C.cyan },
-            { value: p.cacheWrite, color: C.purple },
-            { value: p.cacheRead, color: C.blue },
-          ]),
-          { slots: 24, height: 1.8 },
-        ),
+        children: turnsChart(),
       })
     : null
 
   // ---- tools ----
-  const toolRows = Object.entries(a.tools)
-    .sort((x, y) => y[1].n - x[1].n)
-    .slice(0, 6)
-  const toolMax = Math.max(1, ...toolRows.map(([, t]) => t.n))
+  const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
+  const toolMax = Math.max(1, ...allTools.map(([, t]) => t.n))
+  // The top four, the rest folded under "Other tools".
+  // `collapsed` holds the ids folded by toggling; for this row, toggled means opened.
+  const otherOpen = d.collapsed.includes('tools-other')
+  const toolRows = allTools.slice(0, otherOpen ? allTools.length : 4)
+  const others = allTools.slice(4)
   const tools = toolRows.length
     ? k.section({
         id: 'tools',
@@ -270,17 +325,25 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           </Text>
         ),
         ...fold('tools'),
-        children: toolRows.map(([name, t]) =>
-          k.reading(`tool-${name}`, {
-            label: name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name,
-            value: t.n,
-            max: toolMax,
-            color: C.blue,
-            figure: String(t.n),
-            unit: t.err ? `${t.err} ✕` : undefined,
-            unitColor: t.err ? C.bad : undefined,
-          }),
-        ),
+        children: [
+          ...toolRows.map(([name, t]) =>
+            k.reading(`tool-${name}`, {
+              label: name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name,
+              value: t.n,
+              max: toolMax,
+              color: C.blue,
+              figure: String(t.n),
+              unit: t.err ? `${t.err} ✕` : undefined,
+              unitColor: t.err ? C.bad : undefined,
+            }),
+          ),
+          others.length && Button ? (
+            <Box key="other" flexDirection="row" justifyContent="space-between" gap={1}>
+              <Button plain dimColor label={`${otherOpen ? '▾' : '▸'} Other tools`} onPress={() => d.toggle('tools-other')} />
+              <Text>{String(others.reduce((n, [, t]) => n + t.n, 0))}</Text>
+            </Box>
+          ) : null,
+        ],
       })
     : null
 
@@ -312,8 +375,22 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
       })
     : null
 
-  return (
-    k.pinned([header, context, limits, turns, tools, agents, ...renderBranches(els, k, d, fold)], k.perf(d.perf, { lead: machine(k, d.resources) }), d.rows)
+  // ---- accounting: what the session cost, and on what ----
+  const accounting = k.section({
+    id: 'accounting',
+    title: 'Accounting',
+    right: <Text>{a.cost !== undefined ? money(a.cost) : '–'}</Text>,
+    ...fold('accounting'),
+    children: [
+      snap ? k.prop('model', 'Model', snap.model) : null,
+      k.prop('cost', 'Cost', a.cost !== undefined ? money(a.cost) : 'not tracked here'),
+    ],
+  })
+
+  return k.pinned(
+    [header, events, context, limits, turns, tools, agents, ...renderBranches(els, k, d, fold), accounting],
+    k.perf(d.perf, { lead: machine(k, d.resources) }),
+    d.rows,
   )
 }
 
@@ -322,14 +399,14 @@ const prColor = (pr: GitPr) =>
   pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.warn : C.ok
 
 /**
- * One section per branch the session started, as the desktop app tracks them:
- * the branch's changes against the default branch in the header, and below it
- * where it lives, its uncommitted state, and its PR with CI; Create PR when it
- * has none, ✕ to stop showing it.
+ * Workspaces: the branches the session started, as the desktop app tracks them.
+ * Each entry is two lines: the branch, its lines changed and its state; then
+ * where it lives or its PR, its uncommitted changes, and CI, with Create PR,
+ * Merge and hide as the actions.
  */
 const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
   const { Box, Text, Link, Button } = els
-  return d.branches.map(b => {
+  const entries = d.branches.map((b, i) => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
     const color = pr ? prColor(pr) : C.slate
@@ -388,21 +465,48 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
         {pr.failing.slice(0, 3).join(', ')}
       </Text>
     ) : null
-    return k.section({
-      id,
-      icon: GLYPH.branch,
-      color,
-      title: b.branch,
-      right: (
+    // The entry's first line: the branch, its lines changed, its state as one word.
+    const word = !b.exists ? 'DELETED' : pr ? (pr.state === 'OPEN' ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
+    const title = (
+      <Box key="title" flexDirection="row" justifyContent="space-between" gap={1}>
+        <Box flexDirection="row" gap={0.5} flexShrink={1}>
+          <Text color={color}>{GLYPH.branch}</Text>
+          <Text wrap="truncate">{b.branch}</Text>
+        </Box>
         <Box flexDirection="row" gap={1} alignItems="center">
           {b.insertions ? <Text color={C.ok}>{`+${b.insertions}`}</Text> : null}
           {b.deletions ? <Text color={C.bad}>{`−${b.deletions}`}</Text> : null}
+          <Text color={color}>{word}</Text>
           {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
         </Box>
-      ),
-      ...fold(id),
-      children: [row, failing],
-    })
+      </Box>
+    )
+    return (
+      <Box key={id} flexDirection="column" marginTop={i === 0 ? 0 : 0.6}>
+        {title}
+        {row}
+        {failing}
+      </Box>
+    )
   })
+  if (!entries.length) return []
+  const merged = d.branches.filter(b => b.pr?.state === 'MERGED').length
+  const openPrs = d.branches.filter(b => b.pr?.state === 'OPEN').length
+  return [
+    k.section({
+      id: 'workspaces',
+      icon: GLYPH.branch,
+      color: C.slate,
+      title: 'Workspaces',
+      right: (
+        <Box flexDirection="row" gap={1.5}>
+          {openPrs ? <Text color={C.ok}>{`${openPrs} open`}</Text> : null}
+          {merged ? <Text color={C.purple}>{`${merged} merged`}</Text> : null}
+        </Box>
+      ),
+      ...fold('workspaces'),
+      children: entries,
+    }),
+  ]
 }
 

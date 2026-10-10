@@ -751,7 +751,7 @@ export const countTool = (a: Activity, tool: string, isError: boolean, path?: st
   const old = a.tools[tool] ?? { n: 0, err: 0 }
   const tools = { ...a.tools, [tool]: { n: old.n + 1, err: old.err + (isError ? 1 : 0) } }
   const files = path && !a.files.includes(path) ? [...a.files, path] : a.files
-  return { ...a, tools, files }
+  return { ...a, tools, files, callsThisTurn: (a.callsThisTurn ?? 0) + 1 }
 }
 
 /** The activity with one more main-loop turn, the log cut to its last TURN_LOG. */
@@ -762,8 +762,9 @@ export const countTurn = (a: Activity, ms: number, usage: ModelUsage | undefined
     output: usage?.output_tokens ?? 0,
     cacheRead: usage?.cache_read_input_tokens ?? 0,
     cacheWrite: usage?.cache_creation_input_tokens ?? 0,
+    calls: a.callsThisTurn ?? 0,
   }
-  return { ...a, turns: a.turns + 1, turnLog: [...a.turnLog, point].slice(-TURN_LOG) }
+  return { ...a, turns: a.turns + 1, callsThisTurn: 0, turnLog: [...a.turnLog, point].slice(-TURN_LOG) }
 }
 
 export const refresh = async ($: EngineInterface) => {

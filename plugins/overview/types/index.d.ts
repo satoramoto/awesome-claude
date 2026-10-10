@@ -135,7 +135,8 @@ export type Limit = {
 export type ToolCount = { n: number; err: number }
 
 /** One main-loop turn: how long it took and its tokens. */
-export type TurnPoint = { ms: number; input: number; output: number; cacheRead: number; cacheWrite: number }
+/** One main-loop turn: its time, its tokens, and the tool calls made during it (absent on older points). */
+export type TurnPoint = { ms: number; input: number; output: number; cacheRead: number; cacheWrite: number; calls?: number }
 
 /** What the session has done, as the hooks saw it. */
 export type Activity = {
@@ -145,6 +146,8 @@ export type Activity = {
   cost?: number
   /** Main-loop turns finished. */
   turns: number
+  /** Tool calls since the last turn finished, for the next TurnPoint. */
+  callsThisTurn?: number
   /** Calls per tool name, subagents' included. */
   tools: Record<string, ToolCount>
   /** Paths Edit, Write, MultiEdit and NotebookEdit touched, each once. */
