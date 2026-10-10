@@ -290,9 +290,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
           alignItems="center"
           gap={1}
           backgroundColor={terminal ? undefined : HEAD}
-          // Rounded corners from the round border; transparent, so the band shows no outline.
+          // Rounded corners from the round border, in the band's own colour so it reads as no outline.
           borderStyle={terminal ? undefined : 'round'}
-          borderColor={terminal ? undefined : 'transparent'}
+          borderColor={terminal ? undefined : HEAD}
           paddingRight={terminal ? 0 : 0.8}
           paddingY={terminal ? 0 : 0.2}
         >
