@@ -2,8 +2,8 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { bytes, duration, money, short, tokens } from '../kit/format'
 import type { PerfSnapshot } from '../kit/perf'
-import { C, GLYPH, MUTED, levelColor } from '../kit/tokens'
-import { fold as foldArrow, kit } from '../kit/ui'
+import { C, GLYPH, MUTED, TRACK, levelColor } from '../kit/tokens'
+import { kit } from '../kit/ui'
 
 import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
 
@@ -111,7 +111,7 @@ const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 // in one column grid (label, gauge, value, unit). The context meter, with its
 // scale and the compaction mark, is the one bold thing; the rest stays quiet.
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
-  const { Box, Text, Button } = els
+  const { Box, Text } = els
   const k = kit(els, 'desktop', d.columns)
   const a = d.activity
   const snap = d.snap
@@ -249,105 +249,83 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
       })
     : null
 
-  // ---- turns: tool calls per turn, the peak in amber ----
-  const turnsChart = () => {
-    const log = a.turnLog.slice(-14)
-    const first = a.turns - log.length + 1
-    const calls = log.map(p => p.calls ?? 0)
-    const peak = Math.max(0, ...calls)
-    const at = calls.indexOf(peak)
-    const num = (n: number) => String(n).padStart(2, '0')
-    return [
-      <Box key="sub" flexDirection="row" justifyContent="space-between">
-        <Text dimColor>CALLS / TURN</Text>
-        <Text>
-          {String(peak)}
-          <Text dimColor> PEAK</Text>
-        </Text>
-      </Box>,
-      k.columns(
-        calls.map((n, i) => [{ value: Math.max(n, 0.02 * Math.max(1, peak)), color: i === at && peak > 0 ? C.warn : C.blue }]),
-        { slots: 14, height: 3 },
-      ),
-      <Box key="axis" flexDirection="row" justifyContent="space-between">
-        <Text dimColor>{num(first)}</Text>
-        {log.length > 2 ? <Text dimColor>{num(first + Math.floor(log.length / 2))}</Text> : null}
-        <Text dimColor>{num(a.turns)}</Text>
-      </Box>,
-      peak > 0 ? (
-        <Text key="peak" dimColor>
-          {`Turn ${num(first + at)}: ${peak} calls, ${tokens(log[at]!.output)} out`}
-        </Text>
-      ) : null,
-    ]
-  }
+  // ---- activity: tool calls per turn, each bar sliced by tool ----
+  // The session's busiest tools get a colour each, in the same order in every bar
+  // and in the legend; the rest share one grey slice as "Other".
+  const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
+  const TOOL_HUES = [C.blue, C.cyan, C.purple, C.orchid, C.ok, C.warn]
+  const named = allTools.slice(0, TOOL_HUES.length).map(([name], i) => ({ name, color: TOOL_HUES[i]! }))
+  const OTHER = C.slate
+  const shortName = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
+  const log = a.turnLog.slice(-16)
+  const first = a.turns - log.length + 1
+  const num = (n: number) => String(n).padStart(2, '0')
+  const sliced = log.map(p => {
+    const by = p.tools ?? {}
+    const other = Object.entries(by).reduce((n, [name, c]) => n + (named.some(t => t.name === name) ? 0 : c), 0)
+    // Stacked bottom up: the busiest tool at the base. A turn without calls keeps a sliver.
+    const parts = [...named.map(t => ({ value: by[t.name] ?? 0, color: t.color })), { value: other, color: OTHER }].reverse()
+    return parts.some(x => x.value > 0) ? parts : [{ value: 0.05, color: TRACK }]
+  })
+  const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
+  const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
+  const legend = [
+    ...named.map(t => ({ label: shortName(t.name), color: t.color, n: a.tools[t.name]!.n, err: a.tools[t.name]!.err })),
+    ...(otherCount ? [{ label: 'Other', color: OTHER, n: otherCount, err: allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0) }] : []),
+  ]
   const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
   const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
-  const turns = a.turnLog.length
-    ? k.section({
-        id: 'turns',
-        icon: GLYPH.turns,
-        color: C.blue,
-        title: 'Turns',
-        right: (
-          <Box flexDirection="row" gap={1.5}>
-            <Text>
-              {`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`}
-              <Text dimColor> cached</Text>
-            </Text>
-            <Text>
-              {tokens(a.turnLog.reduce((n, p) => n + p.output, 0))}
-              <Text dimColor> out</Text>
-            </Text>
-          </Box>
-        ),
-        ...fold('turns'),
-        children: turnsChart(),
-      })
-    : null
-
-  // ---- tools ----
-  const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
-  const toolMax = Math.max(1, ...allTools.map(([, t]) => t.n))
-  // The top four, the rest folded under "Other tools".
-  // `collapsed` holds the ids folded by toggling; for this row, toggled means opened.
-  const otherOpen = d.collapsed.includes('tools-other')
-  const toolRows = allTools.slice(0, otherOpen ? allTools.length : 4)
-  const others = allTools.slice(4)
-  const tools = toolRows.length
-    ? k.section({
-        id: 'tools',
-        icon: GLYPH.tools,
-        color: C.blue,
-        title: 'Tools',
-        right: (
-          <Text>
-            {String(toolCalls)}
-            <Text dimColor> calls</Text>
-          </Text>
-        ),
-        ...fold('tools'),
-        children: [
-          ...toolRows.map(([name, t]) =>
-            k.reading(`tool-${name}`, {
-              label: name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name,
-              value: t.n,
-              max: toolMax,
-              color: C.blue,
-              figure: String(t.n),
-              unit: t.err ? `${t.err} ✕` : undefined,
-              unitColor: t.err ? C.bad : undefined,
-            }),
-          ),
-          others.length && Button ? (
-            <Box key="other" flexDirection="row" justifyContent="space-between" gap={1}>
-              <Button plain dimColor label={`${foldArrow(!otherOpen)} Other tools`} onPress={() => d.toggle('tools-other')} />
-              <Text>{String(others.reduce((n, [, t]) => n + t.n, 0))}</Text>
+  const activitySection =
+    a.turnLog.length || toolCalls
+      ? k.section({
+          id: 'activity',
+          icon: GLYPH.tools,
+          color: C.blue,
+          title: 'Activity',
+          right: (
+            <Box flexDirection="row" gap={1.5}>
+              <Text>
+                {String(toolCalls)}
+                <Text dimColor> calls</Text>
+              </Text>
+              <Text>
+                {`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`}
+                <Text dimColor> cached</Text>
+              </Text>
             </Box>
-          ) : null,
-        ],
-      })
-    : null
+          ),
+          ...fold('activity'),
+          children: [
+            <Box key="sub" flexDirection="row" justifyContent="space-between">
+              <Text dimColor>CALLS / TURN</Text>
+              <Text>
+                {String(peak)}
+                <Text dimColor> PEAK</Text>
+              </Text>
+            </Box>,
+            k.columns(sliced, { slots: 16, height: 3.5 }),
+            <Box key="axis" flexDirection="row" justifyContent="space-between">
+              <Text dimColor>{num(Math.max(1, first))}</Text>
+              {log.length > 2 ? <Text dimColor>{num(first + Math.floor(log.length / 2))}</Text> : null}
+              <Text dimColor>{num(a.turns)}</Text>
+            </Box>,
+            // The legend in two columns, like the context's: a dot, the tool, its calls (and failures).
+            <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.4} rowGap={0.1}>
+              {legend.map((t, i) => (
+                <Box key={`tl-${t.label}`} width="50%" flexDirection="row" alignItems="center" gap={0.5} paddingRight={i % 2 === 0 ? 1.5 : 0}>
+                  {k.swatch(t.color)}
+                  <Box flexGrow={1} flexShrink={1}>
+                    <Text wrap="truncate">{t.label}</Text>
+                  </Box>
+                  {t.err ? <Text color={C.bad}>{`!${t.err}`}</Text> : null}
+                  <Text>{String(t.n)}</Text>
+                </Box>
+              ))}
+            </Box>,
+          ],
+        })
+      : null
+
 
   // ---- agents ----
   const agents = d.agents.length
@@ -392,7 +370,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
 
   return k.pinned(
-    [header, events, context, limits, turns, tools, agents, ...renderBranches(els, k, d, fold), accounting],
+    [header, events, context, limits, activitySection, agents, ...renderBranches(els, k, d, fold), accounting],
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
