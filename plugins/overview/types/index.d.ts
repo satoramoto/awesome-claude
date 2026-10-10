@@ -165,8 +165,7 @@ export type Resources = {
   /** Memory: the tree's resident bytes, and the machine's RAM. */
   mem: number
   memAll: number
-  /** Disk: bytes per second read plus written, the tree's and the system's. */
-  disk: number
+  /** Disk: the system's bytes per second, read plus written (macOS has no cheap per-process figure). */
   diskAll: number
   /** Network: bytes per second in plus out; the tree's is null until nettop's first sample. */
   net: number | null
