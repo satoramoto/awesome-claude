@@ -37,6 +37,8 @@ const ROW_PX = 8.5 / 0.45
 /** The inspector's grid: the gutter the fold arrow sits in, and the label column. */
 const GUTTER = 2
 const LABEL = 10
+/** A section body's left indent on the desktop: about the width of a header's rounded corner. */
+const BODY_INDENT = 0.8
 
 /**
  * A section header's band: a tonal step that marks where each section starts. Solid,
@@ -362,9 +364,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             s.right ?? null,
           ],
         )}
-        {/* The body sits flush with the band's left edge, no indent. */}
+        {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : 0} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
+          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
             {s.children}
           </Box>
         )}
