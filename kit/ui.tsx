@@ -61,6 +61,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     // Grow factors out of 1000 (the desktop caps them at 10000): finer than a pixel at any width.
     // Flat, not rounded: on the desktop a border takes room inside the box, so a thin bordered
     // track has no room left for its fills (they draw empty), and bordered fills draw as blobs.
+    // Glyph bars (◖━◗, ╺━╸) didn't draw in the desktop pane either, so flat is the look.
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
