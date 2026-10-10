@@ -588,28 +588,28 @@ const hideBranch = async ($: EngineInterface, branch: string) => {
   await update($, branches, list => list.filter(b => b.branch !== branch))
 }
 
-/** Create PR: push the branch if it isn't, then `gh pr create --fill` from its checkout. */
+/**
+ * Create PR, as the desktop app's own button does it: hand it to the session as a
+ * prompt, so Claude writes the description, opens the PR and starts watching it
+ * (auto-merge and Auto-fix, per the person's instructions). Runs as a turn of its
+ * own once the session is idle.
+ */
 const createPr = async ($: EngineInterface, branch: string) => {
   if (await read($, creating)) return
   const view = (await read($, branches)).find(b => b.branch === branch)
   if (!view) return
   await update($, creating, () => branch)
   try {
-    const run = (cmd: string[]) => $.process.run(cmd, { cwd: view.path, timeoutMs: 60_000 })
-    if (!view.pushed) {
-      const push = await run(['git', 'push', '-u', 'origin', `${branch}:refs/heads/${branch}`])
-      if (push.exitCode !== 0) {
-        $.ui.toast(`Push failed: ${ghNote(push.stderr)}`)
-        return
-      }
-    }
-    const made = await run(['gh', 'pr', 'create', '--fill', '--head', branch])
-    $.ui.toast(made.exitCode === 0 ? `PR created: ${made.stdout.trim().split('\n').pop()}` : `Create PR failed: ${ghNote(made.stderr)}`)
+    await $.prompt.submit({
+      text:
+        `Create a pull request for the \`${branch}\` branch (checked out at ${view.path}). ` +
+        'Push it if needed, write the title and body from its commits, open it, and start watching it.',
+      asUser: true,
+    })
   } catch {
-    $.ui.toast('Create PR failed: gh not available')
+    $.ui.toast('Create PR: could not send the request to the session')
   } finally {
     await update($, creating, () => null)
-    await refreshBranches($, true).catch(() => undefined)
   }
 }
 
