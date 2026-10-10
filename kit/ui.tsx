@@ -513,9 +513,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
     // With a lead, one row only: the lead and the uptime, no wrap; what doesn't fit is cut.
     if (opts.lead?.length) {
-      const row = [...opts.lead, items[0]!]
+      const row = [...opts.lead, share('perf-since', '⏱', C.slate, short(snap.sinceMs), '')]
       if (terminal) return <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">{row}</Box>
-      return rounded(HEAD, { flexDirection: 'row', flexWrap: 'nowrap', columnGap: 1, paddingX: 0.6, flexShrink: 0, marginTop: 0.6, overflow: 'hidden' }, row)
+      return rounded(HEAD, { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', columnGap: 1, paddingX: 0.6, flexShrink: 0, marginTop: 0.6, overflow: 'hidden' }, row)
     }
     if (terminal) return <Box marginTop={1}>{line('jobs', items)}</Box>
     return rounded(HEAD, { flexDirection: 'column', paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, line('jobs', items))
@@ -526,11 +526,14 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * the whole it's a share of, dim. `hot` tints our figure (amber, red) when it's a lot.
    */
   const share = (key: string, glyph: string, color: string, ours: string, whole: string, hot?: string) => (
-    <Text key={key} wrap="truncate">
+    // The glyph in its own box: the desktop drops a space at the start of a Text.
+    <Box key={key} flexDirection="row" gap={0.4} flexShrink={1}>
       <Text color={color}>{glyph}</Text>
-      <Text bold color={hot}>{ours}</Text>
-      {whole ? <Text dimColor>{`/${whole}`}</Text> : null}
-    </Text>
+      <Text wrap="truncate">
+        <Text bold color={hot}>{ours}</Text>
+        {whole ? <Text dimColor>{`/${whole}`}</Text> : null}
+      </Text>
+    </Box>
   )
 
   /**
