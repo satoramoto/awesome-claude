@@ -388,7 +388,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         )}
         {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : BODY_INSET_RIGHT} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
+          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : BODY_INSET_RIGHT} marginTop={terminal ? 0 : 0.25} marginBottom={terminal ? 0 : 1} rowGap={terminal ? 0 : 0.12}>
             {s.children}
           </Box>
         )}
