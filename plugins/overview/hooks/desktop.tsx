@@ -24,6 +24,8 @@ export type DesktopData = {
   toggle: (id: string) => void
   /** The pane's width in cells. */
   columns: number
+  /** The pane's height in rows, so the footer can sit on its bottom edge. */
+  rows?: number
   /** What the mod cost, for the debug footer. */
   perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
@@ -281,7 +283,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   return (
-    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf))
+    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf), d.rows)
   )
 }
 
