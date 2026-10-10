@@ -38,8 +38,12 @@ const ROW_PX = 8.5 / 0.45
 const GUTTER = 2
 const LABEL = 10
 
-/** A section header's band: a tonal step that marks where each section starts. */
-const HEAD = 'rgba(128,128,128,0.13)'
+/**
+ * A section header's band: a tonal step that marks where each section starts. Solid,
+ * not translucent, so its rounded border in the same colour doesn't show as a ring.
+ * Tuned for the desktop's dark pane.
+ */
+const HEAD = '#272727'
 
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
