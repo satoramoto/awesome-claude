@@ -31,7 +31,34 @@ const turnLog = (n: number) =>
     output: 600 + ((i * 7) % 5) * 500,
     cacheRead: 20_000 + i * 1_800,
     cacheWrite: i % 6 === 0 ? 9_000 : 1_200,
+    calls: 2 + ((i * 5) % 9),
+    tools: { Bash: 1 + (i % 4), Read: (i * 3) % 4, Edit: i % 3, Write: i % 5 === 0 ? 1 : 0, Agent: i % 7 === 0 ? 1 : 0 },
   }))
+
+const branch = (b: Record<string, unknown>) => ({
+  path: '/r',
+  place: 'awesome-claude',
+  worktree: false,
+  exists: true,
+  checkedOut: false,
+  ahead: 0,
+  behind: 0,
+  insertions: 0,
+  deletions: 0,
+  staged: 0,
+  modified: 0,
+  untracked: 0,
+  conflicted: 0,
+  pushed: true,
+  pr: null,
+  ...b,
+})
+
+const branches = [
+  branch({ branch: 'dev', checkedOut: true, insertions: 412, deletions: 96, modified: 3, pr: { number: 9, title: 'A neater inspector', url: '#', state: 'OPEN', isDraft: false, review: '', checks: { passed: 2, failed: 1, pending: 0 }, failing: ['mods'], current: true } }),
+  branch({ branch: 'kit-renderer', place: 'awesome-claude-kit', worktree: true, insertions: 120, deletions: 8, pr: { number: 8, title: 'Kit renderer', url: '#', state: 'MERGED', isDraft: false, review: '', checks: { passed: 1, failed: 0, pending: 0 }, failing: [], current: false } }),
+  branch({ branch: 'fix/storybook-port', insertions: 4, deletions: 2, pushed: false }),
+]
 
 const git = {
   ok: true,
@@ -87,6 +114,11 @@ export const busy = {
     contextLog: Array.from({ length: 23 }, (_, i) => Math.min(31, 9 + i)),
   },
   collapsed: [],
+  branches,
+  tracked: [],
+  hidden: [],
+  creating: null,
+  resources: { procs: 6, cpu: 1.4, cpuAll: 18, mem: 612 * 1024 * 1024, memAll: 32 * 1024 ** 3, diskAll: 2_100_000, net: 3_100, netAll: 41_000 },
   now,
 }
 

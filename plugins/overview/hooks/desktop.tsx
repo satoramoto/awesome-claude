@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import { bytes, money, short, tokens } from '../kit/format'
 import type { PerfSnapshot } from '../kit/perf'
 import { C, GLYPH, INK, MUTED, RAMP, TRACK, levelColor } from '../kit/tokens'
-import { SPACE, kit } from '../kit/ui'
+import { EDGE, SPACE, kit } from '../kit/ui'
 
 import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
 
@@ -132,15 +132,16 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
   const metric = (key: string, value: string, label: string) => (
-    <Box key={key} width="25%" flexDirection="column">
+    <Box key={key} flexDirection="column" alignItems={key === 'time' ? 'flex-start' : key === 'files' ? 'flex-end' : 'center'}>
       <Text>{value}</Text>
       {k.caption(label)}
     </Box>
   )
   const header = (
-    <Box key="header" flexDirection="column" paddingX={1}>
+    <Box key="header" flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right}>
       {running ? <Text color={C.blue}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : null}
-      <Box flexDirection="row" marginTop={running ? SPACE.block : 0}>
+      {/* Spread edge to edge: the first total on the left edge, the last on the right. */}
+      <Box flexDirection="row" justifyContent="space-between" marginTop={running ? SPACE.block : 0}>
         {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'Elapsed')}
         {metric('turns', String(a.turns), 'Turns')}
         {metric('calls', String(toolCalls), 'Calls')}
@@ -296,7 +297,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             color: statusColor(agent.status),
             text: agent.description || agent.type,
             note: agent.type,
-            figure: [x?.tokens !== undefined ? tokens(x.tokens) : '', ms !== undefined ? short(ms) : ''].filter(Boolean).join(' '),
+            figures: [x?.tokens !== undefined ? tokens(x.tokens) : '', ms !== undefined ? short(ms) : ''],
             indent: depth * 2,
           })
         }),
@@ -351,7 +352,6 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
           <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
             {b.insertions || b.deletions ? <Text dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null}
             <Text color={color}>{word}</Text>
-            {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
           </Box>
         </Box>
         <Box flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
@@ -365,6 +365,7 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             {b.conflicted ? <Text color={C.bad}>{`${b.conflicted} conflicted`}</Text> : null}
             {ci ? <Text color={ci[1]}>{ci[0]}</Text> : null}
             {action}
+            {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
           </Box>
         </Box>
         {pr && open && pr.failing.length ? (

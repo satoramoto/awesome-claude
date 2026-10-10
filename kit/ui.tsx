@@ -49,6 +49,14 @@ const ROW_PX = 8.5 / 0.45
 export const SPACE = { pair: 0.5, item: 1, group: 2, block: 0.5 } as const
 const INSET = 1
 const BODY_INDENT = 1.6
+/**
+ * The content edges: everything that isn't a band (the header totals, section bodies)
+ * starts at `left` and ends at `right`. Alignment rules, for every row:
+ * - labels, names and titles start on the left edge;
+ * - the row's last figure or action ends on the right edge (rows are space-between);
+ * - figures are right-aligned; a row's right side is one cluster, never two.
+ */
+export const EDGE = { left: BODY_INDENT, right: INSET } as const
 const LABEL = 10
 const FIG = 5
 const FIG2 = 6
@@ -203,29 +211,31 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * truncates, and its figure right-aligned at the cell's end. `note` is an
    * optional coloured figure before it (a failure count).
    */
-  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], cols = 2) => (
-    <Box key={key} flexDirection="row" flexWrap="wrap">
-      {items.map((t, i) => (
-        <Box
-          key={`${key}-${t.label}`}
-          width={`${Math.floor(100 / cols)}%`}
-          flexDirection="row"
-          alignItems="center"
-          gap={SPACE.pair}
-          paddingRight={i % cols === cols - 1 ? 0 : SPACE.group}
-        >
-          {swatch(t.color)}
-          <Box flexGrow={1} flexShrink={1}>
-            <Text dimColor wrap="truncate">
-              {t.label}
-            </Text>
+  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], cols = 2) => {
+    // Columns of equal width, filled top to bottom; the last column's figures end on the right edge.
+    const per = Math.ceil(items.length / cols)
+    const columns = Array.from({ length: cols }, (_, c) => items.slice(c * per, c * per + per))
+    return (
+      <Box key={key} flexDirection="row" gap={SPACE.group}>
+        {columns.map((col, c) => (
+          <Box key={`${key}-col-${c}`} flexGrow={1} width={0} flexDirection="column">
+            {col.map(t => (
+              <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair}>
+                {swatch(t.color)}
+                <Box flexGrow={1} flexShrink={1}>
+                  <Text dimColor wrap="truncate">
+                    {t.label}
+                  </Text>
+                </Box>
+                {t.note ? <Text color={t.noteColor}>{t.note}</Text> : null}
+                <Text>{t.figure}</Text>
+              </Box>
+            ))}
           </Box>
-          {t.note ? <Text color={t.noteColor}>{t.note}</Text> : null}
-          <Text>{t.figure}</Text>
-        </Box>
-      ))}
-    </Box>
-  )
+        ))}
+      </Box>
+    )
+  }
 
   /** A caption: dim uppercase, for a chart's or a column's heading. The only uppercase besides a state word. */
   const caption = (text: string) => <Text dimColor>{text.toUpperCase()}</Text>
@@ -358,14 +368,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  /** A property row: a dim label in the label column, a value beside it. */
-  const prop = (key: string, label: string, value: RenderElement | string, labelWidth = LABEL) => (
-    <Box key={key} flexDirection="row" gap={1}>
-      <Box width={labelWidth} flexShrink={0}>
-        <Text dimColor wrap="truncate">
-          {label}
-        </Text>
-      </Box>
+  /** A property row: the dim label on the left edge, the value right-aligned on the right edge. */
+  const prop = (key: string, label: string, value: RenderElement | string) => (
+    <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
+      <Text dimColor wrap="truncate">
+        {label}
+      </Text>
       {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
     </Box>
   )
@@ -400,7 +408,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   )
 
   /** A row with a slim coloured rail on the left: a name, a dim note, a figure on the right. */
-  const rail = (key: string, r: { color: string; text: string; note?: string; figure?: string; indent?: number }) => (
+  const rail = (key: string, r: { color: string; text: string; note?: string; figures?: string[]; indent?: number }) => (
     <Box key={key} flexDirection="row" gap={terminal ? 1 : 0.75} paddingLeft={r.indent ?? 0}>
       {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
       <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={SPACE.item}>
@@ -408,7 +416,14 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
           {r.text}
           {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
         </Text>
-        {r.figure ? <Text dimColor>{r.figure}</Text> : null}
+        {/* Figures in fixed right-aligned columns, so they line up row to row. */}
+        <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
+          {(r.figures ?? []).map((f, i) => (
+            <Box key={`f${i}`} width={FIG} flexDirection="row" justifyContent="flex-end">
+              <Text dimColor>{f}</Text>
+            </Box>
+          ))}
+        </Box>
       </Box>
     </Box>
   )
