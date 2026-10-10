@@ -35,15 +35,27 @@ const BAR = 0.45
 /** One row's height in CSS pixels on the desktop, measured: a 0.45-row bar is 8.5px tall. */
 const ROW_PX = 8.5 / 0.45
 
-/** The inspector's grid: the gutter the fold arrow sits in, and the label column. */
-const GUTTER = 2
-const LABEL = 10
-/** A band's padding (section headers, the footer), so every band has one height and feel. */
-const BAND_PAD_X = 0.8
-const BAND_PAD_Y = 0.2
-/** A section body's inset on the desktop: on the left in line with the header's fold arrow; a little less on the right. */
+/*
+ * The grid. Mods use these, never raw spacing numbers:
+ *
+ * - SPACE.pair between the two halves of a pair (glyph and figure, dot and label),
+ *   SPACE.item between items in a row, SPACE.group between groups of items;
+ *   SPACE.block between blocks inside a section body (rows in a list sit at 0).
+ * - INSET: a band's (header, footer) padding on both sides, and a body's on the right,
+ *   so header figures, body figures and the footer end on one line.
+ * - BODY_INDENT: a body's left edge, just past the header's fold arrow.
+ * - Reading columns: LABEL | gauge (grows) | FIG right-aligned | FIG2 right-aligned.
+ */
+export const SPACE = { pair: 0.5, item: 1, group: 2, block: 0.5 } as const
+const INSET = 1
 const BODY_INDENT = 1.6
-const BODY_INSET_RIGHT = 1.2
+const LABEL = 10
+const FIG = 5
+const FIG2 = 6
+/** The terminal's fold-arrow gutter. */
+const GUTTER = 2
+/** A band's height: one text row plus this above and below. */
+const BAND_PAD_Y = 0.2
 
 /**
  * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
@@ -59,15 +71,8 @@ export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
 const HEAD = '#272727'
 
 
-/** The debug footer's glyph and hue for each job the mods time. */
-const PERF_LOOK: Record<string, [string, string]> = {
-  render: ['▣', C.purple],
-  tick: ['↻', C.blue],
-  resources: ['◎', C.slate],
-  usage: ['◕', C.cyan],
-  git: ['⎇', C.orchid],
-  gh: ['⇡', C.ok],
-}
+/** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
+const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
@@ -190,78 +195,81 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     return capped(height, first, last, flat)
   }
 
-  /**
-   * A card: a rounded border (`round`, which the desktop draws with rounded
-   * corners and the terminal with ╭╮╰╯), an optional tinted fill, and padding.
-   * Borders the desktop draws: round, single, double, bold, classic; not dashed.
-   */
-  const card = (key: string, children: RenderElement | (RenderElement | null)[], opts: { color?: string; fill?: string; border?: 'round' | 'single' | 'double' | 'bold' } = {}) => (
-    <Box key={key} flexDirection="column" borderStyle={opts.border ?? 'round'} borderColor={opts.color ?? TRACK} backgroundColor={opts.fill} paddingX={1}>
-      {children}
-    </Box>
-  )
-
-  /** A rounded pill: a short colored figure, like a count or a state. */
-  const pill = (key: string, color: string, text: string) =>
-    terminal ? (
-      <Text key={key} color={color}>{`(${text})`}</Text>
-    ) : (
-      <Box key={key} borderStyle="round" borderColor={color} paddingX={0.5}>
-        <Text color={color}>{text}</Text>
-      </Box>
-    )
-
-  /** A status flag: a glyph and a figure in one colour, the size of the text around it. */
-  const flag = (key: string, color: string, glyph: string, figure: string | number) => (
-    <Text key={key} color={color}>{`${glyph} ${figure}`}</Text>
-  )
-
   /** A small round dot of colour, a legend's key. */
   const swatch = (color: string) => <Text color={color}>●</Text>
 
-  /** A chip: a swatch, a figure, a dim tag. */
-  const chip = (key: string, color: string, figure: string, tag?: string) => (
-    <Box key={key} flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5}>
-      {swatch(color)}
-      <Text>
-        {figure}
-        {tag ? <Text dimColor>{` ${tag}`}</Text> : null}
-      </Text>
+  /**
+   * A legend in columns (two by default): each cell a dot, a dim label that
+   * truncates, and its figure right-aligned at the cell's end. `note` is an
+   * optional coloured figure before it (a failure count).
+   */
+  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], cols = 2) => (
+    <Box key={key} flexDirection="row" flexWrap="wrap">
+      {items.map((t, i) => (
+        <Box
+          key={`${key}-${t.label}`}
+          width={`${Math.floor(100 / cols)}%`}
+          flexDirection="row"
+          alignItems="center"
+          gap={SPACE.pair}
+          paddingRight={i % cols === cols - 1 ? 0 : SPACE.group}
+        >
+          {swatch(t.color)}
+          <Box flexGrow={1} flexShrink={1}>
+            <Text dimColor wrap="truncate">
+              {t.label}
+            </Text>
+          </Box>
+          {t.note ? <Text color={t.noteColor}>{t.note}</Text> : null}
+          <Text>{t.figure}</Text>
+        </Box>
+      ))}
     </Box>
   )
 
-  /** Things that sit side by side and wrap. */
-  const flow = (items: RenderElement[], gap = 2) => (
-    <Box flexDirection="row" flexWrap="wrap" columnGap={gap}>
-      {items}
+  /** A caption: dim uppercase, for a chart's or a column's heading. The only uppercase besides a state word. */
+  const caption = (text: string) => <Text dimColor>{text.toUpperCase()}</Text>
+
+  /**
+   * A header's right side, one form for every section: figures, each followed by
+   * a dim lowercase unit, SPACE.group apart. A figure is coloured only when the
+   * colour is a status.
+   */
+  const summary = (items: ([string, string?, string?] | null | false)[]) => (
+    <Box flexDirection="row" gap={SPACE.group}>
+      {items.filter((x): x is [string, string?, string?] => Boolean(x)).map(([figure, unit, color]) => (
+        <Text key={`${figure}-${unit ?? ''}`}>
+          <Text color={color}>{figure}</Text>
+          {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
+        </Text>
+      ))}
     </Box>
   )
 
   /**
-   * A bar with parts and a legend under it: a chip per part, its figure from
-   * `format`, its label as the tag. The context window is one. The legend sits
-   * in cells of one width, so it reads as columns rather than a ragged wrap.
+   * Labels under a chart, each centred under its place: `at` from 0 to 1 across
+   * the chart's width (the first and last flush with its ends).
    */
-  const legendBar = (parts: Part[], max: number, format: (n: number) => string = String, opts: { height?: number; cell?: number } = {}) => (
-    <Box flexDirection="column">
-      <Box flexDirection="row" marginTop={terminal ? 0 : 0.3}>
-        {bar(parts, max, { height: opts.height ?? 0.6 })}
+  const axis = (key: string, labels: { at: number; text: string }[]) => {
+    const row: RenderElement[] = []
+    const sorted = [...labels].sort((a, b) => a.at - b.at)
+    sorted.forEach((l, i) => {
+      // Each label owns the span halfway to its neighbours; the ends own up to the edge.
+      const from = i === 0 ? 0 : (sorted[i - 1]!.at + l.at) / 2
+      const to = i === sorted.length - 1 ? 1 : (l.at + sorted[i + 1]!.at) / 2
+      const align = i === 0 && l.at === 0 ? 'flex-start' : i === sorted.length - 1 && l.at === 1 ? 'flex-end' : 'center'
+      row.push(
+        <Box key={`${key}-${i}`} flexGrow={Math.max(1, Math.round((to - from) * 1000))} width={0} flexDirection="row" justifyContent={align}>
+          <Text dimColor>{l.text}</Text>
+        </Box>,
+      )
+    })
+    return (
+      <Box key={key} flexDirection="row">
+        {row}
       </Box>
-      <Box flexDirection="row" flexWrap="wrap" marginTop={terminal ? 0 : 0.3}>
-        {parts
-          .filter(p => p.value > 0)
-          .map((p, i) => (
-            <Box key={`legend-${i}`} width={opts.cell ?? 15} flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5}>
-              {swatch(p.color)}
-              <Text dimColor wrap="truncate">
-                {p.label ?? ''}
-              </Text>
-              <Text>{format(p.value)}</Text>
-            </Box>
-          ))}
-      </Box>
-    </Box>
-  )
+    )
+  }
 
   /**
    * An instrument's scale under a bar: ticks at 0, 25, 50, 75 and 100%, and a
@@ -286,51 +294,6 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   }
 
   /**
-   * A labelled bar on one line: a fixed-width label, the bar, a figure on the
-   * right. Limits, tools, anything that is one value against a max.
-   */
-  const labelBar = (key: string, label: string, parts: Part[], max: number, figure: RenderElement, labelWidth = 10) => (
-    <Box key={key} flexDirection="row" alignItems="center" gap={1}>
-      <Box width={labelWidth} flexShrink={0}>
-        <Text wrap="truncate">{label}</Text>
-      </Box>
-      {bar(parts, max, { width: Math.max(4, columns - labelWidth - 10) })}
-      <Box minWidth={7} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        {figure}
-      </Box>
-    </Box>
-  )
-
-  /** A stat: a colored glyph, a bold figure, an optional dim suffix. */
-  const stat = (glyph: string, color: string, value: string, suffix?: string) => (
-    <Text>
-      <Text color={color}>{`${glyph} `}</Text>
-      <Text bold>{value}</Text>
-      {suffix ? <Text dimColor>{suffix}</Text> : null}
-    </Text>
-  )
-
-  /** A list line: something on the left that truncates, something on the right that doesn't, an optional indent. */
-  const line = (key: string, left: RenderElement, right?: RenderElement | null, indent = 0) => (
-    <Box key={key} flexDirection="row" justifyContent="space-between" gap={1} paddingLeft={indent}>
-      {left}
-      {right ?? null}
-    </Box>
-  )
-
-  /** A status line: a colored glyph, text that truncates, a dim figure on the right. */
-  const item = (key: string, glyph: string, color: string, text: string, figure?: string, indent = 0) =>
-    line(
-      key,
-      <Text wrap="truncate">
-        <Text color={color}>{`${glyph} `}</Text>
-        {text}
-      </Text>,
-      figure ? <Text dimColor>{figure}</Text> : null,
-      indent,
-    )
-
-  /**
    * A section as a properties inspector draws one (Premiere's Effect Controls):
    * a collapsible header row (▾ title, figures on the right) and its properties
    * indented under the arrow. No panel, outline or tint: rows and indentation do
@@ -340,9 +303,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const section = (s: {
     id: string
     title: string
-    /** A glyph before the title, in `color`. */
+    /** An icon before the title (a GLYPH, drawn as the kit's SVG icon), always muted. */
     icon?: string
-    color?: string
     right?: RenderElement | null
     collapsed?: boolean
     onToggle?: () => void
@@ -365,18 +327,18 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             flexDirection: 'row',
             justifyContent: 'space-between',
             alignItems: 'center',
-            gap: 1,
-            paddingRight: terminal ? 0 : BAND_PAD_X,
+            gap: SPACE.item,
+            paddingX: terminal ? 0 : INSET,
             paddingY: terminal ? 0 : BAND_PAD_Y,
           },
           [
             <Box key="title" flexDirection="row" alignItems="center" flexShrink={1}>
-              <Box width={GUTTER} flexShrink={0}>
+              <Box width={terminal ? GUTTER : 1.6} flexShrink={0}>
                 {toggle}
               </Box>
               {s.icon ? (
                 <Box width={2} flexShrink={0} flexDirection="row" alignItems="center">
-                  {icon(s.icon, s.color ?? MUTED)}
+                  {icon(s.icon, MUTED)}
                 </Box>
               ) : null}
               <Text wrap="truncate" bold>
@@ -388,7 +350,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         )}
         {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : BODY_INSET_RIGHT} marginTop={terminal ? 0 : 1} marginBottom={terminal ? 0 : 1} rowGap={terminal ? 0 : 0.12}>
+          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : INSET} marginTop={terminal ? 0 : 1} marginBottom={terminal ? 0 : 1}>
             {s.children}
           </Box>
         )}
@@ -409,40 +371,27 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   )
 
   /**
-   * Sections side by side when there is room: each at least `minWidth` cells,
-   * growing to share the row; one column when the pane is narrower than two.
-   */
-  const grid = (items: RenderElement[], minWidth = 34) => (
-    <Box flexDirection="row" flexWrap="wrap" columnGap={terminal ? 2 : 1} rowGap={terminal ? 0 : 0.6} marginTop={terminal ? 1 : 0.6}>
-      {items.map((it, i) => (
-        <Box key={`cell-${i}`} flexGrow={1} width={0} minWidth={minWidth} flexDirection="column">
-          {it}
-        </Box>
-      ))}
-    </Box>
-  )
-
-  /**
    * A thin rounded gauge, `value` of `max`: a one-part bar.
    */
   const gauge = (value: number, max: number, color: string) => (terminal ? bar([{ value, color }], max) : bar([{ value, color }], max, { height: 0.3 }))
 
   /**
-   * A reading, as an instrument shows one: a label, a thin gauge, a bold value
-   * and a dim unit or note, in fixed columns so readings line up.
+   * A reading, as an instrument shows one: a dim label, a thin gauge, the value
+   * and a dim unit or note, in fixed columns (LABEL | gauge | FIG | FIG2), both
+   * figures right-aligned so the last ends on the inset like the header's.
    */
   const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
-    <Box key={key} flexDirection="row" alignItems="center" gap={1}>
+    <Box key={key} flexDirection="row" alignItems="center" gap={SPACE.item}>
       <Box width={r.labelWidth ?? LABEL} flexShrink={0}>
         <Text dimColor wrap="truncate">
           {r.label}
         </Text>
       </Box>
       {gauge(r.value, r.max, r.color)}
-      <Box width={5} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        <Text bold>{r.figure}</Text>
+      <Box width={FIG} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+        <Text>{r.figure}</Text>
       </Box>
-      <Box width={6} flexShrink={0}>
+      <Box width={FIG2} flexShrink={0} flexDirection="row" justifyContent="flex-end">
         <Text color={r.unitColor} dimColor={!r.unitColor}>
           {r.unit ?? ''}
         </Text>
@@ -452,9 +401,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /** A row with a slim coloured rail on the left: a name, a dim note, a figure on the right. */
   const rail = (key: string, r: { color: string; text: string; note?: string; figure?: string; indent?: number }) => (
-    <Box key={key} flexDirection="row" gap={1} paddingLeft={r.indent ?? 0}>
+    <Box key={key} flexDirection="row" gap={terminal ? 1 : 0.75} paddingLeft={r.indent ?? 0}>
       {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
-      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
+      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={SPACE.item}>
         <Text wrap="truncate">
           {r.text}
           {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
@@ -478,23 +427,28 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         </Text>
       )
     }
+    // Columns fill from the left, so column i is centred at (i + 0.5) / slots: where `axis` puts its label.
     const slots = Math.max(items.length, opts.slots ?? 0)
     return (
-      <Box flexDirection="row" height={opts.height ?? 2.5} alignItems="flex-end" marginTop={0.3}>
-        {Array.from({ length: slots - items.length }, () => (
-          <Box flexGrow={1} width={0} />
-        ))}
-        {items.map(s => (
-          <Box flexGrow={1} width={0} height={pct(total(s), max)} flexDirection="row" justifyContent="center">
-            <Box width="70%" height="100%" flexDirection="column">
-              {s
-                .filter(p => p.value > 0)
-                .map(p => (
-                  <Box height={pct(p.value, total(s))} backgroundColor={p.color} />
-                ))}
+      <Box flexDirection="column">
+        <Box flexDirection="row" height={opts.height ?? 2.5} alignItems="flex-end">
+          {items.map(s => (
+            <Box flexGrow={1} width={0} height={pct(total(s), max)} flexDirection="row" justifyContent="center">
+              <Box width="70%" height="100%" flexDirection="column">
+                {s
+                  .filter(p => p.value > 0)
+                  .map(p => (
+                    <Box height={pct(p.value, total(s))} backgroundColor={p.color} />
+                  ))}
+              </Box>
             </Box>
-          </Box>
-        ))}
+          ))}
+          {Array.from({ length: slots - items.length }, () => (
+            <Box flexGrow={1} width={0} />
+          ))}
+        </Box>
+        {/* A baseline the columns stand on. */}
+        <Box height={0.06} backgroundColor={TRACK} />
       </Box>
     )
   }
@@ -509,50 +463,37 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const rows = snap.rows.slice(0, opts.max ?? 6)
     const tone = (r: PerfRow) =>
       r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
-    // One glyph and hue per job, so a row reads at a glance; a slow job turns amber or red.
-    const look = (name: string): [string, string] => PERF_LOOK[name] ?? ['•', C.slate]
+    // Muted glyphs; only a slow job's figure takes colour (amber, red).
     const items = [
-      <Text key="perf-since">
-        <Text color={C.slate}>⏱</Text>
-        {` ${short(snap.sinceMs)}`}
-      </Text>,
-      ...rows.map(r => {
-        const [glyph, hue] = look(r.name)
-        const color = tone(r)
-        return (
-          <Text key={`perf-${r.name}`}>
-            <Text color={color ?? hue}>{glyph}</Text>
-            <Text color={color} bold={!!color}>{r.avgMs > 0 ? ` ${ms(r.avgMs)}` : ''}</Text>
-            <Text dimColor>{` ${r.perMin}/m`}</Text>
-          </Text>
-        )
-      }),
+      share('perf-since', '⏱', short(snap.sinceMs), ''),
+      ...rows.map(r => share(`perf-${r.name}`, PERF_GLYPH[r.name] ?? '•', r.avgMs > 0 ? ms(r.avgMs) : `${r.perMin}/m`, '', tone(r))),
     ]
-    const line = (key: string, row: RenderElement[]) => (
-      <Box key={key} flexDirection="row" flexWrap="wrap" columnGap={terminal ? 2 : 1.5}>
-        {row}
-      </Box>
-    )
-    // With a lead, one row only: the lead and the uptime, no wrap; what doesn't fit is cut.
-    if (opts.lead?.length) {
-      const row = [...opts.lead, share('perf-since', '⏱', C.slate, short(snap.sinceMs), '')]
-      if (terminal) return <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">{row}</Box>
-      return rounded(HEAD, { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: 1, paddingX: BAND_PAD_X, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: 0.6, overflow: 'hidden' }, row)
-    }
-    if (terminal) return <Box marginTop={1}>{line('jobs', items)}</Box>
-    return rounded(HEAD, { flexDirection: 'column', paddingX: BAND_PAD_X, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: 0.6 }, line('jobs', items))
+    const band = (row: RenderElement[]) =>
+      terminal ? (
+        <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">
+          {row}
+        </Box>
+      ) : (
+        rounded(
+          HEAD,
+          { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
+          row,
+        )
+      )
+    // One row: the lead (when given) and the uptime, or the jobs; what doesn't fit is cut.
+    return band(opts.lead?.length ? [...opts.lead, items[0]!] : items)
   }
 
   /**
-   * One resource reading for a footer: a coloured glyph, our figure in bold, and
-   * the whole it's a share of, dim. `hot` tints our figure (amber, red) when it's a lot.
+   * One reading for a footer: a muted glyph, our figure, and the whole it's a
+   * share of, dim. `hot` tints our figure (amber, red) when it's a lot.
    */
-  const share = (key: string, glyph: string, color: string, ours: string, whole: string, hot?: string) => (
+  const share = (key: string, glyph: string, ours: string, whole: string, hot?: string) => (
     // The glyph in its own box: the desktop drops a space at the start of a Text.
-    <Box key={key} flexDirection="row" gap={0.4} flexShrink={1}>
-      <Text color={color}>{glyph}</Text>
+    <Box key={key} flexDirection="row" gap={SPACE.pair} flexShrink={1}>
+      <Text color={MUTED}>{glyph}</Text>
       <Text wrap="truncate">
-        <Text bold color={hot}>{ours}</Text>
+        <Text color={hot}>{ours}</Text>
         {whole ? <Text dimColor>{`/${whole}`}</Text> : null}
       </Text>
     </Box>
@@ -573,7 +514,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { icon, pinned, share, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { icon, pinned, share, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, section, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

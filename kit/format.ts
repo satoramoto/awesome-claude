@@ -28,7 +28,7 @@ export const short = (ms: number): string => {
 /** US dollars: $1.50, $123. */
 /** Bytes, short: 812, 41K, 3.2M, 16G. */
 export const bytes = (n: number): string => {
-  const units = ['', 'K', 'M', 'G', 'T']
+  const units = ['', 'k', 'M', 'G', 'T']
   let i = 0
   while (n >= 1024 && i < units.length - 1) {
     n /= 1024
