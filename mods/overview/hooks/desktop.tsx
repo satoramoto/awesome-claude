@@ -377,10 +377,6 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
         </Box>
         {checks}
       </Box>
-    ) : b.exists ? (
-      <Box key="create" flexDirection="row">
-        {d.creating === b.branch ? <Text dimColor>creating PR…</Text> : <Button label="Create PR" onPress={() => d.createPr(b.branch)} />}
-      </Box>
     ) : null
     const failing = pr && open && pr.failing.length ? (
       <Text key="failing" color={C.bad} wrap="truncate">
@@ -396,7 +392,7 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
         <Box flexDirection="row" gap={1} alignItems="center">
           {b.insertions ? <Text color={C.ok}>{`+${b.insertions}`}</Text> : null}
           {b.deletions ? <Text color={C.bad}>{`−${b.deletions}`}</Text> : null}
-          {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="✕" onPress={() => d.hideBranch(b.branch)} /> : null}
+          {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
         </Box>
       ),
       ...fold(id),
