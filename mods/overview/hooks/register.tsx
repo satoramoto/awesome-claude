@@ -990,6 +990,11 @@ export const register: Register = on => {
         branches: await read($, branches),
         creating: await read($, creating),
         hideBranch: (branch: string) => void hideBranch($, branch).catch(() => undefined),
+        // Merge, like Create PR: the session does it, and reports back.
+        mergePr: (pr: GitPr) =>
+          void $.prompt
+            .submit({ text: `Merge PR #${pr.number} (${pr.url}) once its checks pass: turn on auto-merge, or merge it now if it's already green.`, asUser: true })
+            .catch(() => $.ui.toast('Merge: could not send the request to the session')),
         createPr: (branch: string) => void createPr($, branch).catch(() => undefined),
         toggle: (id: string) =>
           void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),

@@ -54,6 +54,8 @@ export type DesktopData = {
   hideBranch: (branch: string) => void
   /** Create PR on a branch without one. */
   createPr: (branch: string) => void
+  /** Merge on an open PR. */
+  mergePr: (pr: GitPr) => void
   /** What the mod cost, for the debug footer. */
   perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
@@ -370,6 +372,7 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             <Text key={`s-${glyph}`} color={c}>{`${glyph}${n}`}</Text>
           ))}
           {pr ? checks : null}
+          {pr && open && !pr.isDraft && Button ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} /> : null}
           {creatable && Button ? (
             d.creating === b.branch ? (
               <Text dimColor>creating PR…</Text>
