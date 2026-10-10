@@ -58,8 +58,20 @@ const SLEEK = {
 
 const Hair = () => <Box height={0.06} backgroundColor={SLEEK.hair} marginY={0.35} />
 
-/** A thin gauge: `value` of `max`. */
-const Thin = (p: { value: number; max: number; color: string }) => <Gauge value={p.value} max={p.max} color={p.color} track={SLEEK.track} height={0.22} />
+/**
+ * A thin rounded gauge: `value` of `max`. The track and the fill are each a box
+ * with a `round` border in its own colour, which the desktop draws with rounded
+ * corners, so a thin one comes out pill-shaped.
+ */
+const Thin = (p: { value: number; max: number; color: string }) => {
+  const f = Math.max(0, Math.min(1, p.value / Math.max(p.max, 1))) * 1000
+  return (
+    <Box flexDirection="row" flexGrow={1} height={0.12} borderStyle="round" borderColor={SLEEK.track} backgroundColor={SLEEK.track} overflow="hidden">
+      {f > 0 ? <Box flexGrow={f} width={0} borderStyle="round" borderColor={p.color} backgroundColor={p.color} /> : null}
+      {f < 1000 ? <Box flexGrow={1000 - f} width={0} /> : null}
+    </Box>
+  )
+}
 
 /** LABEL ─── gauge ─── figure, on one line. */
 const Meter = (p: { label: string; value: number; max: number; color: string; figure: string; sub?: string }) => (
@@ -160,6 +172,106 @@ export const Sleek: StoryObj = {
       ctx,
     )
   },
+}
+
+// ---- Instrument: Sleek without the game ----------------------------------------------
+// Real names for things, no frame and no hairlines (space separates sections),
+// colour only where it means something: the gauges and the agents' status rails.
+
+const Gap = () => <Box height={0.6} />
+
+/** A section's name: dim, plain, with a figure on the right. */
+const Label = (p: { label: string; right?: string; rightColor?: string }) => (
+  <Box flexDirection="row" justifyContent="space-between">
+    <Text dimColor>{p.label}</Text>
+    {p.right ? (
+      <Text color={p.rightColor} dimColor={!p.rightColor}>
+        {p.right}
+      </Text>
+    ) : null}
+  </Box>
+)
+
+/** Name ─── thin gauge ─── figure. */
+const Reading = (p: { label: string; value: number; max: number; color: string; figure: string; note?: string }) => (
+  <Box flexDirection="row" alignItems="center" gap={1} marginTop={0.15}>
+    <Box width={8} flexShrink={0}>
+      <Text>{p.label}</Text>
+    </Box>
+    <Thin value={p.value} max={p.max} color={p.color} />
+    <Box width={4} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+      <Text bold>{p.figure}</Text>
+    </Box>
+    <Box width={5} flexShrink={0}>
+      <Text dimColor>{p.note ?? ''}</Text>
+    </Box>
+  </Box>
+)
+
+export const Instrument: StoryObj = {
+  render: (_, ctx) => {
+    const extra = s.agentExtra as Record<string, { tokens?: number; durationMs?: number; startedAt?: number }>
+    const tools = Object.entries(s.activity.tools).sort((a, b) => b[1].n - a[1].n).slice(0, 4)
+    const max = Math.max(...tools.map(([, t]) => t.n))
+    const reset = (r?: string) => (r ? fxReset(r) : undefined)
+    const running = s.agents.filter(a => a.status === 'running').length
+    return show(
+      <Box flexDirection="column">
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text>
+            <Text bold>{money(s.activity.cost)}</Text>
+            <Text dimColor>{`  ·  ${elapsed}  ·  ${s.activity.turns} turns`}</Text>
+          </Text>
+          <Text dimColor>{`${s.activity.files.length} files`}</Text>
+        </Box>
+        <Gap />
+        <Reading label="Context" value={s.snapshot.percent} max={100} color={s.snapshot.percent >= 80 ? SLEEK.bad : SLEEK.hp} figure={`${s.snapshot.percent}%`} note={tokens(s.snapshot.total)} />
+        <Reading label="5-hour" value={fiveHour.percent} max={100} color={SLEEK.mp} figure={`${fiveHour.percent}%`} note={reset(fiveHour.resetsAt)} />
+        <Reading label="Weekly" value={weekly.percent} max={100} color={weekly.percent > 75 ? SLEEK.warn : SLEEK.violet} figure={`${weekly.percent}%`} note={reset(weekly.resetsAt)} />
+        <Gap />
+        <Label label="Agents" right={running ? `${running} running` : undefined} rightColor={running ? SLEEK.warn : undefined} />
+        {s.agents.map(a => {
+          const x = extra[a.id]
+          const color = a.status === 'running' ? SLEEK.warn : a.status === 'completed' ? SLEEK.hp : a.status === 'failed' ? SLEEK.bad : SLEEK.track
+          const time = x?.durationMs ? short(x.durationMs) : x?.startedAt ? short(Date.now() - x.startedAt) : ''
+          const figure = [x?.tokens !== undefined ? tokens(x.tokens) : '', time].filter(Boolean).join(' · ')
+          return <Railed color={color} name={a.description} type={a.type} figure={figure} indent={a.parentId ? 2 : 0} />
+        })}
+        <Gap />
+        <Label label="Tools" right={`${toolCalls} calls`} />
+        {tools.map(([name, t]) => (
+          <Box flexDirection="row" alignItems="center" gap={1} marginTop={0.15}>
+            <Box width={8} flexShrink={0}>
+              <Text wrap="truncate">{name.split('__').pop() ?? name}</Text>
+            </Box>
+            <Thin value={t.n} max={max} color={SLEEK.mp} />
+            <Box width={4} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+              <Text bold>{String(t.n)}</Text>
+            </Box>
+            <Box width={5} flexShrink={0}>
+              {t.err ? <Text color={SLEEK.bad}>{`${t.err}✕`}</Text> : <Text> </Text>}
+            </Box>
+          </Box>
+        ))}
+        <Gap />
+        <Box flexDirection="row" justifyContent="space-between">
+          <Text dimColor>{s.git.branch}</Text>
+          <Text>
+            <Text color={SLEEK.hp}>{`+${s.git.insertions}`}</Text>
+            <Text color={SLEEK.bad}>{` −${s.git.deletions}`}</Text>
+            <Text dimColor>{`  ${s.gh.prs.length} PRs`}</Text>
+          </Text>
+        </Box>
+      </Box>,
+      ctx,
+    )
+  },
+}
+
+/** "2h18m", from a reset time. */
+const fxReset = (iso: string) => {
+  const m = Math.max(0, Math.ceil((Date.parse(iso) - Date.now()) / 60_000))
+  return m >= 1_440 ? `${Math.floor(m / 1_440)}d${Math.floor((m % 1_440) / 60)}h` : m >= 60 ? `${Math.floor(m / 60)}h${String(m % 60).padStart(2, '0')}` : `${m}m`
 }
 
 // ---- 1. Pokémon party -------------------------------------------------------------
