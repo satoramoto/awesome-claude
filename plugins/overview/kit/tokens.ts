@@ -1,7 +1,15 @@
 /**
- * The instrument's colours: calibrated, not neon, readable on a light page, a dark
- * page and a terminal. Status is green, amber, red; activity is cobalt; quiet
- * structure is slate. Colour always means something.
+ * The instrument's colours. Each hue means one thing, everywhere:
+ *
+ * - grey (MUTED): labels, icons, git marks, ordinary values
+ * - slate (INK): "how much" — bars and gauges that only measure
+ * - blue: live or in progress — running, pending, the activity series
+ * - amber: getting close to a limit — 75% and up, the compaction mark
+ * - red: failed, conflicted, 90% and up
+ * - green: finished well — checks passed, an agent done
+ * - purple: merged
+ *
+ * Cyan and orchid aren't statuses: they only tint parts within one chart.
  */
 export const C = {
   ok: '#5bc08a',
@@ -10,25 +18,29 @@ export const C = {
   blue: '#6c8ef5',
   purple: '#9d85e8',
   cyan: '#4fb3c8',
-  orange: '#e3a33b',
-  teal: '#4fb3c8',
   slate: '#8c9bb5',
   orchid: '#c58ad6',
 } as const
 
-/** Categorical hues, in order: one family of cool tones; the last in a set takes amber when it is the one to watch. */
-export const PALETTE = [C.slate, C.blue, C.cyan, C.purple, C.orchid, C.warn, C.ok, C.bad] as const
+/** Quantity ink: what a bar or gauge is drawn in when it only says how much. */
+export const INK = C.slate
+
+/** Shades within one chart: parts of one thing, told apart without new meanings. */
+export const RAMP = {
+  blue: ['#6c8ef5', '#4c68c9', '#a9bbf9', '#38509e'],
+  slate: ['#8c9bb5', '#6f7c93', '#a7b2c6', '#5b667a'],
+} as const
 
 /** A bar's empty part and other quiet fills: a grey that reads on light and dark. */
 export const TRACK = 'rgba(128,128,128,0.18)'
 
-/** Text and marks that should recede. */
+/** Text, icons and marks that should recede. */
 export const MUTED = '#8e8e93'
 
-/** Green under 75%, amber from 75%, red from 90%. */
-export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : C.ok)
+/** Slate under 75%, amber from 75%, red from 90%: colour only once it matters. */
+export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : INK)
 
-/** One glyph per idea, shared so mods read alike. */
+/** One glyph per idea, shared so mods read alike (the SVG icons are keyed by these). */
 export const GLYPH = {
   context: '◕',
   cost: '$',
