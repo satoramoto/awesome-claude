@@ -73,7 +73,7 @@ describe('pane', () => {
     // Boxes and text, crisp at any width; SVG only for the fixed-size bar ends.
     const svgs = await ui.findAll({ type: 'Svg' })
     expect(svgs.length).toBeGreaterThan(0)
-    expect(svgs.every(s => (s.props as { alt?: string }).alt === 'bar end')).toBe(true)
+    expect(svgs.every(s => (s.props as { alt?: string }).alt === 'rounded end')).toBe(true)
 
     // Folding a section leaves its heading and hides the rest; unfolding brings it back.
     await ui.press({ key: 'toggle-context' })

@@ -14,7 +14,9 @@ export const where = (ctx: StoryContext) => ({
 /** The kit for the toolbar's surface and width. */
 export const kitFor = (ctx: StoryContext) => {
   const { surface, columns } = where(ctx)
-  return kit({ Box: 'Box' as any, Text: 'Text' as any, Button: 'Button' as any }, surface, columns)
+  // The app surfaces draw Svg (rounded ends); the terminal doesn't.
+  const Svg = surface === 'terminal' ? undefined : ('Svg' as any)
+  return kit({ Box: 'Box' as any, Text: 'Text' as any, Button: 'Button' as any, Svg }, surface, columns)
 }
 
 /** A render tree as DOM, for the toolbar's surface. Buttons redraw the story. */
