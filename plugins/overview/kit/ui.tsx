@@ -78,6 +78,9 @@ export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
  */
 const HEAD = '#272727'
 
+/** A tile's fill: between the pane and a header band. Solid, for the same reason as HEAD. */
+const TILE = '#222222'
+
 
 /** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
 const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
@@ -160,6 +163,19 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       <Box {...props} backgroundColor={color} borderStyle="round" borderColor={color}>
         {children}
       </Box>
+    )
+
+  /**
+   * A tile: one item of a list that has several lines (a branch and its PR), in its
+   * own rounded fill a step lighter than the pane, so items read as units.
+   */
+  const tile = (key: string, children: (RenderElement | null)[]) =>
+    terminal ? (
+      <Box key={key} flexDirection="column" marginTop={1}>
+        {children}
+      </Box>
+    ) : (
+      rounded(TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: 0.3, width: '100%' }, children)
     )
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
@@ -533,7 +549,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { icon, pinned, share, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, section, columns: columnsChart, perf: perfFooter }
+  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, section, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

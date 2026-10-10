@@ -327,16 +327,10 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
 }
 
 /**
- * Workspaces: the branches the session started, as the desktop app tracks them.
- * Each entry is two lines. First: the branch, its lines changed (dim) and its
- * state word, the only colour. Second, dim: its PR (linked) or where it lives,
- * one CI word, and one action.
+ * Workspaces: the branches the session started, as the desktop app tracks them,
+ * each in its own tile: the PR's state as an icon and a word, the PR's title on a
+ * line of its own, then its number, where it lives, changes, CI and the actions.
  */
-/** Workspace entries' right-hand columns: changes or CI, state or action, hide. */
-const WS_A = 10
-const WS_B = 9
-const WS_C = 4
-
 const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
   const { Box, Text, Link, Button } = els
   const entries = d.branches.map((b, i) => {
@@ -365,49 +359,42 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             : open && !pr.isDraft
               ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} />
               : null
-    // Every entry is the same small table: a left column that truncates, then three
-    // fixed right-aligned columns, so all entries line up:
-    //   branch               +412 −96   OPEN   hide
-    //   #9 title…           1 failing  Merge
-    const cell = (key: string, width: number, child: RenderElement | null) => (
-      <Box key={key} width={width} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        {child}
-      </Box>
-    )
-    const left = (child: RenderElement | RenderElement[]) => (
-      <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" gap={SPACE.pair}>
-        {child}
-      </Box>
-    )
-    const line = (key: string, l: RenderElement | RenderElement[], a: RenderElement | null, b2: RenderElement | null, c: RenderElement | null) => (
-      <Box key={key} flexDirection="row" gap={SPACE.item}>
-        {left(l)}
-        {cell('a', WS_A, a)}
-        {cell('b', WS_B, b2)}
-        {cell('c', WS_C, c)}
+    // A tile per branch, three lines:
+    //   [pr icon] branch                    OPEN
+    //   A neater inspector, the PR's title, the full width
+    //   #9  awesome-claude      +412 −96  1 failing  Merge  hide
+    const iconKey = !pr ? GLYPH.branch : pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open'
+    const where = b.worktree ? `${b.place} (worktree)` : b.place
+    const row = (key: string, l: RenderElement | (RenderElement | null)[], r: (RenderElement | null)[]) => (
+      <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item} width="100%">
+        <Box flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={1} minWidth={0} overflow="hidden">
+          {l}
+        </Box>
+        <Box flexDirection="row" alignItems="center" gap={SPACE.item} flexShrink={0}>
+          {r}
+        </Box>
       </Box>
     )
     return (
-      <Box key={`branch-${b.branch}`} flexDirection="column" marginTop={i === 0 ? 0 : SPACE.block}>
-        {line(
-          'l1',
-          <Text wrap="truncate">{b.branch}</Text>,
-          b.insertions || b.deletions ? <Text dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
-          <Text color={color}>{word}</Text>,
-          Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null,
-        )}
-        {line(
-          'l2',
-          [
-            ...(pr ? [<Link key="n" href={pr.url} label={`#${pr.number}`} />] : []),
-            <Text key="t" dimColor wrap="truncate">
-              {pr ? pr.title : b.worktree ? `${b.place} (worktree)` : b.place}
-            </Text>,
-          ],
-          ci ? <Text color={ci[1]}>{ci[0]}</Text> : null,
-          action,
-          null,
-        )}
+      <Box key={`branch-${b.branch}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
+        {k.tile(`tile-${b.branch}`, [
+          row('l1', [k.icon(iconKey, color), <Text key="b" wrap="truncate">{b.branch}</Text>], [<Text key="w" color={color}>{word}</Text>]),
+          pr ? (
+            <Text key="title" wrap="truncate">
+              {pr.title}
+            </Text>
+          ) : null,
+          row(
+            'l3',
+            [pr ? <Link key="n" href={pr.url} label={`#${pr.number}`} /> : null, <Text key="p" dimColor wrap="truncate">{where}</Text>],
+            [
+              b.insertions || b.deletions ? <Text key="d" dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
+              ci ? <Text key="ci" color={ci[1]}>{ci[0]}</Text> : null,
+              action,
+              Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null,
+            ],
+          ),
+        ])}
       </Box>
     )
   })
