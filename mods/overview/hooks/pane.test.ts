@@ -61,23 +61,24 @@ describe('pane', () => {
     const ui = await mount($, 'desktop')
     expect(await ui.find({ type: 'Text', text: /^\$1\.50/ })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '9%' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /skl/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: 'Compacts at' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '167k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '14k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Skills' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'at 167k' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '42%' })).toBeDefined()
-    // Plain words, no game vocabulary.
+    // Plain words, no game vocabulary, no middle-dot strings.
     expect(await ui.find({ type: 'Text', text: /\b(HP|MP|LV|party)\b/i })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: / · / })).toBeUndefined()
     // Boxes and text only: crisp at any width.
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
 
     // Folding a section leaves its heading and hides the rest; unfolding brings it back.
     await ui.press({ key: 'toggle-context' })
-    expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeUndefined()
     expect(await ui.find({ type: 'Text', text: 'Context' })).toBeDefined()
     await ui.press({ key: 'toggle-context' })
-    expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Messages' })).toBeDefined()
     await ui.unmount()
   })
 })

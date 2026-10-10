@@ -28,6 +28,10 @@ export type Part = { value: number; color: string; label?: string }
 
 const BAR = 0.45
 
+/** The inspector's grid: the gutter the fold arrow sits in, and the label column. */
+const GUTTER = 2
+const LABEL = 10
+
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button } = els
@@ -109,16 +113,51 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * A bar with parts and a legend under it: a chip per part, its figure from
-   * `format`, its label as the tag. The context window is one.
+   * `format`, its label as the tag. The context window is one. The legend sits
+   * in cells of one width, so it reads as columns rather than a ragged wrap.
    */
-  const legendBar = (parts: Part[], max: number, format: (n: number) => string = String, opts: { height?: number } = {}) => (
+  const legendBar = (parts: Part[], max: number, format: (n: number) => string = String, opts: { height?: number; cell?: number } = {}) => (
     <Box flexDirection="column">
       <Box flexDirection="row" marginTop={terminal ? 0 : 0.3}>
         {bar(parts, max, { height: opts.height ?? 0.6 })}
       </Box>
-      {flow(parts.filter(p => p.value > 0).map((p, i) => chip(`legend-${i}-${p.label ?? ''}`, p.color, format(p.value), p.label)))}
+      <Box flexDirection="row" flexWrap="wrap" marginTop={terminal ? 0 : 0.3}>
+        {parts
+          .filter(p => p.value > 0)
+          .map((p, i) => (
+            <Box key={`legend-${i}`} width={opts.cell ?? 15} flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5}>
+              {swatch(p.color)}
+              <Text dimColor wrap="truncate">
+                {p.label ?? ''}
+              </Text>
+              <Text>{format(p.value)}</Text>
+            </Box>
+          ))}
+      </Box>
     </Box>
   )
+
+  /**
+   * An instrument's scale under a bar: ticks at 0, 25, 50, 75 and 100%, and a
+   * marker where `mark` falls (a fraction of the scale), in `markColor`.
+   */
+  const scale = (mark?: number, markColor: string = C.warn) => {
+    if (terminal) return null
+    // Every tick at its place on the scale, the marker among them, gaps between sized by flex-grow.
+    const marks: Array<{ at: number; color: string; height: number }> = [0, 0.25, 0.5, 0.75, 1].map(at => ({ at, color: TRACK, height: 0.3 }))
+    if (mark !== undefined) marks.push({ at: Math.max(0, Math.min(1, mark)), color: markColor, height: 0.45 })
+    marks.sort((a, b) => a.at - b.at)
+    const row: RenderElement[] = []
+    marks.forEach((m, i) => {
+      if (i > 0) row.push(<Box key={`g${i}`} flexGrow={Math.max(0, (m.at - marks[i - 1]!.at) * 1000)} width={0} />)
+      row.push(<Box key={`m${i}`} width={0.12} height={m.height} backgroundColor={m.color} flexShrink={0} />)
+    })
+    return (
+      <Box flexDirection="row" alignItems="flex-start" height={0.45}>
+        {row}
+      </Box>
+    )
+  }
 
   /**
    * A labelled bar on one line: a fixed-width label, the bar, a figure on the
@@ -190,20 +229,27 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       ) : (
         <Text dimColor>{arrow}</Text>
       )
+    // The arrow and the icon each take a fixed column, so every title starts at the same x.
     return (
-      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.5}>
+      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.9}>
         <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-          <Box flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5} flexShrink={1}>
-            {toggle}
+          <Box flexDirection="row" alignItems="center" flexShrink={1}>
+            <Box width={GUTTER} flexShrink={0}>
+              {toggle}
+            </Box>
+            {s.icon ? (
+              <Box width={2} flexShrink={0}>
+                <Text color={s.color}>{s.icon}</Text>
+              </Box>
+            ) : null}
             <Text wrap="truncate" bold>
-              {s.icon ? <Text color={s.color}>{`${s.icon} `}</Text> : null}
               {s.title}
             </Text>
           </Box>
           {s.right ?? null}
         </Box>
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={2}>
+          <Box flexDirection="column" paddingLeft={GUTTER} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
             {s.children}
           </Box>
         )}
@@ -211,8 +257,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  /** A property row: a dim label on the left, a value on the right. */
-  const prop = (key: string, label: string, value: RenderElement | string, labelWidth = 10) => (
+  /** A property row: a dim label in the label column, a value beside it. */
+  const prop = (key: string, label: string, value: RenderElement | string, labelWidth = LABEL) => (
     <Box key={key} flexDirection="row" gap={1}>
       <Box width={labelWidth} flexShrink={0}>
         <Text dimColor wrap="truncate">
@@ -249,14 +295,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    */
   const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
     <Box key={key} flexDirection="row" alignItems="center" gap={1}>
-      <Box width={r.labelWidth ?? 8} flexShrink={0}>
-        <Text wrap="truncate">{r.label}</Text>
+      <Box width={r.labelWidth ?? LABEL} flexShrink={0}>
+        <Text dimColor wrap="truncate">
+          {r.label}
+        </Text>
       </Box>
       {gauge(r.value, r.max, r.color)}
-      <Box width={4} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+      <Box width={5} flexShrink={0} flexDirection="row" justifyContent="flex-end">
         <Text bold>{r.figure}</Text>
       </Box>
-      <Box width={5} flexShrink={0}>
+      <Box width={6} flexShrink={0}>
         <Text color={r.unitColor} dimColor={!r.unitColor}>
           {r.unit ?? ''}
         </Text>
@@ -266,8 +314,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /** A row with a slim coloured rail on the left: a name, a dim note, a figure on the right. */
   const rail = (key: string, r: { color: string; text: string; note?: string; figure?: string; indent?: number }) => (
-    <Box key={key} flexDirection="row" gap={1} marginTop={terminal ? 0 : 0.2} paddingLeft={r.indent ?? 0}>
-      {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.3} backgroundColor={r.color} flexShrink={0} />}
+    <Box key={key} flexDirection="row" gap={1} paddingLeft={r.indent ?? 0}>
+      {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
       <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
         <Text wrap="truncate">
           {r.text}
@@ -328,7 +376,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         <Text dimColor>{`⏱ ${short(snap.sinceMs)}`}</Text>
         {rows.map(r => {
           const color = tone(r)
-          const timing = r.avgMs > 0 ? `${ms(r.avgMs)}·` : ''
+          const timing = r.avgMs > 0 ? `${ms(r.avgMs)} ` : ''
           return (
             <Text key={`perf-${r.name}`} dimColor={!color} color={color}>
               {`${r.name} ${timing}${r.perMin}/m`}
@@ -339,7 +387,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, gauge, reading, rail, prop, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { bar, scale, gauge, reading, rail, prop, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

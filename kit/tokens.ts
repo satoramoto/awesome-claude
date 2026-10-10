@@ -1,17 +1,23 @@
-/** The colors every mod draws with: hues that read on a light page, a dark page and a terminal. */
+/**
+ * The instrument's colours: calibrated, not neon, readable on a light page, a dark
+ * page and a terminal. Status is green, amber, red; activity is cobalt; quiet
+ * structure is slate. Colour always means something.
+ */
 export const C = {
-  ok: '#9ece6a',
-  bad: '#f7768e',
-  warn: '#e0af68',
-  blue: '#7aa2f7',
-  purple: '#bb9af7',
-  cyan: '#7dcfff',
-  orange: '#ff9e64',
-  teal: '#2ac3de',
+  ok: '#5bc08a',
+  warn: '#e3a33b',
+  bad: '#e5636f',
+  blue: '#6c8ef5',
+  purple: '#9d85e8',
+  cyan: '#4fb3c8',
+  orange: '#e3a33b',
+  teal: '#4fb3c8',
+  slate: '#8c9bb5',
+  orchid: '#c58ad6',
 } as const
 
-/** Categorical hues, in order: one per series. */
-export const PALETTE = [C.blue, C.purple, C.cyan, C.ok, C.warn, C.bad, C.orange, C.teal] as const
+/** Categorical hues, in order: one family of cool tones; the last in a set takes amber when it is the one to watch. */
+export const PALETTE = [C.slate, C.blue, C.cyan, C.purple, C.orchid, C.warn, C.ok, C.bad] as const
 
 /** A bar's empty part and other quiet fills: a grey that reads on light and dark. */
 export const TRACK = 'rgba(128,128,128,0.18)'

@@ -2,7 +2,7 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { duration, money, short, tokens } from '../kit/format'
 import type { PerfSnapshot } from '../kit/perf'
-import { C, MUTED, levelColor } from '../kit/tokens'
+import { C, GLYPH, MUTED, levelColor } from '../kit/tokens'
 import { kit } from '../kit/ui'
 
 import type { Activity, Agent, AgentExtra, GhInfo, GitInfo, GitNote, GitPr, Limit, Snapshot } from '../types'
@@ -38,7 +38,21 @@ export type Helpers = {
   buildTree: (list: Agent[]) => Array<{ agent: Agent; depth: number }>
 }
 
-/** Three letters for a context category, shown beside its chip. */
+/**
+ * A context category's short name and colour. One cool family for what is
+ * fixed, amber for messages: the part that grows, and the one to watch.
+ */
+const CATEGORY: Record<string, { name: string; color: string }> = {
+  'System prompt': { name: 'System', color: C.slate },
+  'System tools': { name: 'Tools', color: C.blue },
+  'MCP tools': { name: 'MCP', color: C.cyan },
+  'Custom agents': { name: 'Agents', color: C.purple },
+  'Memory files': { name: 'Memory', color: C.purple },
+  Skills: { name: 'Skills', color: C.orchid },
+  Messages: { name: 'Messages', color: C.warn },
+}
+
+/** Three letters for a context category: what the terminal layout's chips show. */
 export const tagOf = (name: string): string => {
   const known: Record<string, string> = {
     'System prompt': 'sys',
@@ -59,8 +73,10 @@ const statusColor = (status: string): string =>
 /** "2h18", "3d4h", from "resets in 2h 18m". */
 const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 
-// Drawn as an instrument: every line a reading (a label, a thin gauge, a value,
-// a unit), each section in its own bubble, colour only where it means something.
+// A properties inspector for the session, drawn as an instrument: a header of
+// the session's totals, then one collapsible section per subject, its readings
+// in one column grid (label, gauge, value, unit). The context meter, with its
+// scale and the compaction mark, is the one bold thing; the rest stays quiet.
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
   const { Box, Text } = els
   const k = kit(els, 'desktop', d.columns)
@@ -68,45 +84,75 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
 
-  // ---- the summary line ----
+  // ---- the header: the session's totals ----
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
   const toolErrors = Object.values(a.tools).reduce((n, t) => n + t.err, 0)
-  const facts = [a.startedAt ? short(d.at - a.startedAt) : '', `${a.turns} turns`, `${toolCalls} calls`, `${a.files.length} files`].filter(Boolean)
-  const summary = (
-    <Box flexDirection="row" justifyContent="space-between" gap={1}>
-      <Text wrap="truncate">
-        <Text bold>{a.cost !== undefined ? money(a.cost) : '–'}</Text>
-        <Text dimColor>{`  ${facts.join(' · ')}`}</Text>
+  const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
+  const metric = (key: string, glyph: string, value: string, unit: string) => (
+    <Box key={key} width={11} flexDirection="row" gap={0.5}>
+      <Text dimColor>{glyph}</Text>
+      <Text>
+        {value}
+        <Text dimColor>{` ${unit}`}</Text>
       </Text>
-      {toolErrors ? <Text color={C.bad}>{`${toolErrors} failed`}</Text> : null}
+    </Box>
+  )
+  const header = (
+    <Box flexDirection="column">
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Text bold>{a.cost !== undefined ? money(a.cost) : '–'}</Text>
+        <Box flexDirection="row" gap={0.6}>
+          {running ? k.pill('running', C.warn, `${running} running`) : null}
+          {toolErrors ? k.pill('failed', C.bad, `${toolErrors} failed`) : null}
+        </Box>
+      </Box>
+      <Box flexDirection="row" flexWrap="wrap" marginTop={0.2}>
+        {metric('time', GLYPH.time, a.startedAt ? short(d.at - a.startedAt) : '–', '')}
+        {metric('turns', GLYPH.turns, String(a.turns), 'turns')}
+        {metric('calls', GLYPH.tools, String(toolCalls), 'calls')}
+        {metric('files', GLYPH.files, String(a.files.length), 'files')}
+      </Box>
     </Box>
   )
 
-  // ---- context ----
+  // ---- context: the instrument's main meter ----
   const parts = snap
-    ? snap.segments.flatMap((s, i) => {
-        const color = fx.colorOf(snap.segments, i)
-        return color && s.tokens > 0 ? [{ value: s.tokens, color, label: tagOf(s.name) }] : []
+    ? snap.segments.flatMap(s => {
+        const c = CATEGORY[s.name]
+        return s.kind === 'used' && s.tokens > 0 ? [{ value: s.tokens, color: c?.color ?? C.slate, label: c?.name ?? s.name }] : []
       })
     : []
   const context = k.section({
     id: 'context',
+    icon: GLYPH.context,
+    color: snap ? levelColor(snap.percent) : MUTED,
     title: 'Context',
-    right: snap ? <Text dimColor>{`${tokens(snap.total)} / ${tokens(snap.max)}`}</Text> : <Text dimColor>measuring…</Text>,
+    right: snap ? (
+      <Text>
+        <Text bold color={levelColor(snap.percent)}>{`${snap.percent}%`}</Text>
+        <Text dimColor>{`  ${tokens(snap.total)} of ${tokens(snap.max)}`}</Text>
+      </Text>
+    ) : (
+      <Text dimColor>measuring…</Text>
+    ),
     ...fold('context'),
     children: snap
       ? [
-          k.reading('ctx', {
-            label: 'Used',
-            value: snap.percent,
-            max: 100,
-            color: levelColor(snap.percent),
-            figure: `${snap.percent}%`,
-            unit: tokens(snap.total),
-          }),
-          k.legendBar(parts, snap.max, tokens, { height: 0.22 }),
+          <Box key="meter" flexDirection="column" marginTop={0.2}>
+            {k.bar(parts, snap.max, { height: 0.5 })}
+            {k.scale(snap.compactAt ? snap.compactAt / snap.max : undefined, C.warn)}
+          </Box>,
+          <Box key="legend" flexDirection="row" flexWrap="wrap" marginTop={0.1}>
+            {parts.map(p => (
+              <Box key={`legend-${p.label}`} width={16} flexDirection="row" alignItems="center" gap={0.5}>
+                {k.swatch(p.color)}
+                <Text dimColor>{p.label}</Text>
+                <Text>{tokens(p.value)}</Text>
+              </Box>
+            ))}
+          </Box>,
           k.prop('model', 'Model', snap.model),
-          snap.compactAt ? k.prop('compact', 'Compacts at', tokens(snap.compactAt)) : null,
+          snap.compactAt ? k.prop('compact', 'Compacts', <Text color={C.warn}>{`at ${tokens(snap.compactAt)}`}</Text>) : null,
         ]
       : null,
   })
@@ -116,6 +162,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const limits = windows.length
     ? k.section({
         id: 'limits',
+        icon: GLYPH.limits,
+        color: C.slate,
         title: 'Limits',
         ...fold('limits'),
         children: windows.map(w =>
@@ -137,9 +185,20 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const turns = a.turnLog.length
     ? k.section({
         id: 'turns',
+        icon: GLYPH.turns,
+        color: C.blue,
         title: 'Turns',
         right: (
-          <Text dimColor>{`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}% cached · ${tokens(a.turnLog.reduce((n, p) => n + p.output, 0))} out`}</Text>
+          <Box flexDirection="row" gap={1.5}>
+            <Text>
+              {`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`}
+              <Text dimColor> cached</Text>
+            </Text>
+            <Text>
+              {tokens(a.turnLog.reduce((n, p) => n + p.output, 0))}
+              <Text dimColor> out</Text>
+            </Text>
+          </Box>
         ),
         ...fold('turns'),
         children: k.columns(
@@ -149,7 +208,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             { value: p.cacheWrite, color: C.purple },
             { value: p.cacheRead, color: C.blue },
           ]),
-          { slots: 24, height: 2 },
+          { slots: 24, height: 1.8 },
         ),
       })
     : null
@@ -162,8 +221,15 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const tools = toolRows.length
     ? k.section({
         id: 'tools',
+        icon: GLYPH.tools,
+        color: C.blue,
         title: 'Tools',
-        right: <Text dimColor>{`${toolCalls} calls`}</Text>,
+        right: (
+          <Text>
+            {String(toolCalls)}
+            <Text dimColor> calls</Text>
+          </Text>
+        ),
         ...fold('tools'),
         children: toolRows.map(([name, t]) =>
           k.reading(`tool-${name}`, {
@@ -172,7 +238,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             max: toolMax,
             color: C.blue,
             figure: String(t.n),
-            unit: t.err ? `${t.err}✕` : undefined,
+            unit: t.err ? `${t.err} ✕` : undefined,
             unitColor: t.err ? C.bad : undefined,
           }),
         ),
@@ -180,12 +246,18 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   // ---- agents ----
-  const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
   const agents = d.agents.length
     ? k.section({
         id: 'agents',
+        icon: GLYPH.agents,
+        color: running ? C.warn : C.slate,
         title: 'Agents',
-        right: running ? <Text color={C.warn}>{`${running} running`}</Text> : <Text dimColor>{String(d.agents.length)}</Text>,
+        right: (
+          <Text>
+            {String(d.agents.length)}
+            <Text dimColor> started</Text>
+          </Text>
+        ),
         ...fold('agents'),
         children: fx.buildTree(d.agents).map(({ agent, depth }) => {
           const x = d.extras[agent.id]
@@ -195,7 +267,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
               : x?.durationMs !== undefined
                 ? duration(x.durationMs)
                 : ''
-          const figure = [x?.tokens !== undefined ? tokens(x.tokens) : '', time].filter(Boolean).join(' · ')
+          const figure = [x?.tokens !== undefined ? tokens(x.tokens) : '', time].filter(Boolean).join('  ')
           return k.rail(agent.id, { color: statusColor(agent.status), text: agent.description || agent.type, note: agent.type, figure, indent: depth * 2 })
         }),
       })
@@ -203,7 +275,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
 
   return (
     <Box flexDirection="column">
-      {summary}
+      {header}
       {[context, limits, turns, tools, agents, renderGit(els, k, d, fold)]}
       {k.perf(d.perf)}
     </Box>
@@ -216,10 +288,10 @@ const renderGit = (
   d: DesktopData,
   fold: (id: string) => { collapsed: boolean; onToggle: () => void },
 ): RenderElement => {
-  const { Text } = els
+  const { Box, Text } = els
   const g = d.git
   if (g === null || !g.ok) {
-    return k.section({ id: 'git', title: 'Git', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
+    return k.section({ id: 'git', icon: GLYPH.branch, color: C.slate, title: 'Git', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
   }
   const state: [number, string, string][] = [
     [g.conflicted, 'conflicted', C.bad],
@@ -232,43 +304,50 @@ const renderGit = (
   const prs = hub && hub.root === g.root && !hub.note ? hub.prs.slice(0, 5) : []
   return k.section({
     id: 'git',
+    icon: GLYPH.branch,
+    color: C.slate,
     title: g.branch,
     right: (
-      <Text>
-        {g.ahead ? <Text color={C.ok}>{`↑${g.ahead} `}</Text> : null}
-        {g.behind ? <Text color={C.warn}>{`↓${g.behind} `}</Text> : null}
-        {g.insertions ? <Text color={C.ok}>{`+${g.insertions} `}</Text> : null}
+      <Box flexDirection="row" gap={1}>
+        {g.ahead ? <Text color={C.ok}>{`↑${g.ahead}`}</Text> : null}
+        {g.behind ? <Text color={C.warn}>{`↓${g.behind}`}</Text> : null}
+        {g.insertions ? <Text color={C.ok}>{`+${g.insertions}`}</Text> : null}
         {g.deletions ? <Text color={C.bad}>{`−${g.deletions}`}</Text> : null}
-      </Text>
+      </Box>
     ),
     ...fold('git'),
     children: [
-      k.prop('repo', 'Repository', g.worktree.linked ? `${g.repo} · ${g.worktree.name}` : g.repo),
+      k.prop('repo', 'Repository', g.worktree.linked ? `${g.repo} / ${g.worktree.name}` : g.repo),
       k.prop(
         'changes',
         'Changes',
-        <Text>
-          {changed.length === 0 ? (
-            <Text dimColor>clean</Text>
-          ) : (
-            changed.map(([n, word, color], i) => <Text color={color}>{`${i ? ' · ' : ''}${n} ${word}`}</Text>)
-          )}
-        </Text>,
+        changed.length === 0 ? (
+          <Text dimColor>clean</Text>
+        ) : (
+          <Box flexDirection="row" gap={1.5}>
+            {changed.map(([n, word, color]) => (
+              <Text>
+                <Text color={color}>{String(n)}</Text>
+                <Text dimColor>{` ${word}`}</Text>
+              </Text>
+            ))}
+          </Box>
+        ),
       ),
-      ...prs.map(pr => prRow(els, k, pr)),
+      ...prs.map(pr => prRow(els, pr)),
     ],
   })
 }
 
 /** One PR on a rail: its state as the rail's colour, the number as a link, the title, checks on the right. */
-const prRow = ({ Box, Text, Link }: AppElements, k: ReturnType<typeof kit>, pr: GitPr) => {
+const prRow = ({ Box, Text, Link }: AppElements, pr: GitPr) => {
   const color = pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.warn : C.ok
   const { passed, failed, pending } = pr.checks
   const open = pr.state === 'OPEN'
   const checks = !open ? (pr.state === 'MERGED' ? 'merged' : 'closed') : failed ? `${failed} failing` : pending ? `${pending} pending` : passed ? 'checks pass' : ''
   return (
-    <Box key={`pr-${pr.number}`} flexDirection="row" gap={1} marginTop={0.2}>
-      <Box width={0.3} backgroundColor={color} flexShrink={0} />
+    <Box key={`pr-${pr.number}`} flexDirection="row" gap={1}>
+      <Box width={0.25} backgroundColor={color} flexShrink={0} />
       <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
           <Link href={pr.url} label={`#${pr.number}`} />
