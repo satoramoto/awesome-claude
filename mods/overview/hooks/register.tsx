@@ -822,6 +822,7 @@ export const register: Register = on => {
         toggle: (id: string) =>
           void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
         columns: e.props.bodyColumns,
+        rows: e.props.scroll?.bodyRows,
         at: Date.now(),
         perf: perf.snapshot(),
       }

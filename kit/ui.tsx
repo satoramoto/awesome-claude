@@ -516,11 +516,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * A pane whose footer stays on the bottom edge: `body` fills the height above it.
    * For the debug footer, or anything that should sit under the content however short it is.
    */
-  const pinned = (body: RenderElement | (RenderElement | null)[], footer: RenderElement) => (
-    <Box flexDirection="column" height="100%">
-      <Box flexDirection="column" flexGrow={1}>
-        {body}
-      </Box>
+  // `height="100%"` doesn't resolve in a pane, so the column takes the pane's height in
+  // rows (`e.props.scroll.bodyRows`) and a growing spacer pushes the footer down. Taller
+  // content than that just runs on, footer last.
+  const pinned = (body: RenderElement | (RenderElement | null)[], footer: RenderElement, rows?: number) => (
+    <Box flexDirection="column" minHeight={rows}>
+      {body}
+      <Box flexGrow={1} />
       {footer}
     </Box>
   )
