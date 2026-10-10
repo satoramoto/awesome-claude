@@ -40,7 +40,8 @@ const unit = (surface: Surface, key: string, v: unknown) => {
 const kebab = (k: string) => k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)
 
 const boxStyle = (surface: Surface, p: Record<string, any>) => {
-  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'column', minWidth: '0' }
+  // border-box, as the desktop measures: padding and borders sit inside a box's width.
+  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'column', minWidth: '0', boxSizing: 'border-box' }
   for (const [k, v] of Object.entries(p)) {
     if (v === undefined || v === null || k === 'key' || k === 'hover' || k === 'display') continue
     if (k === 'marginX' || k === 'paddingX') {

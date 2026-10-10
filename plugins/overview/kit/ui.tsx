@@ -216,9 +216,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const per = Math.ceil(items.length / cols)
     const columns = Array.from({ length: cols }, (_, c) => items.slice(c * per, c * per + per))
     return (
-      <Box key={key} flexDirection="row" gap={SPACE.group}>
+      // Whole-percent columns with the gutter as padding inside the first: the desktop
+      // measures padding inside a box's width (zero-width growing columns stack there).
+      <Box key={key} flexDirection="row">
         {columns.map((col, c) => (
-          <Box key={`${key}-col-${c}`} flexGrow={1} width={0} flexDirection="column">
+          <Box key={`${key}-col-${c}`} width={`${Math.floor(100 / cols)}%`} paddingRight={c < cols - 1 ? SPACE.group : 0} flexDirection="column">
             {col.map(t => (
               <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair}>
                 {swatch(t.color)}
