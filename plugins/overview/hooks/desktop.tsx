@@ -68,14 +68,16 @@ export type Helpers = {
  * A context category's short name and colour: the fixed overhead in shades of
  * slate (it only says how much), messages in blue (the part that grows).
  */
+// Grouped into four, so the legend is short: what the system brings, what MCP
+// brings, what the person's setup brings (memory, skills, agents), and the conversation.
 const CATEGORY: Record<string, { name: string; color: string }> = {
   'System prompt': { name: 'System', color: RAMP.slate[0] },
-  'System tools': { name: 'Tools', color: RAMP.slate[1] },
-  'MCP tools': { name: 'MCP', color: RAMP.slate[2] },
-  'MCP server instructions': { name: 'MCP notes', color: RAMP.slate[2] },
-  'Custom agents': { name: 'Agents', color: RAMP.slate[3] },
-  'Memory files': { name: 'Memory', color: RAMP.slate[3] },
-  Skills: { name: 'Skills', color: RAMP.slate[3] },
+  'System tools': { name: 'System', color: RAMP.slate[0] },
+  'MCP tools': { name: 'MCP', color: RAMP.slate[1] },
+  'MCP server instructions': { name: 'MCP', color: RAMP.slate[1] },
+  'Custom agents': { name: 'Memory', color: RAMP.slate[2] },
+  'Memory files': { name: 'Memory', color: RAMP.slate[2] },
+  Skills: { name: 'Memory', color: RAMP.slate[2] },
   Messages: { name: 'Messages', color: C.blue },
 }
 
@@ -165,12 +167,15 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   // ---- context: the instrument's main meter ----
-  const parts = snap
-    ? snap.segments.flatMap(s => {
-        const c = CATEGORY[s.name]
-        return s.kind === 'used' && s.tokens > 0 ? [{ value: s.tokens, color: c?.color ?? INK, label: c?.name ?? s.name }] : []
-      })
-    : []
+  // Used segments summed into their groups, in the groups' order.
+  const parts: { value: number; color: string; label: string }[] = []
+  for (const s of snap?.segments ?? []) {
+    if (s.kind !== 'used' || s.tokens <= 0) continue
+    const c = CATEGORY[s.name] ?? { name: s.name, color: INK }
+    const at = parts.find(p => p.label === c.name)
+    if (at) at.value += s.tokens
+    else parts.push({ value: s.tokens, color: c.color, label: c.name })
+  }
   const context = k.section({
     id: 'context',
     icon: GLYPH.context,
@@ -327,6 +332,11 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
  * state word, the only colour. Second, dim: its PR (linked) or where it lives,
  * one CI word, and one action.
  */
+/** Workspace entries' right-hand columns: changes or CI, state or action, hide. */
+const WS_A = 10
+const WS_B = 9
+const WS_C = 4
+
 const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
   const { Box, Text, Link, Button } = els
   const entries = d.branches.map((b, i) => {
@@ -334,7 +344,17 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     const open = pr?.state === 'OPEN'
     const color = pr ? prColor(pr) : MUTED
     const word = !b.exists ? 'DELETED' : pr ? (open ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
-    const ci = !pr || !open ? null : pr.checks.failed ? [`${pr.checks.failed} failing`, C.bad] : pr.checks.pending ? [`${pr.checks.pending} pending`, C.blue] : pr.checks.passed ? ['checks pass', C.ok] : null
+    const ci: [string, string] | null = b.conflicted
+      ? [`${b.conflicted} conflict${b.conflicted === 1 ? '' : 's'}`, C.bad]
+      : !pr || !open
+        ? null
+        : pr.checks.failed
+          ? [`${pr.checks.failed} failing`, C.bad]
+          : pr.checks.pending
+            ? [`${pr.checks.pending} pending`, C.blue]
+            : pr.checks.passed
+              ? ['passing', C.ok]
+              : null
     const action =
       !Button || !b.exists
         ? null
@@ -345,34 +365,49 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             : open && !pr.isDraft
               ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} />
               : null
+    // Every entry is the same small table: a left column that truncates, then three
+    // fixed right-aligned columns, so all entries line up:
+    //   branch               +412 −96   OPEN   hide
+    //   #9 title…           1 failing  Merge
+    const cell = (key: string, width: number, child: RenderElement | null) => (
+      <Box key={key} width={width} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+        {child}
+      </Box>
+    )
+    const left = (child: RenderElement | RenderElement[]) => (
+      <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden" flexDirection="row" gap={SPACE.pair}>
+        {child}
+      </Box>
+    )
+    const line = (key: string, l: RenderElement | RenderElement[], a: RenderElement | null, b2: RenderElement | null, c: RenderElement | null) => (
+      <Box key={key} flexDirection="row" gap={SPACE.item}>
+        {left(l)}
+        {cell('a', WS_A, a)}
+        {cell('b', WS_B, b2)}
+        {cell('c', WS_C, c)}
+      </Box>
+    )
     return (
       <Box key={`branch-${b.branch}`} flexDirection="column" marginTop={i === 0 ? 0 : SPACE.block}>
-        <Box flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
-          <Text wrap="truncate">{b.branch}</Text>
-          <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
-            {b.insertions || b.deletions ? <Text dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null}
-            <Text color={color}>{word}</Text>
-          </Box>
-        </Box>
-        <Box flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
-          <Box flexDirection="row" gap={SPACE.pair} flexShrink={1}>
-            {pr ? <Link href={pr.url} label={`#${pr.number}`} /> : null}
-            <Text dimColor wrap="truncate">
+        {line(
+          'l1',
+          <Text wrap="truncate">{b.branch}</Text>,
+          b.insertions || b.deletions ? <Text dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
+          <Text color={color}>{word}</Text>,
+          Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null,
+        )}
+        {line(
+          'l2',
+          [
+            ...(pr ? [<Link key="n" href={pr.url} label={`#${pr.number}`} />] : []),
+            <Text key="t" dimColor wrap="truncate">
               {pr ? pr.title : b.worktree ? `${b.place} (worktree)` : b.place}
-            </Text>
-          </Box>
-          <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
-            {b.conflicted ? <Text color={C.bad}>{`${b.conflicted} conflicted`}</Text> : null}
-            {ci ? <Text color={ci[1]}>{ci[0]}</Text> : null}
-            {action}
-            {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null}
-          </Box>
-        </Box>
-        {pr && open && pr.failing.length ? (
-          <Text dimColor wrap="truncate">
-            {pr.failing.slice(0, 3).join(', ')}
-          </Text>
-        ) : null}
+            </Text>,
+          ],
+          ci ? <Text color={ci[1]}>{ci[0]}</Text> : null,
+          action,
+          null,
+        )}
       </Box>
     )
   })
