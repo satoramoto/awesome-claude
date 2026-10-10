@@ -342,28 +342,8 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
       [b.behind, '↓', C.warn],
     ]
     const creatable = !pr && b.exists
-    const where = (
-      <Box key="where" flexDirection="row" justifyContent="space-between" gap={1}>
-        <Box flexDirection="row" gap={1} flexShrink={1}>
-          <Text dimColor wrap="truncate">
-            {b.worktree ? `${b.place} (worktree)` : b.place}
-          </Text>
-          {!b.exists ? <Text dimColor>deleted</Text> : !b.pushed ? <Text dimColor>not pushed</Text> : null}
-        </Box>
-        <Box flexDirection="row" gap={1} alignItems="center">
-          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => (
-            <Text key={`s-${glyph}`} color={c}>{`${glyph}${n}`}</Text>
-          ))}
-          {creatable && Button ? (
-            d.creating === b.branch ? (
-              <Text dimColor>creating PR…</Text>
-            ) : (
-              <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
-            )
-          ) : null}
-        </Box>
-      </Box>
-    )
+    // One row, before and after the PR opens: on the left where the branch lives, or
+    // its PR once it has one; on the right its changes, then Create PR or the CI.
     const checks = pr && open ? (
       <Box flexDirection="row" gap={1}>
         {/* Git-prompt style, like the changes: =passed, !failed, *pending. */}
@@ -374,17 +354,32 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     ) : (
       <Text color={color}>{pr?.state === 'MERGED' ? 'merged' : pr?.state === 'CLOSED' ? 'closed' : ''}</Text>
     )
-    const prLine = pr ? (
-      <Box key="pr" flexDirection="row" justifyContent="space-between" gap={1}>
+    const row = (
+      <Box key="row" flexDirection="row" justifyContent="space-between" gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
-          <Link href={pr.url} label={`#${pr.number}`} />
-          <Text wrap="truncate" dimColor={!open || pr.isDraft}>
-            {pr.title}
+          {pr ? (
+            <Link href={pr.url} label={`#${pr.number}`} />
+          ) : null}
+          <Text wrap="truncate" dimColor>
+            {pr ? pr.title : b.worktree ? `${b.place} (worktree)` : b.place}
           </Text>
+          {!b.exists ? <Text dimColor>deleted</Text> : !pr && !b.pushed ? <Text dimColor>not pushed</Text> : null}
         </Box>
-        {checks}
+        <Box flexDirection="row" gap={1} alignItems="center">
+          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => (
+            <Text key={`s-${glyph}`} color={c}>{`${glyph}${n}`}</Text>
+          ))}
+          {pr ? checks : null}
+          {creatable && Button ? (
+            d.creating === b.branch ? (
+              <Text dimColor>creating PR…</Text>
+            ) : (
+              <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
+            )
+          ) : null}
+        </Box>
       </Box>
-    ) : null
+    )
     const failing = pr && open && pr.failing.length ? (
       <Text key="failing" color={C.bad} wrap="truncate">
         {pr.failing.slice(0, 3).join(', ')}
@@ -403,7 +398,7 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
         </Box>
       ),
       ...fold(id),
-      children: [where, prLine, failing],
+      children: [row, failing],
     })
   })
 }
