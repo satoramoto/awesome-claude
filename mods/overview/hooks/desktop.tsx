@@ -46,6 +46,7 @@ const CATEGORY: Record<string, { name: string; color: string }> = {
   'System prompt': { name: 'System', color: C.slate },
   'System tools': { name: 'Tools', color: C.blue },
   'MCP tools': { name: 'MCP', color: C.cyan },
+  'MCP server instructions': { name: 'MCP notes', color: C.cyan },
   'Custom agents': { name: 'Agents', color: C.purple },
   'Memory files': { name: 'Memory', color: C.purple },
   Skills: { name: 'Skills', color: C.orchid },
@@ -89,7 +90,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const toolErrors = Object.values(a.tools).reduce((n, t) => n + t.err, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
   const metric = (key: string, glyph: string, value: string, unit: string) => (
-    <Box key={key} width={11} flexDirection="row" gap={0.5}>
+    <Box key={key} flexDirection="row" gap={0.5} flexShrink={0}>
       <Text dimColor>{glyph}</Text>
       <Text>
         {value}
@@ -106,7 +107,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           {toolErrors ? k.pill('failed', C.bad, `${toolErrors} failed`) : null}
         </Box>
       </Box>
-      <Box flexDirection="row" flexWrap="wrap" marginTop={0.2}>
+      <Box flexDirection="row" justifyContent="space-between" gap={1} marginTop={0.2}>
         {metric('time', GLYPH.time, a.startedAt ? short(d.at - a.startedAt) : '–', '')}
         {metric('turns', GLYPH.turns, String(a.turns), 'turns')}
         {metric('calls', GLYPH.tools, String(toolCalls), 'calls')}
@@ -146,8 +147,14 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             {parts.map(p => (
               <Box key={`legend-${p.label}`} width={16} flexDirection="row" alignItems="center" gap={0.5}>
                 {k.swatch(p.color)}
-                <Text dimColor>{p.label}</Text>
-                <Text>{tokens(p.value)}</Text>
+                <Box flexShrink={1}>
+                  <Text dimColor wrap="truncate">
+                    {p.label}
+                  </Text>
+                </Box>
+                <Box flexShrink={0}>
+                  <Text>{tokens(p.value)}</Text>
+                </Box>
               </Box>
             ))}
           </Box>,

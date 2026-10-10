@@ -66,8 +66,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
     return (
       <Box flexDirection="row" flexGrow={1} height={height} borderStyle="round" borderColor={TRACK} backgroundColor={TRACK} overflow="hidden">
+        {/* An explicit full height: the desktop doesn't stretch a child to its parent's height. */}
         {shown.map(p => (
-          <Box flexGrow={p.grow} flexShrink={0} width={0} backgroundColor={p.color} />
+          <Box flexGrow={p.grow} flexShrink={0} width={0} height="100%" backgroundColor={p.color} />
         ))}
         {rest > 0 ? <Box flexGrow={rest} width={0} /> : null}
       </Box>
