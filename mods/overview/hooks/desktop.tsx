@@ -102,9 +102,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     <Box flexDirection="column">
       <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
         <Text bold>{a.cost !== undefined ? money(a.cost) : '–'}</Text>
-        <Box flexDirection="row" gap={0.6}>
-          {running ? k.pill('running', C.warn, `${running} running`) : null}
-          {toolErrors ? k.pill('failed', C.bad, `${toolErrors} failed`) : null}
+        <Box flexDirection="row" gap={1.2}>
+          {running ? k.flag('running', C.warn, GLYPH.running, running) : null}
+          {toolErrors ? k.flag('failed', C.bad, GLYPH.failed, toolErrors) : null}
         </Box>
       </Box>
       <Box flexDirection="row" justifyContent="space-between" gap={1} marginTop={0.2}>

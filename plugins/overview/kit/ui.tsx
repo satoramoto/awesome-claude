@@ -137,6 +137,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       </Box>
     )
 
+  /** A status flag: a glyph and a figure in one colour, the size of the text around it. */
+  const flag = (key: string, color: string, glyph: string, figure: string | number) => (
+    <Text key={key} color={color}>{`${glyph} ${figure}`}</Text>
+  )
+
   /** A small round dot of colour, a legend's key. */
   const swatch = (color: string) => <Text color={color}>●</Text>
 
@@ -285,6 +290,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
           alignItems="center"
           gap={1}
           backgroundColor={terminal ? undefined : HEAD}
+          // Rounded corners from the round border; transparent, so the band shows no outline.
+          borderStyle={terminal ? undefined : 'round'}
+          borderColor={terminal ? undefined : 'transparent'}
           paddingRight={terminal ? 0 : 0.8}
           paddingY={terminal ? 0 : 0.2}
         >
@@ -441,7 +449,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, scale, gauge, reading, rail, prop, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { bar, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>
