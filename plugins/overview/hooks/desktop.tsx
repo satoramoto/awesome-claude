@@ -16,7 +16,7 @@ import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote,
  * - Type: values plain, labels and units dim, bold only for section titles and
  *   the context %, uppercase only for captions and a branch's state word.
  * - Spacing: the kit's SPACE scale and INSET; nothing else.
- * - Each fact once: calls and time in the header, failures in Events, cost in Accounting.
+ * - Each fact once: calls and time in the header, failures in Activity, cost in Accounting.
  */
 
 /** The elements the app mode draws with: the desktop and VS Code have these. */
@@ -152,20 +152,6 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     </Box>
   )
 
-  // ---- events: failed tool calls (the only place failures are counted) ----
-  const failed = Object.entries(a.tools).filter(([, t]) => t.err > 0)
-  const failures = failed.reduce((n, [, t]) => n + t.err, 0)
-  const events = failed.length
-    ? k.section({
-        id: 'events',
-        icon: 'events',
-        title: 'Events',
-        right: k.summary([[String(failures), 'failed', C.bad]]),
-        ...fold('events'),
-        children: failed.map(([name, t]) => k.prop(`ev-${name}`, shortTool(name), `${t.err} of ${t.n}`)),
-      })
-    : null
-
   // ---- context: the instrument's main meter ----
   // Used segments summed into their groups, in the groups' order.
   const parts: { value: number; color: string; label: string }[] = []
@@ -257,6 +243,10 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
   const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
   const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
+  // Failed tool calls (the only place failures are counted).
+  const failures = allTools.reduce((n, [, t]) => n + t.err, 0)
+  const otherErr = allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0)
+  const errNote = (err: number) => (err > 0 ? { note: `!${err}`, noteColor: C.bad } : {})
   const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
   const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
   // Turn numbers under the first, middle and last bar.
@@ -267,7 +257,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           id: 'activity',
           icon: GLYPH.tools,
           title: 'Activity',
-          right: k.summary([[String(peak), 'peak'], [`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`, 'cached']]),
+          right: k.summary([[String(peak), 'peak'], failures ? [String(failures), 'failed', C.bad] : null, [`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`, 'cached']]),
           ...fold('activity'),
           children: [
             <Box key="chart" flexDirection="column">
@@ -279,8 +269,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             </Box>,
             <Box key="legend" marginTop={SPACE.block} width="100%">
               {k.legend('act', [
-                ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n) })),
-                ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount) }] : []),
+                ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n), ...errNote(a.tools[t.name]!.err) })),
+                ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount), ...errNote(otherErr) }] : []),
               ])}
             </Box>,
           ],
@@ -295,16 +285,48 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
         title: 'Agents',
         right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
-        children: fx.buildTree(d.agents).map(({ agent, depth }) => {
+        // A tile per agent, two lines:
+        //   [status icon] description            12k  3m
+        //   type                                 running
+        children: fx.buildTree(d.agents).map(({ agent, depth }, i) => {
           const x = d.extras[agent.id]
           const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
-          return k.rail(agent.id, {
-            color: statusColor(agent.status),
-            text: agent.description || agent.type,
-            note: agent.type,
-            figures: [x?.tokens !== undefined ? tokens(x.tokens) : '', ms !== undefined ? short(ms) : ''],
-            indent: depth * 2,
-          })
+          const color = statusColor(agent.status)
+          const glyph =
+            agent.status === 'running' ? GLYPH.running
+            : agent.status === 'completed' ? GLYPH.done
+            : agent.status === 'failed' ? GLYPH.failed
+            : agent.status === 'killed' ? GLYPH.stopped
+            : GLYPH.pending
+          const row = (key: string, l: (RenderElement | null)[], r: (RenderElement | null)[]) => (
+            <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item} width="100%">
+              <Box flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={1} minWidth={0} overflow="hidden">
+                {l}
+              </Box>
+              <Box flexDirection="row" alignItems="center" gap={SPACE.item} flexShrink={0}>
+                {r}
+              </Box>
+            </Box>
+          )
+          return (
+            <Box key={`agent-${agent.id}`} width="100%" marginLeft={depth * 2} marginTop={i === 0 ? 0 : SPACE.block}>
+              {k.tile(`tile-${agent.id}`, [
+                row(
+                  'l1',
+                  [k.icon(glyph, color), <Text key="d" wrap="truncate">{agent.description || agent.type}</Text>],
+                  [
+                    x?.tokens !== undefined ? <Text key="t" color={MUTED}>{tokens(x.tokens)}</Text> : null,
+                    ms !== undefined ? <Text key="ms" color={MUTED}>{short(ms)}</Text> : null,
+                  ],
+                ),
+                row(
+                  'l2',
+                  [<Text key="type" color={MUTED} wrap="truncate">{agent.type}</Text>],
+                  [<Text key="s" color={color}>{agent.status.toLowerCase()}</Text>],
+                ),
+              ])}
+            </Box>
+          )
         }),
       })
     : null
@@ -320,7 +342,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
 
   return k.pinned(
-    [header, events, context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
+    [header, context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
