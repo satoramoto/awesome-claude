@@ -46,7 +46,7 @@ describe('pane', () => {
     await ui.unmount()
   })
 
-  test('on the desktop, draws the tiles, the context bar and chips, and the charts', async ($, on) => {
+  test('on the desktop, draws readings in bubbles: summary, context, limits', async ($, on) => {
     const context = { tokens: 17_000, window: 200_000, percent: 9 }
     on('session.usage', () => ({
       value: {
@@ -59,20 +59,22 @@ describe('pane', () => {
     await openPane($, on)
 
     const ui = await mount($, 'desktop')
-    expect(await ui.find({ type: 'Text', text: /^◕ 9%$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^\$ 1\.50$/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '17k/200k ↧167k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /^\$1\.50/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '9%' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /skl/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: /5-hour/ })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: /^42%/ })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacts at 167k of 200k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '42%' })).toBeDefined()
+    // Plain words, no game vocabulary.
+    expect(await ui.find({ type: 'Text', text: /\b(HP|MP|LV|party)\b/i })).toBeUndefined()
     // Boxes and text only: crisp at any width.
     expect(await ui.find({ type: 'Svg' })).toBeUndefined()
 
     // Folding a section leaves its heading and hides the rest; unfolding brings it back.
     await ui.press({ key: 'toggle-context' })
     expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: '17k/200k ↧167k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Context' })).toBeDefined()
     await ui.press({ key: 'toggle-context' })
     expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeDefined()
     await ui.unmount()

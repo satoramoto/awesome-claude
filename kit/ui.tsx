@@ -28,6 +28,9 @@ export type Part = { value: number; color: string; label?: string }
 
 const BAR = 0.45
 
+/** A bubble's faint rounded outline. */
+const FRAME = 'rgba(128,128,128,0.28)'
+
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button } = els
   const terminal = surface === 'terminal'
@@ -171,31 +174,46 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    */
   const section = (s: {
     id: string
-    icon: string
-    color: string
     title: string
+    /** A glyph before the title, in `color`; plain sections leave it out. */
+    icon?: string
+    color?: string
     right?: RenderElement | null
     collapsed?: boolean
     onToggle?: () => void
+    /** Draw the section in its own rounded bubble (the default) or bare. */
+    bubble?: boolean
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
     const toggle =
       s.onToggle && Button ? (
         <Button key={`toggle-${s.id}`} plain dimColor label={s.collapsed ? '▸' : '▾'} onPress={() => s.onToggle?.()} />
       ) : null
-    return (
-      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.6}>
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-          <Box flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5} flexShrink={1}>
-            {toggle}
-            <Text wrap="truncate">
-              <Text color={s.color}>{`${s.icon} `}</Text>
-              <Text bold>{s.title}</Text>
-            </Text>
-          </Box>
-          {s.right ?? null}
+    const head = (
+      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+        <Box flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5} flexShrink={1}>
+          {toggle}
+          <Text wrap="truncate">
+            {s.icon ? <Text color={s.color}>{`${s.icon} `}</Text> : null}
+            <Text dimColor>{s.title}</Text>
+          </Text>
         </Box>
-        {s.collapsed ? null : s.children}
+        {s.right ?? null}
+      </Box>
+    )
+    const body = s.collapsed ? null : s.children
+    if (s.bubble === false) {
+      return (
+        <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.6}>
+          {head}
+          {body}
+        </Box>
+      )
+    }
+    return (
+      <Box key={`section-${s.id}`} flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} paddingY={terminal ? 0 : 0.3}>
+        {head}
+        {body}
       </Box>
     )
   }
@@ -205,12 +223,62 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * growing to share the row; one column when the pane is narrower than two.
    */
   const grid = (items: RenderElement[], minWidth = 34) => (
-    <Box flexDirection="row" flexWrap="wrap" columnGap={3}>
+    <Box flexDirection="row" flexWrap="wrap" columnGap={terminal ? 2 : 1} rowGap={terminal ? 0 : 0.6} marginTop={terminal ? 1 : 0.6}>
       {items.map((it, i) => (
         <Box key={`cell-${i}`} flexGrow={1} width={0} minWidth={minWidth} flexDirection="column">
           {it}
         </Box>
       ))}
+    </Box>
+  )
+
+  /**
+   * A thin rounded gauge, `value` of `max`: on the desktop the track and the fill
+   * are boxes with a `round` border in their own colour, so they draw as pills.
+   */
+  const gauge = (value: number, max: number, color: string) => {
+    if (terminal) return bar([{ value, color }], max)
+    const f = Math.max(0, Math.min(1, value / Math.max(max, 1))) * 1000
+    return (
+      <Box flexDirection="row" flexGrow={1} height={0.12} borderStyle="round" borderColor={TRACK} backgroundColor={TRACK} overflow="hidden">
+        {f > 0 ? <Box flexGrow={f} width={0} borderStyle="round" borderColor={color} backgroundColor={color} /> : null}
+        {f < 1000 ? <Box flexGrow={1000 - f} width={0} /> : null}
+      </Box>
+    )
+  }
+
+  /**
+   * A reading, as an instrument shows one: a label, a thin gauge, a bold value
+   * and a dim unit or note, in fixed columns so readings line up.
+   */
+  const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
+    <Box key={key} flexDirection="row" alignItems="center" gap={1}>
+      <Box width={r.labelWidth ?? 8} flexShrink={0}>
+        <Text wrap="truncate">{r.label}</Text>
+      </Box>
+      {gauge(r.value, r.max, r.color)}
+      <Box width={4} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+        <Text bold>{r.figure}</Text>
+      </Box>
+      <Box width={5} flexShrink={0}>
+        <Text color={r.unitColor} dimColor={!r.unitColor}>
+          {r.unit ?? ''}
+        </Text>
+      </Box>
+    </Box>
+  )
+
+  /** A row with a slim coloured rail on the left: a name, a dim note, a figure on the right. */
+  const rail = (key: string, r: { color: string; text: string; note?: string; figure?: string; indent?: number }) => (
+    <Box key={key} flexDirection="row" gap={1} marginTop={terminal ? 0 : 0.2} paddingLeft={r.indent ?? 0}>
+      {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.3} backgroundColor={r.color} flexShrink={0} />}
+      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
+        <Text wrap="truncate">
+          {r.text}
+          {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
+        </Text>
+        {r.figure ? <Text dimColor>{r.figure}</Text> : null}
+      </Box>
     </Box>
   )
 
@@ -275,7 +343,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { bar, gauge, reading, rail, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>
