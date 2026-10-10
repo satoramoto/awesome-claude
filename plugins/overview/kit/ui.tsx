@@ -40,8 +40,8 @@ const LABEL = 10
 /** A band's padding (section headers, the footer), so every band has one height and feel. */
 const BAND_PAD_X = 0.8
 const BAND_PAD_Y = 0.2
-/** A section body's left indent on the desktop: about the width of a header's rounded corner. */
-const BODY_INDENT = 0.8
+/** A section body's inset on the desktop, both sides: its left edge in line with the header's fold arrow. */
+const BODY_INDENT = 1.2
 
 /**
  * A section header's band: a tonal step that marks where each section starts. Solid,
@@ -370,7 +370,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         )}
         {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
+          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : BODY_INDENT} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
             {s.children}
           </Box>
         )}
