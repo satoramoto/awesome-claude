@@ -12,8 +12,9 @@ import { C, MUTED, TRACK } from './tokens'
  *
  * What the desktop accepts (2.1.293): whole percentages only, `flexGrow` up to
  * 10000, fractional heights and margins; no `hover`. Borders `round` (rounded
- * corners), single, double, bold and classic draw; `dashed` doesn't. No SVG:
- * the page scales it as an image and it blurs.
+ * corners), single, double, bold and classic draw; `dashed` doesn't. SVG is
+ * drawn as an image: crisp only at its exact pixel size, so it's kept to small
+ * fixed pieces like bar ends.
  */
 
 /** The element constructors the kit draws with. `Button` is needed only for collapsible sections. */
@@ -21,12 +22,17 @@ export type Els = {
   Box: (props: any, ...children: any[]) => RenderElement
   Text: (props: any, ...children: any[]) => RenderElement
   Button?: (props: any, ...children: any[]) => RenderElement
+  /** Rounds the ends of bars where the surface has it. */
+  Svg?: (props: any, ...children: any[]) => RenderElement
 }
 
 /** A bar part: its value, its color, and the label its legend shows. */
 export type Part = { value: number; color: string; label?: string }
 
 const BAR = 0.45
+
+/** One row's height in CSS pixels on the desktop, measured: a 0.45-row bar is 8.5px tall. */
+const ROW_PX = 8.5 / 0.45
 
 /** The inspector's grid: the gutter the fold arrow sits in, and the label column. */
 const GUTTER = 2
@@ -37,8 +43,27 @@ const HEAD = 'rgba(128,128,128,0.13)'
 
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
-  const { Box, Text, Button } = els
+  const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
+
+  /**
+   * A bar's rounded end: a square as tall as the bar, a half circle on the outside
+   * and a filled strip on the inside. Drawn at its exact pixel size, so it stays crisp
+   * (an SVG the page has to scale blurs). Too-thin slivers didn't draw; squares do.
+   */
+  const cap = (px: number, color: string, side: 'left' | 'right'): RenderElement | null => {
+    if (!Svg) return null
+    const r = px / 2
+    const source =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}">` +
+      `<circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/>` +
+      `<rect x="${side === 'left' ? r : 0}" y="0" width="${r}" height="${px}" fill="${color}"/></svg>`
+    return (
+      <Box flexShrink={0}>
+        <Svg source={source} alt="bar end" width={px} height={px} />
+      </Box>
+    )
+  }
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
   const bar = (parts: Part[], max: number, opts: { height?: number; width?: number } = {}): RenderElement => {
@@ -59,19 +84,31 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       )
     }
     // Grow factors out of 1000 (the desktop caps them at 10000): finer than a pixel at any width.
-    // Flat, not rounded: on the desktop a border takes room inside the box, so a thin bordered
-    // track has no room left for its fills (they draw empty), and bordered fills draw as blobs.
-    // Glyph bars (◖━◗, ╺━╸) didn't draw in the desktop pane either, so flat is the look.
+    // Rounded by SVG end caps around a flat middle. Borders can't round it: on the desktop a
+    // border takes room inside the box, so a thin bordered track draws empty and bordered fills
+    // draw as blobs; glyph bars (◖━◗, ╺━╸) don't draw at all.
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
-    return (
+    const flat = (
       <Box flexDirection="row" flexGrow={1} height={height} backgroundColor={TRACK} overflow="hidden">
         {/* An explicit full height: the desktop doesn't stretch a child to its parent's height. */}
         {shown.map(p => (
           <Box flexGrow={p.grow} flexShrink={0} width={0} height="100%" backgroundColor={p.color} />
         ))}
         {rest > 0 ? <Box flexGrow={rest} width={0} /> : null}
+      </Box>
+    )
+    if (!Svg) return flat
+    // The caps sit inside the bar's width, so a scale under it still lines up with its ends.
+    const px = Math.round(height * ROW_PX * 2) / 2
+    const first = shown[0]?.color ?? TRACK
+    const last = rest > 0 ? TRACK : (shown[shown.length - 1]?.color ?? TRACK)
+    return (
+      <Box flexDirection="row" flexGrow={1} alignItems="center">
+        {cap(px, first, 'left')}
+        {flat}
+        {cap(px, last, 'right')}
       </Box>
     )
   }

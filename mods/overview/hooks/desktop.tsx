@@ -8,7 +8,7 @@ import { kit } from '@kit/ui'
 import type { Activity, Agent, AgentExtra, GhInfo, GitInfo, GitNote, GitPr, Limit, Snapshot } from '../types'
 
 /** The elements the app mode draws with: the desktop and VS Code have these. */
-export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button'>
+export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button' | 'Svg'>
 
 export type DesktopData = {
   snap: Snapshot | null

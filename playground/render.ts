@@ -119,6 +119,17 @@ export const draw = (node: Child, surface: Surface, press: (fn: () => void) => v
       b.onclick = () => press(() => p.onPress?.({ surface }))
       return b
     }
+    case 'Svg': {
+      // As the desktop draws it: an image at the given pixel size.
+      const img = document.createElement('img')
+      img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(p.source ?? '')}`
+      img.alt = p.alt ?? ''
+      if (p.width !== undefined) img.width = p.width
+      if (p.height !== undefined) img.height = p.height
+      img.style.display = 'block'
+      img.style.flexShrink = '0'
+      return img
+    }
     case 'Code':
     case 'Markdown': {
       const pre = document.createElement('pre')
