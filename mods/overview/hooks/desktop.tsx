@@ -327,13 +327,6 @@ const prColor = (pr: GitPr) =>
  */
 const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
   const { Box, Text, Link, Button } = els
-  // A glyph and its figure, a small gap between (a leading space in Text is dropped).
-  const mark = (key: string, glyph: string, color: string, figure: string, dim = false) => (
-    <Box key={key} flexDirection="row" gap={0.3}>
-      <Text color={color}>{glyph}</Text>
-      <Text dimColor={dim}>{figure}</Text>
-    </Box>
-  )
   return d.branches.map(b => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
@@ -373,9 +366,10 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     )
     const checks = pr && open ? (
       <Box flexDirection="row" gap={1}>
-        {pr.checks.passed ? mark('ok', '✓', C.ok, String(pr.checks.passed)) : null}
-        {pr.checks.failed ? mark('bad', '✕', C.bad, String(pr.checks.failed)) : null}
-        {pr.checks.pending ? mark('wait', '◌', C.warn, String(pr.checks.pending)) : null}
+        {/* Git-prompt style, like the changes: =passed, !failed, *pending. */}
+        {pr.checks.passed ? <Text key="ok" color={C.ok}>{`=${pr.checks.passed}`}</Text> : null}
+        {pr.checks.failed ? <Text key="bad" color={C.bad}>{`!${pr.checks.failed}`}</Text> : null}
+        {pr.checks.pending ? <Text key="wait" color={C.warn}>{`*${pr.checks.pending}`}</Text> : null}
       </Box>
     ) : (
       <Text color={color}>{pr?.state === 'MERGED' ? 'merged' : pr?.state === 'CLOSED' ? 'closed' : ''}</Text>
