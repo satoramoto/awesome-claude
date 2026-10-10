@@ -54,10 +54,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const cap = (px: number, color: string, side: 'left' | 'right'): RenderElement | null => {
     if (!Svg) return null
     const r = px / 2
+    // One shape, not a circle over a rectangle: a translucent colour would paint the overlap twice.
+    const d = side === 'left' ? `M${r} 0H${px}V${px}H${r}A${r} ${r} 0 0 1 ${r} 0Z` : `M0 0H${r}A${r} ${r} 0 0 1 ${r} ${px}H0Z`
     const source =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}">` +
-      `<circle cx="${r}" cy="${r}" r="${r}" fill="${color}"/>` +
-      `<rect x="${side === 'left' ? r : 0}" y="0" width="${r}" height="${px}" fill="${color}"/></svg>`
+      `<path d="${d}" fill="${color}"/></svg>`
     return (
       <Box flexShrink={0}>
         <Svg source={source} alt="bar end" width={px} height={px} />
@@ -90,8 +91,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
-    const flat = (
-      <Box flexDirection="row" flexGrow={1} height={height} backgroundColor={TRACK} overflow="hidden">
+    // With caps, the middle takes no height of its own: it stretches to the caps' exact pixel
+    // height, so the two can't drift apart by a fraction of a pixel from row to row.
+    const flat = (stretch: boolean) => (
+      <Box flexDirection="row" flexGrow={1} height={stretch ? undefined : height} backgroundColor={TRACK} overflow="hidden">
         {/* An explicit full height: the desktop doesn't stretch a child to its parent's height. */}
         {shown.map(p => (
           <Box flexGrow={p.grow} flexShrink={0} width={0} height="100%" backgroundColor={p.color} />
@@ -99,15 +102,15 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {rest > 0 ? <Box flexGrow={rest} width={0} /> : null}
       </Box>
     )
-    if (!Svg) return flat
+    if (!Svg) return flat(false)
     // The caps sit inside the bar's width, so a scale under it still lines up with its ends.
-    const px = Math.round(height * ROW_PX * 2) / 2
+    const px = Math.max(4, Math.round(height * ROW_PX))
     const first = shown[0]?.color ?? TRACK
     const last = rest > 0 ? TRACK : (shown[shown.length - 1]?.color ?? TRACK)
     return (
-      <Box flexDirection="row" flexGrow={1} alignItems="center">
+      <Box flexDirection="row" flexGrow={1} alignItems="stretch">
         {cap(px, first, 'left')}
-        {flat}
+        {flat(true)}
         {cap(px, last, 'right')}
       </Box>
     )
