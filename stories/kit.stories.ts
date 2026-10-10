@@ -1,8 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
-import { short, tokens } from '@kit/format'
+import { tokens } from '@kit/format'
 import type { PerfRow } from '@kit/perf'
-import { C, GLYPH, PALETTE, levelColor } from '@kit/tokens'
+import { C, GLYPH, INK, RAMP, levelColor } from '@kit/tokens'
 
 import { h } from '../playground/render'
 import { kitFor, show } from './show'
@@ -21,9 +21,9 @@ export const Bar: Story = {
     show(
       kitFor(ctx).bar(
         [
-          { value: args.a, color: C.blue },
-          { value: args.b, color: C.purple },
-          { value: args.c, color: C.bad },
+          { value: args.a, color: RAMP.slate[0] },
+          { value: args.b, color: RAMP.slate[1] },
+          { value: args.c, color: C.blue },
         ],
         args.max,
         { height: args.height },
@@ -32,39 +32,9 @@ export const Bar: Story = {
     ),
 }
 
-export const LegendBar: Story = {
-  args: { system: 3_100, tools: 14_200, mcp: 6_400, memory: 2_300, skills: 3_900, messages: 31_100, max: 200_000 },
-  render: (args, ctx) =>
-    show(
-      kitFor(ctx).legendBar(
-        [
-          { value: args.system, color: PALETTE[0]!, label: 'sys' },
-          { value: args.tools, color: PALETTE[1]!, label: 'tls' },
-          { value: args.mcp, color: PALETTE[2]!, label: 'mcp' },
-          { value: args.memory, color: PALETTE[3]!, label: 'mem' },
-          { value: args.skills, color: PALETTE[4]!, label: 'skl' },
-          { value: args.messages, color: PALETTE[5]!, label: 'msg' },
-        ],
-        args.max,
-        tokens,
-      ),
-      ctx,
-    ),
-}
-
-export const LabelBar: Story = {
-  args: { fiveHour: 42, weekly: 78, opus: 96 },
-  argTypes: Object.fromEntries(['fiveHour', 'weekly', 'opus'].map(k => [k, { control: { type: 'range', min: 0, max: 110 } }])),
-  render: (args, ctx) => {
-    const k = kitFor(ctx)
-    const row = (key: string, label: string, v: number) =>
-      k.labelBar(key, label, [{ value: Math.min(100, v), color: levelColor(v) }], 100, h('Text', { bold: true, color: levelColor(v) }, `${v}%`))
-    return show(h('Box', { flexDirection: 'column' }, row('5h', '5-hour', args.fiveHour), row('7d', 'Weekly', args.weekly), row('op', 'Weekly opus', args.opus)), ctx)
-  },
-}
-
+/** A section with readings: label, gauge, figure, unit, in the kit's fixed columns. */
 export const Section: Story = {
-  args: { title: 'Tools', right: '103', collapsible: true, collapsed: false },
+  args: { title: 'Limits', collapsible: true, collapsed: false, fiveHour: 42, weekly: 81 },
   render: (args, ctx) => {
     let collapsed = args.collapsed as boolean
     const host = document.createElement('div')
@@ -72,43 +42,20 @@ export const Section: Story = {
       const k = kitFor(ctx)
       const tree = k.section({
         id: 'demo',
-        icon: GLYPH.tools,
-        color: C.purple,
+        icon: GLYPH.limits,
         title: args.title,
-        right: h('Text', { dimColor: true }, args.right),
+        right: k.summary([['2', 'windows']]),
         collapsed,
         ...(args.collapsible ? { onToggle: () => (collapsed = !collapsed) } : {}),
         children: [
-          k.labelBar('bash', 'Bash', [{ value: 41, color: C.blue }], 41, h('Text', { bold: true }, '41')),
-          k.labelBar('read', 'Read', [{ value: 33, color: C.purple }], 41, h('Text', { bold: true }, '33')),
+          k.reading('5h', { label: '5-hour', value: args.fiveHour, max: 100, color: levelColor(args.fiveHour), figure: `${args.fiveHour}%`, unit: '2h18' }),
+          k.reading('wk', { label: 'Weekly', value: args.weekly, max: 100, color: levelColor(args.weekly), figure: `${args.weekly}%`, unit: '3d4h' }),
         ],
       })
       host.replaceChildren(show(tree, ctx, paint))
     }
     paint()
     return host
-  },
-}
-
-export const Card: Story = {
-  args: { border: 'round', color: C.blue, tinted: true },
-  argTypes: {
-    border: { control: 'select', options: ['round', 'single', 'double', 'bold'] },
-    color: { control: 'color' },
-  },
-  render: (args, ctx) => {
-    const k = kitFor(ctx)
-    return show(
-      k.card(
-        'demo',
-        [
-          k.flow([k.stat(GLYPH.context, C.ok, '31%'), k.stat(GLYPH.cost, C.ok, '4.82'), k.stat(GLYPH.turns, C.blue, '23')]),
-          k.bar([{ value: 31, color: C.blue }], 100),
-        ],
-        { border: args.border, color: args.color, fill: args.tinted ? 'rgba(122,162,247,0.10)' : undefined },
-      ),
-      ctx,
-    )
   },
 }
 
@@ -124,83 +71,61 @@ export const Rounding: Story = {
         'Box',
         { flexDirection: 'column', rowGap: 0.8 },
         k.rounded(args.fill, { paddingX: 1, paddingY: 0.2 }, h('Text', { bold: true }, 'rounded: a solid fill, a row or more tall')),
-        k.capped(args.height, C.blue, C.blue, flat(C.blue)),
-        k.bar([{ value: 45, color: C.blue }, { value: 15, color: C.warn }], 100, { height: args.height }),
+        k.capped(args.height, INK, INK, flat(INK)),
+        k.bar([{ value: 45, color: INK }, { value: 15, color: C.blue }], 100, { height: args.height }),
       ),
       ctx,
     )
   },
 }
 
-export const Pills: Story = {
+/** A legend in two columns, and a header summary. */
+export const Legend: Story = {
   render: (_, ctx) => {
     const k = kitFor(ctx)
     return show(
-      k.flow(
-        [
-          k.pill('ok', C.ok, '✓ 3'),
-          k.pill('bad', C.bad, '✕ 1 failing'),
-          k.pill('warn', C.warn, '◌ 2 pending'),
-          k.pill('run', C.warn, '2 running'),
-          k.pill('merged', C.purple, 'merged'),
-        ],
-        1,
-      ),
-      ctx,
-    )
-  },
-}
-
-export const Grid: Story = {
-  args: { sections: 4, minWidth: 34 },
-  argTypes: { sections: { control: { type: 'range', min: 1, max: 6 } }, minWidth: { control: { type: 'range', min: 16, max: 60 } } },
-  render: (args, ctx) => {
-    const k = kitFor(ctx)
-    const names = ['Context', 'Turns', 'Tools', 'Agents', 'Limits', 'Git']
-    const items = names.slice(0, args.sections).map((title, i) =>
-      k.section({
-        id: title,
-        icon: GLYPH.layers,
-        color: PALETTE[i]!,
-        title,
-        children: k.bar([{ value: 20 + i * 12, color: PALETTE[i]! }], 100),
-      }),
-    )
-    return show(k.grid(items, args.minWidth), ctx)
-  },
-}
-
-export const Columns: Story = {
-  args: { turns: 23, slots: 24 },
-  argTypes: { turns: { control: { type: 'range', min: 1, max: 40 } } },
-  render: (args, ctx) =>
-    show(
-      kitFor(ctx).columns(
-        Array.from({ length: args.turns }, (_, i) => [
-          { value: 600 + ((i * 7) % 5) * 500, color: C.ok },
-          { value: 800 + (i % 4) * 300, color: C.cyan },
-          { value: i % 6 === 0 ? 9_000 : 1_200, color: C.purple },
-          { value: 20_000 + i * 1_800, color: C.blue },
+      h(
+        'Box',
+        { flexDirection: 'column', rowGap: 1 },
+        k.summary([['28%', 'of 1M'], ['3', 'failed', C.bad]]),
+        k.legend('demo', [
+          { label: 'System', color: RAMP.slate[0], figure: tokens(5_300) },
+          { label: 'Tools', color: RAMP.slate[1], figure: tokens(29_700) },
+          { label: 'MCP', color: RAMP.slate[2], figure: tokens(20_500) },
+          { label: 'Memory', color: RAMP.slate[3], figure: tokens(9_500) },
+          { label: 'Messages', color: C.blue, figure: tokens(207_000) },
         ]),
-        { slots: args.slots },
       ),
       ctx,
-    ),
+    )
+  },
 }
 
-export const Stats: Story = {
-  args: { percent: 31, cost: '4.82', minutes: 47, turns: 23, tools: 103, failed: 4, files: 7 },
+/** Stacked columns on a baseline, with labels under their columns. */
+export const Columns: Story = {
+  args: { turns: 11, slots: 16 },
+  argTypes: { turns: { control: { type: 'range', min: 1, max: 16 } } },
   render: (args, ctx) => {
     const k = kitFor(ctx)
+    const n = args.turns as number
+    const ticks = [0, Math.floor((n - 1) / 2), n - 1].filter((v, i, xs) => xs.indexOf(v) === i)
     return show(
-      k.flow([
-        k.stat(GLYPH.context, levelColor(args.percent), `${args.percent}%`),
-        k.stat(GLYPH.cost, C.ok, args.cost),
-        k.stat(GLYPH.time, C.cyan, short(args.minutes * 60_000)),
-        k.stat(GLYPH.turns, C.blue, String(args.turns)),
-        k.stat(GLYPH.tools, args.failed ? C.warn : C.purple, String(args.tools), args.failed ? ` ${args.failed}${GLYPH.failed}` : undefined),
-        k.stat(GLYPH.files, C.warn, String(args.files)),
-      ]),
+      h(
+        'Box',
+        { flexDirection: 'column' },
+        k.columns(
+          Array.from({ length: n }, (_, i) => [
+            { value: 1 + (i % 3), color: RAMP.slate[1] },
+            { value: 2 + ((i * 5) % 7), color: RAMP.blue[1] },
+            { value: 3 + ((i * 3) % 9), color: RAMP.blue[0] },
+          ]),
+          { slots: args.slots, height: 3.5 },
+        ),
+        k.axis(
+          'demo',
+          ticks.map(i => ({ at: (i + 0.5) / args.slots, text: String(i + 1).padStart(2, '0') })),
+        ),
+      ),
       ctx,
     )
   },
