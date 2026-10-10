@@ -46,6 +46,15 @@ const LABEL = 10
 const HEAD = '#272727'
 
 
+/** The debug footer's glyph and hue for each job the mods time. */
+const PERF_LOOK: Record<string, [string, string]> = {
+  render: ['▣', C.purple],
+  tick: ['↻', C.blue],
+  usage: ['◕', C.cyan],
+  git: ['⎇', C.orchid],
+  gh: ['⇡', C.ok],
+}
+
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
@@ -475,23 +484,48 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const rows = snap.rows.slice(0, opts.max ?? 6)
     const tone = (r: PerfRow) =>
       r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
-    return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={terminal ? 1 : 0.6}>
-        <Text dimColor>{`⏱ ${short(snap.sinceMs)}`}</Text>
-        {rows.map(r => {
-          const color = tone(r)
-          const timing = r.avgMs > 0 ? `${ms(r.avgMs)} ` : ''
-          return (
-            <Text key={`perf-${r.name}`} dimColor={!color} color={color}>
-              {`${r.name} ${timing}${r.perMin}/m`}
-            </Text>
-          )
-        })}
-      </Box>
-    )
+    // One glyph and hue per job, so a row reads at a glance; a slow job turns amber or red.
+    const look = (name: string): [string, string] => PERF_LOOK[name] ?? ['•', C.slate]
+    const items = [
+      <Text key="perf-since">
+        <Text color={C.slate}>⏱</Text>
+        {` ${short(snap.sinceMs)}`}
+      </Text>,
+      ...rows.map(r => {
+        const [glyph, hue] = look(r.name)
+        const color = tone(r)
+        return (
+          <Text key={`perf-${r.name}`}>
+            <Text color={color ?? hue}>{glyph}</Text>
+            <Text color={color} bold={!!color}>{r.avgMs > 0 ? ` ${ms(r.avgMs)}` : ''}</Text>
+            <Text dimColor>{` ${r.perMin}/m`}</Text>
+          </Text>
+        )
+      }),
+    ]
+    if (terminal)
+      return (
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
+          {items}
+        </Box>
+      )
+    return rounded(HEAD, { flexDirection: 'row', flexWrap: 'wrap', columnGap: 1.5, paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, items)
   }
 
-  return { bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  /**
+   * A pane whose footer stays on the bottom edge: `body` fills the height above it.
+   * For the debug footer, or anything that should sit under the content however short it is.
+   */
+  const pinned = (body: RenderElement | (RenderElement | null)[], footer: RenderElement) => (
+    <Box flexDirection="column" height="100%">
+      <Box flexDirection="column" flexGrow={1}>
+        {body}
+      </Box>
+      {footer}
+    </Box>
+  )
+
+  return { pinned, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

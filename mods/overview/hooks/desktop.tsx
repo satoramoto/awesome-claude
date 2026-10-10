@@ -281,11 +281,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   return (
-    <Box flexDirection="column">
-      {header}
-      {[context, limits, turns, tools, agents, renderGit(els, k, d, fold)]}
-      {k.perf(d.perf)}
-    </Box>
+    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf))
   )
 }
 
