@@ -37,6 +37,9 @@ const ROW_PX = 8.5 / 0.45
 /** The inspector's grid: the gutter the fold arrow sits in, and the label column. */
 const GUTTER = 2
 const LABEL = 10
+/** A band's padding (section headers, the footer), so every band has one height and feel. */
+const BAND_PAD_X = 0.8
+const BAND_PAD_Y = 0.2
 /** A section body's left indent on the desktop: about the width of a header's rounded corner. */
 const BODY_INDENT = 0.8
 
@@ -344,8 +347,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             justifyContent: 'space-between',
             alignItems: 'center',
             gap: 1,
-            paddingRight: terminal ? 0 : 0.8,
-            paddingY: terminal ? 0 : 0.2,
+            paddingRight: terminal ? 0 : BAND_PAD_X,
+            paddingY: terminal ? 0 : BAND_PAD_Y,
           },
           [
             <Box key="title" flexDirection="row" alignItems="center" flexShrink={1}>
@@ -515,10 +518,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     if (opts.lead?.length) {
       const row = [...opts.lead, share('perf-since', '⏱', C.slate, short(snap.sinceMs), '')]
       if (terminal) return <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">{row}</Box>
-      return rounded(HEAD, { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', columnGap: 1, paddingX: 0.6, flexShrink: 0, marginTop: 0.6, overflow: 'hidden' }, row)
+      return rounded(HEAD, { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: 1, paddingX: BAND_PAD_X, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: 0.6, overflow: 'hidden' }, row)
     }
     if (terminal) return <Box marginTop={1}>{line('jobs', items)}</Box>
-    return rounded(HEAD, { flexDirection: 'column', paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, line('jobs', items))
+    return rounded(HEAD, { flexDirection: 'column', paddingX: BAND_PAD_X, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: 0.6 }, line('jobs', items))
   }
 
   /**
