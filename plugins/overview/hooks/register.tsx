@@ -31,7 +31,7 @@ import { createPerf } from '../kit/perf'
 
 import { renderDesktop } from './desktop'
 import type { AppElements, Helpers } from './desktop'
-import { NETTOP, NET_PER_PROCESS, RESOURCES_SCRIPT, takeNettop, toResources } from './resources'
+import { NETTOP, NET_PER_PROCESS, resourcesSh, takeNettop, toResources } from './resources'
 
 const PANE = 'overview'
 const snapshot = atom({ plugin: 'overview', key: 'snapshot' } as const, null)
@@ -681,7 +681,7 @@ let nettopBusy = false
 
 /** One sample of the session's share of the machine; see resources.ts. */
 const sampleResources = async ($: EngineInterface) => {
-  const run = await $.process.run(['/usr/bin/python3', '-c', RESOURCES_SCRIPT], { timeoutMs: 5_000 })
+  const run = await $.process.run(resourcesSh(), { timeoutMs: 5_000 })
   if (run.exitCode !== 0) return null
   if (NET_PER_PROCESS && !nettopBusy) {
     nettopBusy = true
@@ -720,8 +720,7 @@ const tick = async ($: EngineInterface) => {
     last.gh = t
     await perf.time('gh', () => refreshGh($))
   }
-  // The session's share of the machine. Each sample costs about 0.1 s of CPU (mostly
-  // Python starting), so every 10 s: about 1% of one core while the pane is shown.
+  // The session's share of the machine: a few shell commands, every 10 s while shown.
   if (t - last.resources >= RESOURCES_EVERY) {
     last.resources = t
     const res = await perf.time('resources', () => sampleResources($)).catch(() => null)

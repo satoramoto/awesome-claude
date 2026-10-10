@@ -15,12 +15,13 @@ const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[
   if (!r) return []
   const hot = (part: number, whole: number) => (whole > 0 && part / whole > 0.5 ? C.bad : whole > 0 && part / whole > 0.25 ? C.warn : undefined)
   const pctOf = (n: number) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`
+  // Tight on purpose: the footer is one row. Rates are per second; the disk is the system's.
   return [
     k.share('cpu', '⚙', C.blue, pctOf(r.cpu), pctOf(r.cpuAll), hot(r.cpu, r.cpuAll)),
     k.share('mem', '▦', C.purple, bytes(r.mem), bytes(r.memAll), hot(r.mem, r.memAll)),
-    k.share('disk', '⛁', C.orchid, `${bytes(r.disk)}/s`, `${bytes(r.diskAll)}/s`, hot(r.disk, r.diskAll)),
-    k.share('net', '⇅', C.cyan, r.net === null ? '–' : `${bytes(r.net)}/s`, `${bytes(r.netAll)}/s`, r.net === null ? undefined : hot(r.net, r.netAll)),
-    k.share('procs', '⑂', C.slate, String(r.procs), 'procs'),
+    k.share('net', '⇅', C.cyan, r.net === null ? '–' : bytes(r.net), bytes(r.netAll), r.net === null ? undefined : hot(r.net, r.netAll)),
+    k.share('disk', '⛁', C.orchid, bytes(r.diskAll), ''),
+    k.share('procs', '⑂', C.slate, String(r.procs), ''),
   ]
 }
 
