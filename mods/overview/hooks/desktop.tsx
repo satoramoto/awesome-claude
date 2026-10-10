@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import { bytes, duration, money, short, tokens } from '@kit/format'
 import type { PerfSnapshot } from '@kit/perf'
 import { C, GLYPH, MUTED, levelColor } from '@kit/tokens'
-import { kit } from '@kit/ui'
+import { fold as foldArrow, kit } from '@kit/ui'
 
 import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
 
@@ -339,7 +339,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           ),
           others.length && Button ? (
             <Box key="other" flexDirection="row" justifyContent="space-between" gap={1}>
-              <Button plain dimColor label={`${otherOpen ? '▾' : '▸'} Other tools`} onPress={() => d.toggle('tools-other')} />
+              <Button plain dimColor label={`${foldArrow(!otherOpen)} Other tools`} onPress={() => d.toggle('tools-other')} />
               <Text>{String(others.reduce((n, [, t]) => n + t.n, 0))}</Text>
             </Box>
           ) : null,

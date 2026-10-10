@@ -45,6 +45,12 @@ const BODY_INDENT = 1.6
 const BODY_INSET_RIGHT = 1.2
 
 /**
+ * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
+ * ▶ a text glyph; without it macOS can draw it as an emoji.
+ */
+export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
+
+/**
  * A section header's band: a tonal step that marks where each section starts. Solid,
  * not translucent, so its rounded border in the same colour doesn't show as a ring.
  * Tuned for the desktop's dark pane.
@@ -331,7 +337,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     onToggle?: () => void
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
-    const arrow = s.collapsed ? '▸' : '▾'
+    const arrow = fold(s.collapsed)
     const toggle =
       s.onToggle && Button ? (
         <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
