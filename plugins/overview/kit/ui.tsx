@@ -59,13 +59,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       )
     }
     // Grow factors out of 1000 (the desktop caps them at 10000): finer than a pixel at any width.
-    // Rounded: the track alone carries a `round` border in its own colour and clips what is
-    // inside, so the bar is a pill and its fills stay plain (a border on each fill drew blobs).
+    // Flat, not rounded: on the desktop a border takes room inside the box, so a thin bordered
+    // track has no room left for its fills (they draw empty), and bordered fills draw as blobs.
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
     return (
-      <Box flexDirection="row" flexGrow={1} height={height} borderStyle="round" borderColor={TRACK} backgroundColor={TRACK} overflow="hidden">
+      <Box flexDirection="row" flexGrow={1} height={height} backgroundColor={TRACK} overflow="hidden">
         {/* An explicit full height: the desktop doesn't stretch a child to its parent's height. */}
         {shown.map(p => (
           <Box flexGrow={p.grow} flexShrink={0} width={0} height="100%" backgroundColor={p.color} />
