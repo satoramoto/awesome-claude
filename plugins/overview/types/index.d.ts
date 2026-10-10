@@ -155,6 +155,37 @@ export type Activity = {
   contextLog: number[]
 }
 
+/** A branch the session started (or began on), and the checkout it lives in. */
+export type Tracked = { branch: string; path: string; at: number }
+
+/** One tracked branch's state against the repo's default branch, and its PR. */
+export type BranchView = {
+  branch: string
+  /** The checkout (main or a worktree) the branch was started in. */
+  path: string
+  /** That checkout's folder name, and whether it's a linked worktree. */
+  place: string
+  worktree: boolean
+  /** The branch still exists locally. */
+  exists: boolean
+  /** It's what that checkout has checked out now, so the uncommitted counts are its. */
+  checkedOut: boolean
+  /** Commits ahead of and behind the default branch. */
+  ahead: number
+  behind: number
+  /** Lines added and removed against the default branch, committed and not. */
+  insertions: number
+  deletions: number
+  staged: number
+  modified: number
+  untracked: number
+  conflicted: number
+  /** Pushed: the remote has the branch. */
+  pushed: boolean
+  /** Its most recent PR, if any. */
+  pr: GitPr | null
+}
+
 /** This session's process tree against the whole machine, from the last sample. */
 export type Resources = {
   /** Processes in the session's tree. */
@@ -194,6 +225,14 @@ declare module 'claude-code' {
       collapsed: string[]
       /** The session's share of the machine; null until two samples give rates. */
       resources: Resources | null
+      /** Branches the session started or began on, oldest first. */
+      tracked: Tracked[]
+      /** Branches the person closed with ✕. */
+      hidden: string[]
+      /** Each shown tracked branch's state, newest first. */
+      branches: BranchView[]
+      /** A branch a PR is being created for, while gh runs. */
+      creating: string | null
     }
   }
 }

@@ -15,6 +15,7 @@ import type {
   Activity,
   Agent,
   AgentExtra,
+  BranchView,
   GhInfo,
   GitFile,
   GitInfo,
@@ -24,9 +25,11 @@ import type {
   Limit,
   Segment,
   Snapshot,
+  Tracked,
   TreeRow,
   TurnPoint,
 } from '../types'
+import { parseLeftRight, startedBy } from './branches'
 import { createPerf } from '@kit/perf'
 
 import { renderDesktop } from './desktop'
@@ -484,6 +487,132 @@ const refreshGit = async ($: EngineInterface): Promise<void> => {
   }
 }
 
+// ---- Branches the session works on ----------------------------------------------
+
+const tracked = atom({ plugin: 'overview', key: 'tracked' } as const, [])
+const hidden = atom({ plugin: 'overview', key: 'hidden' } as const, [])
+const branches = atom({ plugin: 'overview', key: 'branches' } as const, [])
+const creating = atom({ plugin: 'overview', key: 'creating' } as const, null)
+const MAX_BRANCHES = 6
+
+/** Adds a branch to the tracked list once; a path relative to `cwd` is resolved. */
+const track = async ($: EngineInterface, branch: string, path: string, cwd: string) => {
+  const full = path.startsWith('/') ? path : `${cwd.replace(/\/$/, '')}/${path.replace(/^\.\//, '')}`
+  await update($, tracked, list => (list.some(t => t.branch === branch) ? list : [...list, { branch, path: full, at: Date.now() }]))
+}
+
+/** One tracked branch's git state against the default branch. */
+const loadBranch = async ($: EngineInterface, t: Tracked, base: string, prs: Map<string, GitPr>): Promise<BranchView> => {
+  const run = (args: string[]) => $.process.run(['git', '--no-optional-locks', ...args], { cwd: t.path, timeoutMs: 10_000 }).catch(() => null)
+  const [head, exists, lr, committed, status, remote, top] = await Promise.all([
+    run(['rev-parse', '--abbrev-ref', 'HEAD']),
+    run(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`]),
+    run(['rev-list', '--left-right', '--count', `${base}...${t.branch}`]),
+    run(['diff', '--shortstat', `${base}...${t.branch}`]),
+    run(['status', '--porcelain=v2']),
+    run(['rev-parse', '--verify', '--quiet', `refs/remotes/origin/${t.branch}`]),
+    run(['rev-parse', '--show-toplevel', '--git-dir', '--git-common-dir']),
+  ])
+  const checkedOut = head?.exitCode === 0 && head.stdout.trim() === t.branch
+  const counts = checkedOut && status?.exitCode === 0 ? parseStatus(status.stdout) : null
+  // Uncommitted lines count too while the branch is checked out, as the app counts them.
+  const working = checkedOut ? await run(['diff', '--shortstat', 'HEAD']) : null
+  const lines = parseShortstat(committed?.exitCode === 0 ? committed.stdout : '')
+  const extra = parseShortstat(working?.exitCode === 0 ? working.stdout : '')
+  // A linked worktree's git dir differs from the repository's common one.
+  const [toplevel = t.path, gitDir = '.git', common = '.git'] = top?.exitCode === 0 ? top.stdout.trim().split('\n') : []
+  return {
+    branch: t.branch,
+    path: t.path,
+    place: basename(toplevel),
+    worktree: gitDir !== common,
+    exists: exists?.exitCode === 0,
+    checkedOut,
+    ...(lr?.exitCode === 0 ? parseLeftRight(lr.stdout) : { ahead: 0, behind: 0 }),
+    insertions: lines.insertions + extra.insertions,
+    deletions: lines.deletions + extra.deletions,
+    staged: counts?.staged ?? 0,
+    modified: counts?.modified ?? 0,
+    untracked: counts?.untracked ?? 0,
+    conflicted: counts?.conflicted ?? 0,
+    pushed: remote?.exitCode === 0,
+    pr: prs.get(t.branch) ?? null,
+  }
+}
+
+let branchesBusy = false
+
+/** PRs by head branch, from the last gh read; gh runs on its own slower cadence. */
+let prCache = new Map<string, GitPr>()
+let baseCache: string | null = null
+
+/** Re-reads every shown tracked branch; with `withGh`, all their PRs too, in one gh call. */
+const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void> => {
+  if (branchesBusy) return
+  branchesBusy = true
+  try {
+    const info = await read($, git)
+    if (!info?.ok) return
+    // The session's own branch counts as started here.
+    if (!info.detached) await track($, info.branch, info.root, info.root)
+    const off = await read($, hidden)
+    const list = (await read($, tracked)).filter(t => !off.includes(t.branch)).slice(-MAX_BRANCHES).reverse()
+    const run = (cmd: string[]) => $.process.run(cmd, { cwd: info.root, timeoutMs: 20_000 }).catch(() => null)
+    if (baseCache === null) {
+      const ref = await run(['git', 'rev-parse', '--abbrev-ref', 'origin/HEAD'])
+      baseCache = ref?.exitCode === 0 ? ref.stdout.trim() : 'origin/main'
+    }
+    if (withGh) {
+      const prList = await run(['gh', 'pr', 'list', '--state', 'all', '--limit', '40', '--json', GH_FIELDS])
+      if (prList?.exitCode === 0) {
+        try {
+          // Newest first from gh, so the first PR per branch is its latest.
+          const prs = new Map<string, GitPr>()
+          for (const json of JSON.parse(prList.stdout) as any[]) if (!prs.has(json.headRefName)) prs.set(json.headRefName, toGitPr(json, json.headRefName))
+          prCache = prs
+        } catch {
+          // Unreadable gh output: keep the last PRs.
+        }
+      }
+    }
+    const fresh = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache)))
+    if (!same(await read($, branches), fresh)) await update($, branches, () => fresh)
+  } finally {
+    branchesBusy = false
+  }
+}
+
+/** The ✕ on a branch: stop showing it. */
+const hideBranch = async ($: EngineInterface, branch: string) => {
+  await update($, hidden, list => (list.includes(branch) ? list : [...list, branch]))
+  await update($, branches, list => list.filter(b => b.branch !== branch))
+}
+
+/**
+ * Create PR, as the desktop app's own button does it: hand it to the session as a
+ * prompt, so Claude writes the description, opens the PR and starts watching it
+ * (auto-merge and Auto-fix, per the person's instructions). Runs as a turn of its
+ * own once the session is idle.
+ */
+const createPr = async ($: EngineInterface, branch: string) => {
+  if (await read($, creating)) return
+  const view = (await read($, branches)).find(b => b.branch === branch)
+  if (!view) return
+  await update($, creating, () => branch)
+  try {
+    await $.prompt.submit({
+      text:
+        `Create a pull request for the \`${branch}\` branch (checked out at ${view.path}). ` +
+        'Push it if needed, write the title and body from its commits, open it, and start watching it.',
+      asUser: true,
+    })
+  } catch {
+    $.ui.toast('Create PR: could not send the request to the session')
+  } finally {
+    await update($, creating, () => null)
+  }
+}
+
 const refreshGh = async ($: EngineInterface): Promise<void> => {
   if (ghBusy) return
   const info = await read($, git)
@@ -714,11 +843,13 @@ const tick = async ($: EngineInterface) => {
     stale.git = false
     last.git = t
     await perf.time('git', () => refreshGit($))
+    if (!due('gh', t)) await perf.time('branches', () => refreshBranches($))
   }
   if (due('gh', t)) {
     stale.gh = false
     last.gh = t
     await perf.time('gh', () => refreshGh($))
+    await perf.time('branches', () => refreshBranches($, true))
   }
   // The session's share of the machine: a few shell commands, every 10 s while shown.
   if (t - last.resources >= RESOURCES_EVERY) {
@@ -762,6 +893,17 @@ export const register: Register = on => {
     if (!('deny' in ran && ran.deny)) {
       const path = editedPath(e.tool, e as { file_path?: unknown; notebook_path?: unknown })
       void perf.time('tool.call', () => update($, activity, a => countTool(a, e.tool, Boolean(ran.isError), path))).catch(() => undefined)
+    }
+    // A command that starts a branch or a worktree: track it.
+    if (e.tool === 'Bash') {
+      const started = startedBy(e.command)
+      if (started.length) {
+        void (async () => {
+          const cwd = await $.session.cwd()
+          for (const s of started) await track($, s.branch, s.path ?? cwd, cwd)
+          stale.gh = true
+        })().catch(() => undefined)
+      }
     }
     if (FILE_TOOLS.includes(e.tool)) {
       stale.git = true
@@ -845,6 +987,15 @@ export const register: Register = on => {
         activity: await read($, activity),
         collapsed: await read($, collapsed),
         resources: await read($, resources),
+        branches: await read($, branches),
+        creating: await read($, creating),
+        hideBranch: (branch: string) => void hideBranch($, branch).catch(() => undefined),
+        // Merge, like Create PR: the session does it, and reports back.
+        mergePr: (pr: GitPr) =>
+          void $.prompt
+            .submit({ text: `Merge PR #${pr.number} (${pr.url}) once its checks pass: turn on auto-merge, or merge it now if it's already green.`, asUser: true })
+            .catch(() => $.ui.toast('Merge: could not send the request to the session')),
+        createPr: (branch: string) => void createPr($, branch).catch(() => undefined),
         toggle: (id: string) =>
           void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
         columns: e.props.bodyColumns,

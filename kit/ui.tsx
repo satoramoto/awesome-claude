@@ -338,8 +338,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         <Text dimColor>{arrow}</Text>
       )
     // The arrow and the icon each take a fixed column, so every title starts at the same x.
+    // One standard row above each section, and no other margin: sections sit one row apart.
     return (
-      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.7} marginBottom={terminal ? 0 : 0.5}>
+      <Box key={`section-${s.id}`} flexDirection="column" marginTop={1}>
         {rounded(
           HEAD,
           {

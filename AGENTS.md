@@ -17,7 +17,8 @@ what mods draw; until then, the checks are the build and validate.
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR: the
 build (and fails if `plugins/` wasn't rebuilt and committed) and `claude plugin
 validate` for every mod. Work on a branch, open a PR, and let CI be the final
-check; `main` takes PRs only.
+check; `main` takes PRs only. Every PR gets auto-merge turned on when it's opened
+(`main` requires the CI check, so it merges once CI passes).
 
 Every agent commit ends with a blank line and a co-author trailer naming the agent
 that made it, for example `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`.
