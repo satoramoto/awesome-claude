@@ -5,7 +5,7 @@ import type { PerfSnapshot } from '@kit/perf'
 import { C, GLYPH, MUTED, levelColor } from '@kit/tokens'
 import { kit } from '@kit/ui'
 
-import type { Activity, Agent, AgentExtra, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
+import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
 
 /**
  * The session's share of the machine: CPU, memory, disk and network, each ours
@@ -46,6 +46,14 @@ export type DesktopData = {
   rows?: number
   /** The session's share of the machine, for the footer. */
   resources: Resources | null
+  /** The branches the session started, newest first. */
+  branches: BranchView[]
+  /** The branch a PR is being created for, if any. */
+  creating: string | null
+  /** The ✕ on a branch. */
+  hideBranch: (branch: string) => void
+  /** Create PR on a branch without one. */
+  createPr: (branch: string) => void
   /** What the mod cost, for the debug footer. */
   perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
@@ -303,80 +311,97 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   return (
-    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf, { lead: machine(k, d.resources) }), d.rows)
+    k.pinned([header, context, limits, turns, tools, agents, ...renderBranches(els, k, d, fold)], k.perf(d.perf, { lead: machine(k, d.resources) }), d.rows)
   )
 }
 
-const renderGit = (
-  els: AppElements,
-  k: ReturnType<typeof kit>,
-  d: DesktopData,
-  fold: (id: string) => { collapsed: boolean; onToggle: () => void },
-): RenderElement => {
-  const { Box, Text } = els
-  const g = d.git
-  if (g === null || !g.ok) {
-    return k.section({ id: 'git', icon: GLYPH.branch, color: C.slate, title: 'Development', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
-  }
-  // The working tree's state as coloured glyphs: conflicted, staged, modified, new.
-  const state: [number, string, string][] = [
-    [g.conflicted, '✕', C.bad],
-    [g.staged, '●', C.ok],
-    [g.modified, '✎', C.warn],
-    [g.untracked, '+', C.cyan],
-    [g.ahead, '↑', C.ok],
-    [g.behind, '↓', C.warn],
-  ]
+/** A PR's state as one colour: merged purple, closed or draft grey, else by its checks. */
+const prColor = (pr: GitPr) =>
+  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.warn : C.ok
+
+/**
+ * One section per branch the session started, as the desktop app tracks them:
+ * the branch's changes against the default branch in the header, and below it
+ * where it lives, its uncommitted state, and its PR with CI; Create PR when it
+ * has none, ✕ to stop showing it.
+ */
+const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopData, fold: (id: string) => { collapsed: boolean; onToggle: () => void }): RenderElement[] => {
+  const { Box, Text, Link, Button } = els
   // A glyph and its figure, a small gap between (a leading space in Text is dropped).
-  const mark = (key: string, glyph: string, color: string, figure: string) => (
+  const mark = (key: string, glyph: string, color: string, figure: string, dim = false) => (
     <Box key={key} flexDirection="row" gap={0.3}>
       <Text color={color}>{glyph}</Text>
-      <Text>{figure}</Text>
+      <Text dimColor={dim}>{figure}</Text>
     </Box>
   )
-  const hub = d.gh
-  const prs = hub && hub.root === g.root && !hub.note ? hub.prs.slice(0, 5) : []
-  return k.section({
-    id: 'git',
-    icon: GLYPH.branch,
-    color: C.slate,
-    title: 'Development',
-    right: (
-      <Box flexDirection="row" gap={1.2} alignItems="center">
-        <Text dimColor wrap="truncate">
-          {g.worktree.linked ? `${g.repo}/${g.worktree.name}` : g.repo}
-        </Text>
-        {mark('branch', GLYPH.branch, C.slate, g.branch)}
-        {state.filter(([n]) => n > 0).map(([n, glyph, color]) => mark(`s-${glyph}`, glyph, color, String(n)))}
-        {g.insertions ? <Text color={C.ok}>{`+${g.insertions}`}</Text> : null}
-        {g.deletions ? <Text color={C.bad}>{`−${g.deletions}`}</Text> : null}
+  return d.branches.map(b => {
+    const pr = b.pr
+    const open = pr?.state === 'OPEN'
+    const color = pr ? prColor(pr) : C.slate
+    const id = `branch-${b.branch}`
+    const state: [number, string, string][] = [
+      [b.conflicted, '✕', C.bad],
+      [b.staged, '●', C.ok],
+      [b.modified, '✎', C.warn],
+      [b.untracked, '+', C.cyan],
+      [b.ahead, '↑', C.ok],
+      [b.behind, '↓', C.warn],
+    ]
+    const where = (
+      <Box key="where" flexDirection="row" justifyContent="space-between" gap={1}>
+        <Box flexDirection="row" gap={1} flexShrink={1}>
+          {mark('place', b.worktree ? '⧉' : '▣', C.slate, b.place, true)}
+          {!b.exists ? <Text dimColor>deleted</Text> : !b.pushed ? <Text dimColor>not pushed</Text> : null}
+        </Box>
+        <Box flexDirection="row" gap={1}>
+          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => mark(`s-${glyph}`, glyph, c, String(n)))}
+        </Box>
       </Box>
-    ),
-    ...fold('git'),
-    children: prs.length ? prs.map(pr => prRow(els, pr)) : null,
-  })
-}
-
-/** One PR on a rail: its state as the rail's colour, the number as a link, the title, checks on the right. */
-const prRow = ({ Box, Text, Link }: AppElements, pr: GitPr) => {
-  const color = pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.warn : C.ok
-  const { passed, failed, pending } = pr.checks
-  const open = pr.state === 'OPEN'
-  const checks = !open ? (pr.state === 'MERGED' ? 'merged' : 'closed') : failed ? `${failed} failing` : pending ? `${pending} pending` : passed ? 'checks pass' : ''
-  return (
-    <Box key={`pr-${pr.number}`} flexDirection="row" gap={1}>
-      <Box width={0.25} backgroundColor={color} flexShrink={0} />
-      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={1}>
+    )
+    const checks = pr && open ? (
+      <Box flexDirection="row" gap={1}>
+        {pr.checks.passed ? mark('ok', '✓', C.ok, String(pr.checks.passed)) : null}
+        {pr.checks.failed ? mark('bad', '✕', C.bad, String(pr.checks.failed)) : null}
+        {pr.checks.pending ? mark('wait', '◌', C.warn, String(pr.checks.pending)) : null}
+      </Box>
+    ) : (
+      <Text color={color}>{pr?.state === 'MERGED' ? 'merged' : pr?.state === 'CLOSED' ? 'closed' : ''}</Text>
+    )
+    const prLine = pr ? (
+      <Box key="pr" flexDirection="row" justifyContent="space-between" gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
           <Link href={pr.url} label={`#${pr.number}`} />
-          <Text wrap="truncate" dimColor={!open || pr.isDraft} bold={pr.current}>
+          <Text wrap="truncate" dimColor={!open || pr.isDraft}>
             {pr.title}
           </Text>
         </Box>
-        <Text color={failed && open ? C.bad : undefined} dimColor={!(failed && open)}>
-          {checks}
-        </Text>
+        {checks}
       </Box>
-    </Box>
-  )
+    ) : b.exists ? (
+      <Box key="create" flexDirection="row">
+        {d.creating === b.branch ? <Text dimColor>creating PR…</Text> : <Button label="Create PR" onPress={() => d.createPr(b.branch)} />}
+      </Box>
+    ) : null
+    const failing = pr && open && pr.failing.length ? (
+      <Text key="failing" color={C.bad} wrap="truncate">
+        {pr.failing.slice(0, 3).join(', ')}
+      </Text>
+    ) : null
+    return k.section({
+      id,
+      icon: GLYPH.branch,
+      color,
+      title: b.branch,
+      right: (
+        <Box flexDirection="row" gap={1} alignItems="center">
+          {b.insertions ? <Text color={C.ok}>{`+${b.insertions}`}</Text> : null}
+          {b.deletions ? <Text color={C.bad}>{`−${b.deletions}`}</Text> : null}
+          {Button ? <Button key={`hide-${b.branch}`} plain dimColor label="✕" onPress={() => d.hideBranch(b.branch)} /> : null}
+        </Box>
+      ),
+      ...fold(id),
+      children: [where, prLine, failing],
+    })
+  })
 }
+
