@@ -339,22 +339,35 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     const open = pr?.state === 'OPEN'
     const color = pr ? prColor(pr) : C.slate
     const id = `branch-${b.branch}`
+    // Git-prompt marks: ! conflicted, + staged, ~ modified, ? untracked, ↑ ahead, ↓ behind.
     const state: [number, string, string][] = [
-      [b.conflicted, '✕', C.bad],
-      [b.staged, '●', C.ok],
-      [b.modified, '✎', C.warn],
-      [b.untracked, '+', C.cyan],
+      [b.conflicted, '!', C.bad],
+      [b.staged, '+', C.ok],
+      [b.modified, '~', C.warn],
+      [b.untracked, '?', C.cyan],
       [b.ahead, '↑', C.ok],
       [b.behind, '↓', C.warn],
     ]
+    const creatable = !pr && b.exists
     const where = (
       <Box key="where" flexDirection="row" justifyContent="space-between" gap={1}>
         <Box flexDirection="row" gap={1} flexShrink={1}>
-          {mark('place', b.worktree ? '⧉' : '▣', C.slate, b.place, true)}
+          <Text dimColor wrap="truncate">
+            {b.worktree ? `${b.place} (worktree)` : b.place}
+          </Text>
           {!b.exists ? <Text dimColor>deleted</Text> : !b.pushed ? <Text dimColor>not pushed</Text> : null}
         </Box>
-        <Box flexDirection="row" gap={1}>
-          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => mark(`s-${glyph}`, glyph, c, String(n)))}
+        <Box flexDirection="row" gap={1} alignItems="center">
+          {state.filter(([n]) => n > 0).map(([n, glyph, c]) => (
+            <Text key={`s-${glyph}`} color={c}>{`${glyph}${n}`}</Text>
+          ))}
+          {creatable && Button ? (
+            d.creating === b.branch ? (
+              <Text dimColor>creating PR…</Text>
+            ) : (
+              <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
+            )
+          ) : null}
         </Box>
       </Box>
     )
