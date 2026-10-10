@@ -316,7 +316,7 @@ const renderGit = (
   const { Box, Text } = els
   const g = d.git
   if (g === null || !g.ok) {
-    return k.section({ id: 'git', icon: GLYPH.branch, color: C.slate, title: 'Git', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
+    return k.section({ id: 'git', icon: GLYPH.branch, color: C.slate, title: 'Development', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
   }
   // The working tree's state as coloured glyphs: conflicted, staged, modified, new.
   const state: [number, string, string][] = [
@@ -340,12 +340,13 @@ const renderGit = (
     id: 'git',
     icon: GLYPH.branch,
     color: C.slate,
-    title: g.branch,
+    title: 'Development',
     right: (
       <Box flexDirection="row" gap={1.2} alignItems="center">
         <Text dimColor wrap="truncate">
           {g.worktree.linked ? `${g.repo}/${g.worktree.name}` : g.repo}
         </Text>
+        {mark('branch', GLYPH.branch, C.slate, g.branch)}
         {state.filter(([n]) => n > 0).map(([n, glyph, color]) => mark(`s-${glyph}`, glyph, color, String(n)))}
         {g.insertions ? <Text color={C.ok}>{`+${g.insertions}`}</Text> : null}
         {g.deletions ? <Text color={C.bad}>{`−${g.deletions}`}</Text> : null}
