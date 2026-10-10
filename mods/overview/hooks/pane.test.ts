@@ -63,7 +63,8 @@ describe('pane', () => {
     expect(await ui.find({ type: 'Text', text: '9%' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '14k msg' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: /skl/ })).toBeUndefined()
-    expect(await ui.find({ type: 'Text', text: 'Compacts at 167k of 200k' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: 'Compacts at' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '167k' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '42%' })).toBeDefined()
     // Plain words, no game vocabulary.

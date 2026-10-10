@@ -92,7 +92,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const context = k.section({
     id: 'context',
     title: 'Context',
-    right: snap ? <Text dimColor>{snap.model}</Text> : <Text dimColor>measuring…</Text>,
+    right: snap ? <Text dimColor>{`${tokens(snap.total)} / ${tokens(snap.max)}`}</Text> : <Text dimColor>measuring…</Text>,
     ...fold('context'),
     children: snap
       ? [
@@ -104,8 +104,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             figure: `${snap.percent}%`,
             unit: tokens(snap.total),
           }),
-          k.legendBar(parts, snap.max, tokens, { height: 0.35 }),
-          snap.compactAt ? <Text dimColor>{`Compacts at ${tokens(snap.compactAt)} of ${tokens(snap.max)}`}</Text> : null,
+          k.legendBar(parts, snap.max, tokens, { height: 0.22 }),
+          k.prop('model', 'Model', snap.model),
+          snap.compactAt ? k.prop('compact', 'Compacts at', tokens(snap.compactAt)) : null,
         ]
       : null,
   })
@@ -203,7 +204,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   return (
     <Box flexDirection="column">
       {summary}
-      {k.grid([context, limits, turns, tools, agents, renderGit(els, k, d, fold)].filter((s): s is RenderElement => s !== null))}
+      {[context, limits, turns, tools, agents, renderGit(els, k, d, fold)]}
       {k.perf(d.perf)}
     </Box>
   )
@@ -242,11 +243,10 @@ const renderGit = (
     ),
     ...fold('git'),
     children: [
-      k.line(
-        'git-state',
-        <Text dimColor wrap="truncate-start">
-          {g.worktree.linked ? `${g.repo}/${g.worktree.name}` : g.repo}
-        </Text>,
+      k.prop('repo', 'Repository', g.worktree.linked ? `${g.repo} · ${g.worktree.name}` : g.repo),
+      k.prop(
+        'changes',
+        'Changes',
         <Text>
           {changed.length === 0 ? (
             <Text dimColor>clean</Text>

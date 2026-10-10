@@ -28,8 +28,6 @@ export type Part = { value: number; color: string; label?: string }
 
 const BAR = 0.45
 
-/** A bubble's faint rounded outline. */
-const FRAME = 'rgba(128,128,128,0.28)'
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button } = els
@@ -168,55 +166,62 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
 
   /**
-   * A section: an icon, a heading, figures aligned right, and its content.
-   * Collapsible when given `onToggle` (the mod keeps which are collapsed in its
-   * state); collapsed, only the heading line shows.
+   * A section as a properties inspector draws one (Premiere's Effect Controls):
+   * a collapsible header row (▾ title, figures on the right) and its properties
+   * indented under the arrow. No panel, outline or tint: rows and indentation do
+   * the grouping. Collapsible when given `onToggle` (the mod keeps which are
+   * folded in its state); folded, only the header row shows.
    */
   const section = (s: {
     id: string
     title: string
-    /** A glyph before the title, in `color`; plain sections leave it out. */
+    /** A glyph before the title, in `color`. */
     icon?: string
     color?: string
     right?: RenderElement | null
     collapsed?: boolean
     onToggle?: () => void
-    /** Draw the section in its own rounded bubble (the default) or bare. */
-    bubble?: boolean
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
+    const arrow = s.collapsed ? '▸' : '▾'
     const toggle =
       s.onToggle && Button ? (
-        <Button key={`toggle-${s.id}`} plain dimColor label={s.collapsed ? '▸' : '▾'} onPress={() => s.onToggle?.()} />
-      ) : null
-    const head = (
-      <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
-        <Box flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5} flexShrink={1}>
-          {toggle}
-          <Text wrap="truncate">
-            {s.icon ? <Text color={s.color}>{`${s.icon} `}</Text> : null}
-            <Text dimColor>{s.title}</Text>
-          </Text>
-        </Box>
-        {s.right ?? null}
-      </Box>
-    )
-    const body = s.collapsed ? null : s.children
-    if (s.bubble === false) {
-      return (
-        <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.6}>
-          {head}
-          {body}
-        </Box>
+        <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
+      ) : (
+        <Text dimColor>{arrow}</Text>
       )
-    }
     return (
-      <Box key={`section-${s.id}`} flexDirection="column" borderStyle="round" borderColor={FRAME} paddingX={1} paddingY={terminal ? 0 : 0.3}>
-        {head}
-        {body}
+      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.5}>
+        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+          <Box flexDirection="row" alignItems="center" gap={terminal ? 1 : 0.5} flexShrink={1}>
+            {toggle}
+            <Text wrap="truncate" bold>
+              {s.icon ? <Text color={s.color}>{`${s.icon} `}</Text> : null}
+              {s.title}
+            </Text>
+          </Box>
+          {s.right ?? null}
+        </Box>
+        {s.collapsed ? null : (
+          <Box flexDirection="column" paddingLeft={2}>
+            {s.children}
+          </Box>
+        )}
       </Box>
     )
   }
+
+  /** A property row: a dim label on the left, a value on the right. */
+  const prop = (key: string, label: string, value: RenderElement | string, labelWidth = 10) => (
+    <Box key={key} flexDirection="row" gap={1}>
+      <Box width={labelWidth} flexShrink={0}>
+        <Text dimColor wrap="truncate">
+          {label}
+        </Text>
+      </Box>
+      {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
+    </Box>
+  )
 
   /**
    * Sections side by side when there is room: each at least `minWidth` cells,
@@ -233,19 +238,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   )
 
   /**
-   * A thin rounded gauge, `value` of `max`: on the desktop the track and the fill
-   * are boxes with a `round` border in their own colour, so they draw as pills.
+   * A thin flat gauge, `value` of `max`. Not rounded: a `round` border on a box
+   * this thin draws as a thick blob on the desktop, not a pill.
    */
-  const gauge = (value: number, max: number, color: string) => {
-    if (terminal) return bar([{ value, color }], max)
-    const f = Math.max(0, Math.min(1, value / Math.max(max, 1))) * 1000
-    return (
-      <Box flexDirection="row" flexGrow={1} height={0.12} borderStyle="round" borderColor={TRACK} backgroundColor={TRACK} overflow="hidden">
-        {f > 0 ? <Box flexGrow={f} width={0} borderStyle="round" borderColor={color} backgroundColor={color} /> : null}
-        {f < 1000 ? <Box flexGrow={1000 - f} width={0} /> : null}
-      </Box>
-    )
-  }
+  const gauge = (value: number, max: number, color: string) => (terminal ? bar([{ value, color }], max) : bar([{ value, color }], max, { height: 0.22 }))
 
   /**
    * A reading, as an instrument shows one: a label, a thin gauge, a bold value
@@ -343,7 +339,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  return { bar, gauge, reading, rail, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  return { bar, gauge, reading, rail, prop, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>
