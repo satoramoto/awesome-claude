@@ -211,15 +211,22 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * truncates, and its figure right-aligned at the cell's end. `note` is an
    * optional coloured figure before it (a failure count).
    */
-  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], cols = 2) => {
-    // Columns of equal width, filled top to bottom; the last column's figures end on the right edge.
-    const per = Math.ceil(items.length / cols)
-    const columns = Array.from({ length: cols }, (_, c) => items.slice(c * per, c * per + per))
+  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], maxCols?: number) => {
+    // As few rows as fit: as many columns as the widest cell allows across the body
+    // (dot, label, figure, plus the gutter between columns), then rows evened out so
+    // no column is left short by more than one.
+    const cell = 2 + Math.max(0, ...items.map(t => t.label.length)) + SPACE.item + Math.max(0, ...items.map(t => t.figure.length + (t.note?.length ?? 0)))
+    const body = columns - EDGE.left - EDGE.right - 2
+    const fit = Math.max(1, Math.floor((body + SPACE.group) / (cell + SPACE.group)))
+    const rows = Math.ceil(items.length / Math.min(fit, maxCols ?? fit, Math.max(1, items.length)))
+    const cols = Math.max(1, Math.ceil(items.length / rows))
+    const per = rows
+    const groups = Array.from({ length: cols }, (_, c) => items.slice(c * per, c * per + per))
     return (
       // Whole-percent columns with the gutter as padding inside the first: the desktop
       // measures padding inside a box's width (zero-width growing columns stack there).
       <Box key={key} flexDirection="row">
-        {columns.map((col, c) => (
+        {groups.map((col, c) => (
           <Box key={`${key}-col-${c}`} width={`${Math.floor(100 / cols)}%`} paddingRight={c < cols - 1 ? SPACE.group : 0} flexDirection="column">
             {col.map(t => (
               <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair}>
