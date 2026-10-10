@@ -32,6 +32,9 @@ const BAR = 0.45
 const GUTTER = 2
 const LABEL = 10
 
+/** A section header's band: a tonal step that marks where each section starts. */
+const HEAD = 'rgba(128,128,128,0.13)'
+
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button } = els
@@ -56,13 +59,15 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       )
     }
     // Grow factors out of 1000 (the desktop caps them at 10000): finer than a pixel at any width.
+    // Rounded: the track alone carries a `round` border in its own colour and clips what is
+    // inside, so the bar is a pill and its fills stay plain (a border on each fill drew blobs).
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
     return (
-      <Box flexDirection="row" flexGrow={1} height={height} backgroundColor={TRACK} overflow="hidden">
+      <Box flexDirection="row" flexGrow={1} height={height} borderStyle="round" borderColor={TRACK} backgroundColor={TRACK} overflow="hidden">
         {shown.map(p => (
-          <Box flexGrow={p.grow} flexShrink={0} width={0} height={height} backgroundColor={p.color} />
+          <Box flexGrow={p.grow} flexShrink={0} width={0} backgroundColor={p.color} />
         ))}
         {rest > 0 ? <Box flexGrow={rest} width={0} /> : null}
       </Box>
@@ -90,8 +95,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       </Box>
     )
 
-  /** A small square of color. */
-  const swatch = (color: string) => (terminal ? <Text color={color}>■</Text> : <Box width={1} height={0.7} backgroundColor={color} />)
+  /** A small round dot of colour, a legend's key. */
+  const swatch = (color: string) => <Text color={color}>●</Text>
 
   /** A chip: a swatch, a figure, a dim tag. */
   const chip = (key: string, color: string, figure: string, tag?: string) => (
@@ -231,8 +236,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       )
     // The arrow and the icon each take a fixed column, so every title starts at the same x.
     return (
-      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.9}>
-        <Box flexDirection="row" justifyContent="space-between" alignItems="center" gap={1}>
+      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.7}>
+        <Box
+          flexDirection="row"
+          justifyContent="space-between"
+          alignItems="center"
+          gap={1}
+          backgroundColor={terminal ? undefined : HEAD}
+          paddingRight={terminal ? 0 : 0.8}
+          paddingY={terminal ? 0 : 0.2}
+        >
           <Box flexDirection="row" alignItems="center" flexShrink={1}>
             <Box width={GUTTER} flexShrink={0}>
               {toggle}
@@ -284,10 +297,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   )
 
   /**
-   * A thin flat gauge, `value` of `max`. Not rounded: a `round` border on a box
-   * this thin draws as a thick blob on the desktop, not a pill.
+   * A thin rounded gauge, `value` of `max`: a one-part bar.
    */
-  const gauge = (value: number, max: number, color: string) => (terminal ? bar([{ value, color }], max) : bar([{ value, color }], max, { height: 0.22 }))
+  const gauge = (value: number, max: number, color: string) => (terminal ? bar([{ value, color }], max) : bar([{ value, color }], max, { height: 0.3 }))
 
   /**
    * A reading, as an instrument shows one: a label, a thin gauge, a bold value
