@@ -1,11 +1,28 @@
 import type { Elements, RenderElement } from 'claude-code'
 
-import { duration, money, short, tokens } from '@kit/format'
+import { bytes, duration, money, short, tokens } from '@kit/format'
 import type { PerfSnapshot } from '@kit/perf'
 import { C, GLYPH, MUTED, levelColor } from '@kit/tokens'
 import { kit } from '@kit/ui'
 
-import type { Activity, Agent, AgentExtra, GhInfo, GitInfo, GitNote, GitPr, Limit, Snapshot } from '../types'
+import type { Activity, Agent, AgentExtra, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
+
+/**
+ * The session's share of the machine: CPU, memory, disk and network, each ours
+ * against the system's. Ours turns amber or red when it's a big share.
+ */
+const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[] => {
+  if (!r) return []
+  const hot = (part: number, whole: number) => (whole > 0 && part / whole > 0.5 ? C.bad : whole > 0 && part / whole > 0.25 ? C.warn : undefined)
+  const pctOf = (n: number) => `${n < 10 ? n.toFixed(1) : Math.round(n)}%`
+  return [
+    k.share('cpu', '⚙', C.blue, pctOf(r.cpu), pctOf(r.cpuAll), hot(r.cpu, r.cpuAll)),
+    k.share('mem', '▦', C.purple, bytes(r.mem), bytes(r.memAll), hot(r.mem, r.memAll)),
+    k.share('disk', '⛁', C.orchid, `${bytes(r.disk)}/s`, `${bytes(r.diskAll)}/s`, hot(r.disk, r.diskAll)),
+    k.share('net', '⇅', C.cyan, r.net === null ? '–' : `${bytes(r.net)}/s`, `${bytes(r.netAll)}/s`, r.net === null ? undefined : hot(r.net, r.netAll)),
+    k.share('procs', '⑂', C.slate, String(r.procs), 'procs'),
+  ]
+}
 
 /** The elements the app mode draws with: the desktop and VS Code have these. */
 export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button' | 'Svg'>
@@ -26,6 +43,8 @@ export type DesktopData = {
   columns: number
   /** The pane's height in rows, so the footer can sit on its bottom edge. */
   rows?: number
+  /** The session's share of the machine, for the footer. */
+  resources: Resources | null
   /** What the mod cost, for the debug footer. */
   perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
@@ -283,7 +302,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   return (
-    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf), d.rows)
+    k.pinned([header, context, limits, turns, tools, agents, renderGit(els, k, d, fold)], k.perf(d.perf, { lead: machine(k, d.resources) }), d.rows)
   )
 }
 
