@@ -23,8 +23,8 @@ const run = (cmd: string[], ms: number) =>
 
 /**
  * After each save under mods/ or kit/: compile the mods into plugins/
- * (`bun build.ts`), then run the engine's own tests on the mod that changed
- * (`claude plugin test plugins/<mod>`), and show the result in the page.
+ * (`bun build.ts`), then have the engine validate the mod that changed
+ * (`claude plugin validate plugins/<mod>`), and show the result in the page.
  */
 const checks = (): Plugin => {
   let busy = false
@@ -37,15 +37,14 @@ const checks = (): Plugin => {
     busy = true
     try {
       const build = await run(['bun', 'build.ts'], 30_000)
-      const test = build.code === 0 ? await run(['claude', 'plugin', 'test', `plugins/${mod}`], 60_000) : build
-      const summary = test.output.match(/(\d+) pass[\s\S]*?(\d+) fail/)
+      const test = build.code === 0 ? await run(['claude', 'plugin', 'validate', `plugins/${mod}`], 60_000) : build
       server.ws.send({
         type: 'custom',
         event: 'awesome:check',
         data: {
           mod,
           ok: test.code === 0,
-          summary: build.code !== 0 ? 'build failed' : summary ? `${summary[1]} pass, ${summary[2]} fail` : `exit ${test.code}`,
+          summary: build.code !== 0 ? 'build failed' : test.code === 0 ? 'valid' : 'invalid',
           output: test.output.slice(-4000),
         },
       })

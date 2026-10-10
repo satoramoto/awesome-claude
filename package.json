@@ -6,8 +6,7 @@
     "build": "bun build.ts",
     "watch": "bun build.ts --watch",
     "playground": "vite playground --port ${PORT:-5173} --strictPort",
-    "storybook": "storybook dev --port ${PORT:-6006} --no-open --ci",
-    "test": "bun test kit playground"
+    "storybook": "storybook dev --port ${PORT:-6006} --no-open --ci"
   },
   "devDependencies": {
     "@storybook/addon-essentials": "8.3.6",

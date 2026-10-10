@@ -38,33 +38,92 @@ const ROW_PX = 8.5 / 0.45
 const GUTTER = 2
 const LABEL = 10
 
-/** A section header's band: a tonal step that marks where each section starts. */
-const HEAD = 'rgba(128,128,128,0.13)'
+/**
+ * A section header's band: a tonal step that marks where each section starts. Solid,
+ * not translucent, so its rounded border in the same colour doesn't show as a ring.
+ * Tuned for the desktop's dark pane.
+ */
+const HEAD = '#272727'
 
+
+/** The debug footer's glyph and hue for each job the mods time. */
+const PERF_LOOK: Record<string, [string, string]> = {
+  render: ['▣', C.purple],
+  tick: ['↻', C.blue],
+  usage: ['◕', C.cyan],
+  git: ['⎇', C.orchid],
+  gh: ['⇡', C.ok],
+}
 
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
 
+  /*
+   * Rounding on the desktop. Boxes have no corner radius; what rounds is:
+   *
+   * - `rounded`: a box a row or more tall. A `round` border in the fill's own colour,
+   *   which must be solid (a translucent one paints twice where border and fill
+   *   overlap and draws a ring). Not on thin boxes: the border takes room inside the
+   *   box, so a thin one has nothing left for its content.
+   * - `capped`: anything thin (bars, gauges). SVG end caps drawn at an exact pixel
+   *   size, so they stay crisp; the middle takes no height and stretches to the caps.
+   *
+   * What doesn't work, so nobody tries again: borders on thin bars (empty, or blobs),
+   * glyph ends (◖━◗, ╺━╸ don't draw), SVG slivers a few pixels wide (don't draw), an
+   * SVG stretched to fit (blurs), a circle drawn over a rect in one SVG (a translucent
+   * colour doubles where they overlap).
+   */
+
   /**
-   * A bar's rounded end: a square as tall as the bar, a half circle on the outside
-   * and a filled strip on the inside. Drawn at its exact pixel size, so it stays crisp
-   * (an SVG the page has to scale blurs). Too-thin slivers didn't draw; squares do.
+   * One rounded end: a square `px` tall, a half circle on the outside and a filled
+   * strip on the inside, as one shape.
    */
   const cap = (px: number, color: string, side: 'left' | 'right'): RenderElement | null => {
     if (!Svg) return null
     const r = px / 2
-    // One shape, not a circle over a rectangle: a translucent colour would paint the overlap twice.
     const d = side === 'left' ? `M${r} 0H${px}V${px}H${r}A${r} ${r} 0 0 1 ${r} 0Z` : `M0 0H${r}A${r} ${r} 0 0 1 ${r} ${px}H0Z`
     const source =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}">` +
       `<path d="${d}" fill="${color}"/></svg>`
     return (
       <Box flexShrink={0}>
-        <Svg source={source} alt="bar end" width={px} height={px} />
+        <Svg source={source} alt="rounded end" width={px} height={px} />
       </Box>
     )
   }
+
+  /**
+   * Rounds the ends of something thin: `middle` between a `left` and a `right` cap,
+   * `height` rows tall. Give `middle` no height of its own; it stretches to the caps,
+   * whose pixel size it can't drift from. Where the surface has no SVG, `middle` alone
+   * at `height`.
+   */
+  const capped = (height: number, left: string, right: string, middle: (height: number | undefined) => RenderElement): RenderElement => {
+    if (terminal || !Svg) return middle(height)
+    const px = Math.max(4, Math.round(height * ROW_PX))
+    return (
+      <Box flexDirection="row" flexGrow={1} alignItems="stretch">
+        {cap(px, left, 'left')}
+        {middle(undefined)}
+        {cap(px, right, 'right')}
+      </Box>
+    )
+  }
+
+  /**
+   * A filled box with rounded corners, a row or more tall. `color` must be solid
+   * (hex, not rgba): the border that rounds it is the same colour. In the terminal,
+   * the box without fill or border.
+   */
+  const rounded = (color: string, props: Record<string, unknown>, children: RenderElement | (RenderElement | null)[] | null) =>
+    terminal ? (
+      <Box {...props}>{children}</Box>
+    ) : (
+      <Box {...props} backgroundColor={color} borderStyle="round" borderColor={color}>
+        {children}
+      </Box>
+    )
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
   const bar = (parts: Part[], max: number, opts: { height?: number; width?: number } = {}): RenderElement => {
@@ -91,10 +150,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const height = opts.height ?? BAR
     const shown = parts.filter(p => p.value > 0).map(p => ({ ...p, grow: (p.value / total) * 1000 }))
     const rest = Math.max(0, 1000 - shown.reduce((n, p) => n + p.grow, 0))
-    // With caps, the middle takes no height of its own: it stretches to the caps' exact pixel
-    // height, so the two can't drift apart by a fraction of a pixel from row to row.
-    const flat = (stretch: boolean) => (
-      <Box flexDirection="row" flexGrow={1} height={stretch ? undefined : height} backgroundColor={TRACK} overflow="hidden">
+    // Not `h`: that's the JSX factory.
+    const flat = (rows: number | undefined) => (
+      <Box flexDirection="row" flexGrow={1} height={rows} backgroundColor={TRACK} overflow="hidden">
         {/* An explicit full height: the desktop doesn't stretch a child to its parent's height. */}
         {shown.map(p => (
           <Box flexGrow={p.grow} flexShrink={0} width={0} height="100%" backgroundColor={p.color} />
@@ -102,18 +160,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {rest > 0 ? <Box flexGrow={rest} width={0} /> : null}
       </Box>
     )
-    if (!Svg) return flat(false)
     // The caps sit inside the bar's width, so a scale under it still lines up with its ends.
-    const px = Math.max(4, Math.round(height * ROW_PX))
     const first = shown[0]?.color ?? TRACK
     const last = rest > 0 ? TRACK : (shown[shown.length - 1]?.color ?? TRACK)
-    return (
-      <Box flexDirection="row" flexGrow={1} alignItems="stretch">
-        {cap(px, first, 'left')}
-        {flat(true)}
-        {cap(px, last, 'right')}
-      </Box>
-    )
+    return capped(height, first, last, flat)
   }
 
   /**
@@ -136,6 +186,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         <Text color={color}>{text}</Text>
       </Box>
     )
+
+  /** A status flag: a glyph and a figure in one colour, the size of the text around it. */
+  const flag = (key: string, color: string, glyph: string, figure: string | number) => (
+    <Text key={key} color={color}>{`${glyph} ${figure}`}</Text>
+  )
 
   /** A small round dot of colour, a legend's key. */
   const swatch = (color: string) => <Text color={color}>●</Text>
@@ -278,33 +333,37 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       )
     // The arrow and the icon each take a fixed column, so every title starts at the same x.
     return (
-      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.7}>
-        <Box
-          flexDirection="row"
-          justifyContent="space-between"
-          alignItems="center"
-          gap={1}
-          backgroundColor={terminal ? undefined : HEAD}
-          paddingRight={terminal ? 0 : 0.8}
-          paddingY={terminal ? 0 : 0.2}
-        >
-          <Box flexDirection="row" alignItems="center" flexShrink={1}>
-            <Box width={GUTTER} flexShrink={0}>
-              {toggle}
-            </Box>
-            {s.icon ? (
-              <Box width={2} flexShrink={0}>
-                <Text color={s.color}>{s.icon}</Text>
+      <Box key={`section-${s.id}`} flexDirection="column" marginTop={terminal ? 1 : 0.7} marginBottom={terminal ? 0 : 0.5}>
+        {rounded(
+          HEAD,
+          {
+            flexDirection: 'row',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            gap: 1,
+            paddingRight: terminal ? 0 : 0.8,
+            paddingY: terminal ? 0 : 0.2,
+          },
+          [
+            <Box key="title" flexDirection="row" alignItems="center" flexShrink={1}>
+              <Box width={GUTTER} flexShrink={0}>
+                {toggle}
               </Box>
-            ) : null}
-            <Text wrap="truncate" bold>
-              {s.title}
-            </Text>
-          </Box>
-          {s.right ?? null}
-        </Box>
+              {s.icon ? (
+                <Box width={2} flexShrink={0}>
+                  <Text color={s.color}>{s.icon}</Text>
+                </Box>
+              ) : null}
+              <Text wrap="truncate" bold>
+                {s.title}
+              </Text>
+            </Box>,
+            s.right ?? null,
+          ],
+        )}
+        {/* The body sits flush with the band's left edge, no indent. */}
         {s.collapsed ? null : (
-          <Box flexDirection="column" paddingLeft={GUTTER} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
+          <Box flexDirection="column" paddingLeft={terminal ? GUTTER : 0} marginTop={terminal ? 0 : 0.25} rowGap={terminal ? 0 : 0.12}>
             {s.children}
           </Box>
         )}
@@ -425,23 +484,48 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const rows = snap.rows.slice(0, opts.max ?? 6)
     const tone = (r: PerfRow) =>
       r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
-    return (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={terminal ? 1 : 0.6}>
-        <Text dimColor>{`⏱ ${short(snap.sinceMs)}`}</Text>
-        {rows.map(r => {
-          const color = tone(r)
-          const timing = r.avgMs > 0 ? `${ms(r.avgMs)} ` : ''
-          return (
-            <Text key={`perf-${r.name}`} dimColor={!color} color={color}>
-              {`${r.name} ${timing}${r.perMin}/m`}
-            </Text>
-          )
-        })}
-      </Box>
-    )
+    // One glyph and hue per job, so a row reads at a glance; a slow job turns amber or red.
+    const look = (name: string): [string, string] => PERF_LOOK[name] ?? ['•', C.slate]
+    const items = [
+      <Text key="perf-since">
+        <Text color={C.slate}>⏱</Text>
+        {` ${short(snap.sinceMs)}`}
+      </Text>,
+      ...rows.map(r => {
+        const [glyph, hue] = look(r.name)
+        const color = tone(r)
+        return (
+          <Text key={`perf-${r.name}`}>
+            <Text color={color ?? hue}>{glyph}</Text>
+            <Text color={color} bold={!!color}>{r.avgMs > 0 ? ` ${ms(r.avgMs)}` : ''}</Text>
+            <Text dimColor>{` ${r.perMin}/m`}</Text>
+          </Text>
+        )
+      }),
+    ]
+    if (terminal)
+      return (
+        <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
+          {items}
+        </Box>
+      )
+    return rounded(HEAD, { flexDirection: 'row', flexWrap: 'wrap', columnGap: 1.5, paddingX: 0.8, flexShrink: 0, marginTop: 0.6 }, items)
   }
 
-  return { bar, scale, gauge, reading, rail, prop, card, pill, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
+  /**
+   * A pane whose footer stays on the bottom edge: `body` fills the height above it.
+   * For the debug footer, or anything that should sit under the content however short it is.
+   */
+  const pinned = (body: RenderElement | (RenderElement | null)[], footer: RenderElement) => (
+    <Box flexDirection="column" height="100%">
+      <Box flexDirection="column" flexGrow={1}>
+        {body}
+      </Box>
+      {footer}
+    </Box>
+  )
+
+  return { pinned, bar, capped, rounded, scale, gauge, reading, rail, prop, card, pill, flag, swatch, chip, flow, legendBar, labelBar, stat, line, item, section, grid, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

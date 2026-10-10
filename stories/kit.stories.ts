@@ -112,6 +112,26 @@ export const Card: Story = {
   },
 }
 
+/** The two ways to round on the desktop; see the notes above `cap` in kit/ui.tsx. */
+export const Rounding: Story = {
+  args: { fill: '#272727', height: 0.45 },
+  argTypes: { fill: { control: 'color' }, height: { control: { type: 'range', min: 0.2, max: 1, step: 0.05 } } },
+  render: (args, ctx) => {
+    const k = kitFor(ctx)
+    const flat = (color: string) => (rows: number | undefined) => h('Box', { flexGrow: 1, height: rows, backgroundColor: color })
+    return show(
+      h(
+        'Box',
+        { flexDirection: 'column', rowGap: 0.8 },
+        k.rounded(args.fill, { paddingX: 1, paddingY: 0.2 }, h('Text', { bold: true }, 'rounded: a solid fill, a row or more tall')),
+        k.capped(args.height, C.blue, C.blue, flat(C.blue)),
+        k.bar([{ value: 45, color: C.blue }, { value: 15, color: C.warn }], 100, { height: args.height }),
+      ),
+      ctx,
+    )
+  },
+}
+
 export const Pills: Story = {
   render: (_, ctx) => {
     const k = kitFor(ctx)
