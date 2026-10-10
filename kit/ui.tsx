@@ -337,7 +337,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     onToggle?: () => void
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
-    const arrow = fold(s.collapsed)
+    const arrow = fold(Boolean(s.collapsed))
     const toggle =
       s.onToggle && Button ? (
         <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
