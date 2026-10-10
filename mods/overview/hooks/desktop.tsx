@@ -318,13 +318,22 @@ const renderGit = (
   if (g === null || !g.ok) {
     return k.section({ id: 'git', icon: GLYPH.branch, color: C.slate, title: 'Git', right: <Text dimColor>{g === null ? 'reading…' : g.note}</Text>, children: null })
   }
+  // The working tree's state as coloured glyphs: conflicted, staged, modified, new.
   const state: [number, string, string][] = [
-    [g.conflicted, 'conflicted', C.bad],
-    [g.staged, 'staged', C.ok],
-    [g.modified, 'modified', C.warn],
-    [g.untracked, 'new', C.cyan],
+    [g.conflicted, '✕', C.bad],
+    [g.staged, '●', C.ok],
+    [g.modified, '✎', C.warn],
+    [g.untracked, '+', C.cyan],
+    [g.ahead, '↑', C.ok],
+    [g.behind, '↓', C.warn],
   ]
-  const changed = state.filter(([n]) => n > 0)
+  // A glyph and its figure, a small gap between (a leading space in Text is dropped).
+  const mark = (key: string, glyph: string, color: string, figure: string) => (
+    <Box key={key} flexDirection="row" gap={0.3}>
+      <Text color={color}>{glyph}</Text>
+      <Text>{figure}</Text>
+    </Box>
+  )
   const hub = d.gh
   const prs = hub && hub.root === g.root && !hub.note ? hub.prs.slice(0, 5) : []
   return k.section({
@@ -333,34 +342,17 @@ const renderGit = (
     color: C.slate,
     title: g.branch,
     right: (
-      <Box flexDirection="row" gap={1}>
-        {g.ahead ? <Text color={C.ok}>{`↑${g.ahead}`}</Text> : null}
-        {g.behind ? <Text color={C.warn}>{`↓${g.behind}`}</Text> : null}
+      <Box flexDirection="row" gap={1.2} alignItems="center">
+        <Text dimColor wrap="truncate">
+          {g.worktree.linked ? `${g.repo}/${g.worktree.name}` : g.repo}
+        </Text>
+        {state.filter(([n]) => n > 0).map(([n, glyph, color]) => mark(`s-${glyph}`, glyph, color, String(n)))}
         {g.insertions ? <Text color={C.ok}>{`+${g.insertions}`}</Text> : null}
         {g.deletions ? <Text color={C.bad}>{`−${g.deletions}`}</Text> : null}
       </Box>
     ),
     ...fold('git'),
-    children: [
-      k.prop('repo', 'Repository', g.worktree.linked ? `${g.repo} / ${g.worktree.name}` : g.repo),
-      k.prop(
-        'changes',
-        'Changes',
-        changed.length === 0 ? (
-          <Text dimColor>clean</Text>
-        ) : (
-          <Box flexDirection="row" gap={1.5}>
-            {changed.map(([n, word, color]) => (
-              <Text>
-                <Text color={color}>{String(n)}</Text>
-                <Text dimColor>{` ${word}`}</Text>
-              </Text>
-            ))}
-          </Box>
-        ),
-      ),
-      ...prs.map(pr => prRow(els, pr)),
-    ],
+    children: prs.length ? prs.map(pr => prRow(els, pr)) : null,
   })
 }
 
