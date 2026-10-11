@@ -110,8 +110,10 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               [prNote(Text, pr)],
             ),
           ),
-          row(
-            'l3',
+          // The footer, with the same room above it as the title has below, when PRs sit between.
+          <Box key="l3" width="100%" marginTop={issue.prs.length ? SPACE.block / 2 : 0}>
+          {row(
+            'footer',
             [
               // The byline sits flush left, under the icons rather than the titles.
               <Text key="by" dimColor wrap="truncate">
@@ -140,7 +142,8 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
                 <Button key={`pick-${issue.number}`} plain dimColor label="Select" onPress={() => act.toggle(issue)} />
               ),
             ],
-          ),
+          )}
+          </Box>,
         ], { selected: picked(issue) })}
       </Box>
     )
