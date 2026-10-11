@@ -2,8 +2,7 @@ import type { Meta, StoryObj } from '@storybook/html'
 
 import { collect, elements, engine } from '../playground/host'
 import type { Node } from '../playground/render'
-// @ts-expect-error: the mod is plain JavaScript, with no types.
-import * as mod from '../mods/blast-radius/hooks/blast-radius.mjs'
+import * as mod from '../mods/blast-radius/hooks/register'
 import { show, where } from './show'
 
 // Blast Radius (a fork of Anthropic's claude-code-playground mod) keeps the call
