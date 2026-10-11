@@ -1,5 +1,6 @@
 import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
+import type { Engine } from 'claude-code/testing'
 
 // The issues pane drawn by the engine's test kit on each surface. The test's
 // own hooks sit beneath the mod and stand for the engine: `process.run`
@@ -53,22 +54,29 @@ const engine = (on: On) => {
   }))
 }
 
-// One test: the module (and its own variables) outlives a test, while each test
-// starts with empty state, so a second `/issues` in a later test can draw nothing.
+/** `/issues` as the person types it; it settles once gh was read into state. */
+const open = ($: Engine) =>
+  $.command.run({ command: 'issues', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
 test('/issues opens a pane listing the open issues, on the terminal and the desktop', async ($, on) => {
   engine(on)
-  await $.command.run({ command: 'issues', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+  await open($)
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'issues', surface, ...PANE })
     expect(await ui.find({ type: 'Text', text: 'satoramoto/awesome-claude' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Fold arrow is clipped in the desktop pane' })).toBeDefined()
-    if (surface === 'desktop') {
-      // Refine only on the issue not yet labelled `refined`; Start on every one.
-      expect(await ui.find({ key: 'refine-24' })).toBeDefined()
-      expect(await ui.find({ key: 'refine-23' })).toBeUndefined()
-      expect(await ui.findAll({ type: 'Button', text: 'Start' })).toHaveLength(2)
-    }
     await ui.unmount()
   }
+})
+
+test('on the desktop, Refine shows only on an unrefined issue, Start on every one', async ($, on) => {
+  engine(on)
+  await open($)
+
+  const ui = await $.ui.mount({ plugin: 'issues', surface: 'desktop', ...PANE })
+  expect(await ui.find({ key: 'refine-24' })).toBeDefined()
+  expect(await ui.find({ key: 'refine-23' })).toBeUndefined()
+  expect(await ui.findAll({ type: 'Button', text: 'Start' })).toHaveLength(2)
+  await ui.unmount()
 })

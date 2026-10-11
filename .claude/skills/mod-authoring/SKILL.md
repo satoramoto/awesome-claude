@@ -40,7 +40,9 @@ Copy `mods/issues/` as the template (it's the smaller mod):
 
 1. `cp -R mods/issues mods/<name>`, then rename: `name` in `plugin.json`, the
    `PluginState` key in `types/index.d.ts`, every `atom({ plugin: '<name>', ... })`,
-   the pane id and the `/command`. Delete what you don't need.
+   the pane id and the `/command`. Delete what you don't need, and delete
+   `hooks/issues.test.ts` or rewrite it as `hooks/<name>.test.ts` for your mod
+   (it tests the issues pane and fails anywhere else).
 2. Add an entry for it to `.claude-plugin/marketplace.json` (`name`,
    `source: ./plugins/<name>`, `description`, `version` equal to `plugin.json`'s).
    Bumping a mod's version means bumping it in both places; CI fails on drift

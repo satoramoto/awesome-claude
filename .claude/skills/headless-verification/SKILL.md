@@ -103,8 +103,10 @@ test('/issues opens a pane listing the open issues', async ($, on) => {
 - Act and read by key: `ui.find({ key })`, `ui.findAll({ type: 'Button', text })`,
   `ui.press({ key })`, `ui.input({ key, text })`, `ui.drawn()` for the whole tree.
   Each act resolves after its handler's work settles; assert right after it.
-- The module, and its own variables, outlive a test; state doesn't. Keep a
-  scenario that depends on module variables (a `busy` flag, a cache) in one test.
+- A test only waits for work a hook awaits. Work a hook leaves running
+  (`void refresh($)`) may not have reached state when the next line mounts, so
+  the pane draws its loading state. Await it in the hook (the issues mod's
+  `/issues` awaits its first read) rather than retrying in the test.
 - A mount rejects with the reason when the surface refuses the tree (an element
   it lacks, a prop not allowed): that's the desktop validator, caught headlessly.
 
@@ -126,9 +128,9 @@ model turn. A hook that failed or a module that didn't load is in the debug log
 
 Last, look at it where it's used:
 
-- Load the compiled mods: `CLAUDE_CODE_PLUGIN_DIRS=$PWD/plugins claude` (a
-  folder of plugins loads each one), or one at a time with
-  `claude --plugin-dir plugins/<mod>`, or for every session set
+- Load the compiled mods: `CLAUDE_CODE_PLUGIN_DIRS=$PWD/plugins claude` or
+  `claude --plugin-dir plugins` (a folder of plugins loads each one), one mod
+  with `claude --plugin-dir plugins/<mod>`, or for every session set
   `CLAUDE_CODE_PLUGIN_DIRS=<repo>/plugins` and `CLAUDE_CODE_PLUGIN_DIR_WATCH=1`
   in `~/.claude/settings.json` `env`, as README shows. Then `/overview` or `/issues`.
 - After a rebuild, run `/reload-plugins` (with `bun run watch` and the watch

@@ -49,7 +49,8 @@ it) rather than letting it overflow.
 
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR: the
 build (and fails if `plugins/` wasn't rebuilt and committed), `claude plugin
-validate` for every mod, and `claude plugin validate .` for the marketplace.
+validate` for every mod, `claude plugin test` for every mod that has a
+`*.test.ts` or `*.test.tsx`, and `claude plugin validate .` for the marketplace.
 Work on a branch, open a PR, and let CI be the final check; `main` takes PRs
 only. Every PR gets auto-merge turned on when it's opened (`main` requires the
 CI check, so it merges once CI passes).

@@ -86,6 +86,8 @@ Story ids are `<title>--<export>` in kebab case: `Mods/Issues` + `NoRepo` is `mo
 
 It's an emulator from captures of the app; spacing, fonts and what the engine
 refuses can differ. Before calling a look done, load the mod in the real app.
-An `Engine` section with experiments on the engine's drawing limits is on its
-way (branches `lab` / `bench-engine`); until it lands, the limits are in
-README's "Drawing for the desktop".
+For what the engine itself accepts, use the `lab` mod: `/lab` lists its
+experiments, `/lab <id>` opens one, `/lab gallery` shows them all, and
+`mods/lab/verdicts.json` records the engine's verdict on each per surface.
+README's "Drawing for the desktop" sums up the limits. An `Engine` section in
+Storybook with those experiments is coming (branch `bench-engine`).
