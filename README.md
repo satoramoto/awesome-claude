@@ -106,6 +106,9 @@ its name, its state, its URL once the port answers, and Start, Stop and Restart.
 - Which ports answer comes from `lsof` (an HTTP request to each port where
   `lsof` isn't installed), every 2 s while the pane is shown, and not at all
   while it isn't.
+- Stop frees the port: checked with `npm run serve` starting a `node` server,
+  ending the spawn loop ends the grandchild `node` too, so its port was free at
+  once.
 
 The servers it starts are children of the mod: they end when the session ends,
 and when the mod reloads (`/reload-plugins`, or a rebuild with hot reloading

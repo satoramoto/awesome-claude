@@ -126,8 +126,12 @@ type Child = {
  * ending, a reload) kills every one.
  */
 const children = new Map<string, Child>()
-/** Each server's output: whole lines, the line still being written, and whether state has seen the latest. */
-const logs = new Map<string, { lines: string[]; partial: string; dirty: boolean }>()
+/** Each server's output: whole lines and the line still being written. */
+const logs = new Map<string, { lines: string[]; partial: string }>()
+/** Names whose Start is under way but not yet spawned, so a second Start can't spawn twice. */
+const starting = new Set<string>()
+/** How long Stop waits for a child's loop to end before answering anyway. */
+const STOP_WAIT = 3_000
 
 const ANSI = /\x1b\[[0-9;?]*[ -\/]*[@-~]|\x1b\][^\x07]*\x07/g
 
@@ -154,7 +158,8 @@ const reconcile = async ($: EngineInterface) => {
     const prev = old[c.name]
     const child = children.get(c.name)
     let status: Status
-    if (child) status = listening.has(child.port) ? 'running' : 'starting'
+    if (starting.has(c.name)) status = 'starting'
+    else if (child) status = listening.has(child.port) ? 'running' : 'starting'
     else if (listening.has(c.port)) status = 'elsewhere'
     else if (prev?.status === 'failed') status = 'failed'
     else status = 'stopped'
@@ -166,7 +171,6 @@ const reconcile = async ($: EngineInterface) => {
       startedAt: child?.startedAt ?? 0,
     }
   }
-  for (const log of logs.values()) log.dirty = false
   // Only a real change redraws.
   if (JSON.stringify(next) !== JSON.stringify(old)) await update($, servers, () => next)
 }
@@ -177,22 +181,33 @@ const start = async ($: EngineInterface, name: string): Promise<string> => {
   const c = f?.configs.find(x => x.name === name)
   if (!f || !c) return `No configuration named "${name}"${f?.configs.length ? ` (have: ${f.configs.map(x => x.name).join(', ')})` : ''}.`
   if (children.has(name)) return `${name} is already running from this session on ${urlOf(children.get(name)!.port)}.`
+  if (starting.has(name)) return `${name} is already starting.`
+  // Reserved before the first await, so a second Start meanwhile spawns nothing.
+  starting.add(name)
+  try {
+    return await spawnIt($, name, f, c)
+  } finally {
+    starting.delete(name)
+    await reconcile($).catch(() => undefined)
+  }
+}
+
+const spawnIt = async ($: EngineInterface, name: string, f: LaunchFile, c: LaunchConfig): Promise<string> => {
+  await reconcile($)
   await probe($, [c.port])
   let port = c.port
   if (listening.has(port)) {
     if (!c.autoPort) {
-      await reconcile($)
       return `${name}: port ${port} is in use by another process (started elsewhere); not starting it twice.`
     }
     port = freePort(port)
   }
   const argv = [c.runtimeExecutable, ...c.runtimeArgs]
   const stream = $.process.spawn({ argv, cwd: c.cwd ? resolvePath(f.root, c.cwd) : f.root, env: { ...c.env, PORT: String(port) } })
-  logs.set(name, { lines: [`$ ${commandOf(c)}`], partial: '', dirty: true })
+  logs.set(name, { lines: [`$ ${commandOf(c)}`], partial: '' })
   const child: Child = { stream, port, startedAt: Date.now(), stopping: false, done: Promise.resolve() }
   children.set(name, child)
-  await reconcile($)
-  child.done = run($, name, child)
+  child.done = run($, name, child).catch(() => undefined)
   return `Starting ${name} on ${urlOf(port)} (${commandOf(c)}).`
 }
 
@@ -209,7 +224,6 @@ const run = async ($: EngineInterface, name: string, child: Child) => {
         break
       }
       appendLog(log, piece.value.text)
-      log.dirty = true
     }
   } catch (err) {
     cannot = !child.stopping
@@ -219,6 +233,8 @@ const run = async ($: EngineInterface, name: string, child: Child) => {
   const failed = !child.stopping && (cannot || result?.code !== 0)
   if (!child.stopping && result) appendLog(log, `\n${result.signal ? `ended by ${result.signal}` : `exited with code ${result.code}`}\n`)
   const ended: Server = { status: failed ? 'failed' : 'stopped', port: child.port, log: logOf(name) ?? [], code: result?.code ?? null, startedAt: 0 }
+  // A newer child of the same name owns the row now.
+  if (children.has(name) || starting.has(name)) return
   await update($, servers, s => ({ ...s, [name]: ended }))
   // A failure unfolds its row, so its output is in view.
   if (failed) await update($, open, o => (o.includes(name) ? o : [...o, name]))
@@ -236,7 +252,11 @@ const stop = async ($: EngineInterface, name: string): Promise<string> => {
   child.stopping = true
   // Leaving the loop kills the child: return() ends the stream the loop reads.
   void child.stream.return({ code: null, signal: 'SIGTERM' }).catch(() => undefined)
-  await child.done
+  // A server that ignores the end mustn't hang Stop.
+  const wait = new AbortController()
+  await Promise.race([child.done, $.clock.sleep(STOP_WAIT, { signal: wait.signal }).catch(() => undefined)])
+  wait.abort()
+  if (children.get(name) === child) children.delete(name)
   await probe($, [child.port]).catch(() => undefined)
   await reconcile($)
   return `Stopped ${name}.`

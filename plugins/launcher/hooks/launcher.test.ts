@@ -31,6 +31,8 @@ type World = {
   spawned: ProcessSpawnRequest[]
   /** Spawns that ended because the mod ended their loop. */
   killed: string[]
+  /** The test's clock. */
+  clock: ReturnType<typeof mock.clock>
 }
 
 /**
@@ -38,9 +40,9 @@ type World = {
  * session in /repo/app (so the mod walks up). A spawned server writes a line
  * and runs until its loop ends, unless `crash` names it: then it fails at once.
  */
-const engine = (on: On, opts: { crash?: string } = {}): World => {
-  const world: World = { listening: new Set([6006]), spawned: [], killed: [] }
-  mock.clock(on, { now: NOW })
+const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => {
+  const clock = mock.clock(on, { now: NOW })
+  const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock }
   on('session.cwd', async () => ({ value: '/repo/app' }))
   on('ui.open', async () => ({ value: { isPlaced: true } }))
   on('ui.panes', async () => ({ value: [] }))
@@ -57,6 +59,10 @@ const engine = (on: On, opts: { crash?: string } = {}): World => {
   on('process.spawn', async function* (_$, e, next) {
     world.spawned.push(e)
     const name = e.argv.includes('dev') ? 'app' : 'storybook'
+    if (opts.hang === name) {
+      // Never writes, and ignores the abort: only Stop's own wait ends it.
+      await new Promise<void>(() => undefined)
+    }
     if (opts.crash === name) {
       yield { stream: 'stderr' as const, text: 'Error: Cannot find module vite\n' }
       return { value: { code: 1, signal: null } }
@@ -135,6 +141,24 @@ test('a server that exits with an error shows failed, unfolded with its output',
     expect(await ui.find({ key: 'start-app' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('two Starts at once spawn one server', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const [a, b] = await Promise.all([launcher($, 'start app'), launcher($, 'start app')])
+  expect(world.spawned).toHaveLength(1)
+  expect([a.text, b.text].some(t => t?.includes('already'))).toBe(true)
+  await launcher($, 'stop app')
+})
+
+test('Stop answers even when the server never ends', async ($, on) => {
+  const world = engine(on, { hang: 'app' })
+  await launcher($)
+  await launcher($, 'start app')
+  const stopping = launcher($, 'stop app')
+  await world.clock.advance(5_000)
+  expect((await stopping).text).toContain('Stopped app')
 })
 
 test('/launcher start refuses a server whose port another process holds, and stop names where it runs', async ($, on) => {
