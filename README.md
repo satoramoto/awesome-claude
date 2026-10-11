@@ -16,6 +16,7 @@ version CI pins.
 | --- | --- | --- | --- |
 | `overview` | the current session at a glance: context, limits, activity, agents, the branches it started and their pull requests, cost | on its own when a session starts; `/overview` opens it again | `git` for Workspaces; `gh` signed in for pull requests |
 | `issues` | the open GitHub issues of the session's repository, newest change first, with actions on each | `/issues` | a GitHub repository; `gh` signed in |
+| `launcher` | the project's dev servers from `.claude/launch.json` (the desktop app's preview list), each with its state, URL, Start, Stop and Restart, and its output | `/launcher` (or `/preview`); `/launcher start <name>`, `/launcher stop <name>` | a `.claude/launch.json`; `lsof` to tell which ports answer |
 | `lab` | for mod authors: 77 experiments probing what the engine draws (SVG gradients and filters, animation, hover, `Client` modules, every element), with the engine's verdict on each surface in `mods/lab/verdicts.json` | `/lab`, `/lab <id>`, `/lab gallery` | nothing |
 
 ### Forked mods
@@ -81,6 +82,35 @@ These prompts encode an opinionated way of working (worktrees, a subagent per
 issue, an integration branch reviewed by you). Read
 [`mods/issues/hooks/register.tsx`](mods/issues/hooks/register.tsx) for their
 exact wording before you rely on them.
+
+### `/launcher`
+
+The desktop app's preview launcher, in a pane that works in the terminal too.
+It lists every configuration in the project's `.claude/launch.json` (the
+session's folder, or the nearest one above it up to the git root), one row each:
+its name, its state, its URL once the port answers, and Start, Stop and Restart.
+
+- **States**: stopped (grey); starting (blue: started here, its port not
+  answering yet); running (green, with `http://localhost:<port>`); running
+  elsewhere (green: something this session didn't start answers on the port,
+  such as the desktop app or another session; it can't be started twice); failed
+  (red: it exited with an error, and its row unfolds to show why).
+- **Start** runs `runtimeExecutable runtimeArgs…` in the configuration's `cwd`
+  (the project root by default) with `PORT` set to its port and its `env` over
+  that. With `autoPort`, a taken port moves it to the next free one.
+- Unfold a row for its command, its exit code, and the tail of its output (the
+  last 200 lines are kept, colours stripped).
+- From the prompt: `/launcher start <name>`, `/launcher stop <name>`,
+  `/launcher restart <name>`, `/launcher list`. Each answers in text, so they
+  work without the pane. `/preview` does the same.
+- Which ports answer comes from `lsof` (an HTTP request to each port where
+  `lsof` isn't installed), every 2 s while the pane is shown, and not at all
+  while it isn't.
+
+The servers it starts are children of the mod: they end when the session ends,
+and when the mod reloads (`/reload-plugins`, or a rebuild with hot reloading
+on). Servers started elsewhere aren't touched; Stop is only for the ones this
+session started.
 
 ## Install
 
