@@ -99,9 +99,20 @@ export const tagOf = (name: string): string => {
 const statusColor = (status: string): string =>
   status === 'running' || status === 'pending' ? C.blue : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
 
-/** A PR's state as one colour: merged purple, closed or draft grey, else by its checks. */
-const prColor = (pr: GitPr) =>
-  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.blue : C.ok
+/**
+ * A PR's state as one colour: merged purple; closed or draft grey; an open one green,
+ * red while it has conflicts (on GitHub or in the checkout), amber while CI fails.
+ */
+const prColor = (pr: GitPr, conflicted: boolean) =>
+  pr.state === 'MERGED'
+    ? C.purple
+    : pr.state === 'CLOSED' || pr.isDraft
+      ? MUTED
+      : conflicted || pr.conflicting
+        ? C.bad
+        : pr.checks.failed
+          ? C.warn
+          : C.ok
 
 /** "2h18", "3d4h", from "resets in 2h 18m". */
 const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
@@ -345,13 +356,15 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
   const entries = d.branches.map((b, i) => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
-    const color = pr ? prColor(pr) : MUTED
+    const color = pr ? prColor(pr, b.conflicted > 0) : MUTED
     const ci: [string, string] | null = b.conflicted
       ? [`${b.conflicted} conflict${b.conflicted === 1 ? '' : 's'}`, C.bad]
       : !pr || !open
         ? null
-        : pr.checks.failed
-          ? [`${pr.checks.failed} failing`, C.bad]
+        : pr.conflicting
+          ? ['conflicts', C.bad]
+          : pr.checks.failed
+          ? [`${pr.checks.failed} failing`, C.warn]
           : pr.checks.pending
             ? [`${pr.checks.pending} pending`, C.blue]
             : pr.checks.passed

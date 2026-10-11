@@ -389,6 +389,7 @@ export const toGitPr = (json: any, branch: string): GitPr => ({
   review: String(json.reviewDecision ?? ''),
   ...summarizeChecks(json.statusCheckRollup),
   current: json.headRefName === branch,
+  conflicting: json.mergeable === 'CONFLICTING',
 })
 
 /** A one-line reason from gh's stderr. */
@@ -432,7 +433,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
   }
 }
 
-const GH_FIELDS = 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName'
+const GH_FIELDS = 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName,mergeable'
 
 const loadGh = async ($: EngineInterface, info: GitInfo): Promise<GhInfo> => {
   const at = Date.now()

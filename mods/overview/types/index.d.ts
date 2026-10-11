@@ -109,6 +109,8 @@ export type GitPr = {
   failing: string[]
   /** The PR's head is the current branch. */
   current: boolean
+  /** GitHub can't merge it for conflicts with its base (`mergeable` is `CONFLICTING`). */
+  conflicting?: boolean
 }
 
 /** The cached `gh` result, refreshed on a slower timer. */
