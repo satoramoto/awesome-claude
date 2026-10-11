@@ -1,3 +1,4 @@
+// Changed in this fork (awesome-claude) for the desktop version: desktop rows are Buttons the hook draws, not a Client.
 import { expect, mock, test } from 'claude-code/testing'
 
 import { LINUX_LAUNCH } from '../hooks/open'
@@ -114,7 +115,8 @@ function world(on: any, w: World, ran: Ran) {
 const paneProps = (bodyColumns: number) => ({ title: 'Files', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} }) as any
 
 async function texts(ui: any): Promise<string> {
-  const rows = JSON.stringify(await ui.drawn({ in: 'rows' }))
+  // The desktop draws its rows itself, without the terminal's rows Client.
+  const rows = ui.surface === 'desktop' ? '' : JSON.stringify(await ui.drawn({ in: 'rows' }))
   return JSON.stringify(await ui.drawn()) + rows
 }
 
@@ -136,12 +138,13 @@ test('macOS Claude Code app: desktop pane draws, selects, opens with open', { ti
   const shown = await texts(ui)
   for (const word of ['README.md', 'notes.md', 'src', 'main', 'origin/main']) expect(shown).toContain(word)
   expect(NERD.test(shown)).toBe(false)
-  await ui.post({ press: `${root}/README.md` }, { in: 'rows' })
+  await ui.press({ key: `${root}/README.md` })
   await clock.settle()
-  expect(await texts(ui)).toContain('"selected: ","README.md"')
+  expect(await ui.find({ key: 'unselect' })).toBeDefined()
+  expect(await ui.find({ key: 'open' })).toBeDefined()
   const sent = await $.prompt.submit({ text: 'what is this?', wait: false } as any)
   expect(JSON.stringify(sent)).toContain(`${root}/README.md`)
-  await ui.post({ press: `${root}/README.md` }, { in: 'rows' })
+  await ui.press({ key: `${root}/README.md` })
   await clock.settle()
   expect(ran).toContainEqual(['open', '--', `${root}/README.md`])
   expect(ran.some(a => a[0] === 'setsid' || a[0] === 'gio')).toBe(false)
@@ -245,7 +248,7 @@ test('macOS app: every header button and the search box work on the desktop surf
   expect(jumped).toContain('"value":""')
   await ui.press({ key: 'collapse' })
   await clock.settle()
-  expect(await texts(ui)).not.toContain(`"id":"${root}/src/a.ts"`)
+  expect(await ui.find({ key: `${root}/src/a.ts` })).toBeUndefined()
   await ui.press({ key: 'up' })
   await clock.settle()
   expect(await texts(ui)).toContain('"proj"')
@@ -330,18 +333,18 @@ test('desktop: a long tree draws every row and leaves the wheel to the app', { t
   const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props })
   await clock.settle()
-  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  const rowsOf = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith(`${root}/`))
+  expect(await ui.find({ type: 'Client' })).toBeUndefined()
   let p = await rowsOf()
-  expect(p.bar).toBeUndefined()
-  expect(p.rows.length).toBe(60)
-  expect(p.rows.at(-1).id).toBe(`${root}/f59.txt`)
+  expect(p.length).toBe(60)
+  expect(p.at(-1)).toBe(`${root}/f59.txt`)
   const wheel = { component: 'Pane', requestId: 'filetree', by: 1, offset: 1, bodyRows: 20, contentRows: 64, origin: { kind: 'person' } }
   expect(await $.ui.scroll(wheel as any)).toEqual({})
   expect(appScrolls).toEqual([1])
   await clock.settle()
   p = await rowsOf()
-  expect(p.rows.length).toBe(60)
-  expect(p.rows[0].id).toBe(`${root}/f00.txt`)
+  expect(p.length).toBe(60)
+  expect(p[0]).toBe(`${root}/f00.txt`)
   await ui.unmount()
 })
 
@@ -503,8 +506,9 @@ test('opener failures show a toast instead of failing silently', { timeoutMs: 20
   await $.session.start({ cwd: root, surface: 'desktop', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
-  await ui.post({ press: `${root}/a.xyz` }, { in: 'rows' })
-  await ui.post({ press: `${root}/a.xyz` }, { in: 'rows' })
+  await clock.settle()
+  await ui.press({ key: `${root}/a.xyz` })
+  await ui.press({ key: `${root}/a.xyz` })
   await clock.settle()
   expect(ran).toContainEqual(['open', '--', `${root}/a.xyz`])
   expect(ran.some(a => a[0] === 'toast' && (a[1] ?? '').includes('No application knows how to open a.xyz'))).toBe(true)
@@ -654,8 +658,9 @@ test('open with preview on desktop: the whole file is drawn and the wheel goes t
   await clock.settle()
   const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'desktop', component: 'Pane', requestId: 'filetree', props })
-  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
-  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
+  await clock.settle()
+  await ui.press({ key: `${root}/a.ts` })
+  await ui.press({ key: `${root}/a.ts` })
   await clock.settle()
   const shown = JSON.stringify(await ui.drawn())
   expect(shown).toContain('line 0')
@@ -704,13 +709,13 @@ test('a listing error keeps the cached rows and says so', { timeoutMs: 20_000 },
 })
 
 test('replacing many folders in one batch keeps unchanged nodes and drops what vanished', async () => {
-  const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, loaded })
+  const dir = (id: string, loaded: boolean) => ({ id, parent: id.slice(0, id.lastIndexOf('/')) || '/', name: id.slice(id.lastIndexOf('/') + 1), kind: 'dir' as const, hidden: false, mtime: 0, size: 0, loaded })
   const file = (id: string) => ({ ...dir(id, false), kind: 'file' as const })
   const nodes = [dir('/r/a', true), dir('/r/b', true), file('/r/a/x'), dir('/r/b/y', true), file('/r/b/y/z')]
   const out = replaceChildren(nodes, new Map([
-    ['/r/a', toNodes('/r/a', [{ name: 'w', kind: 'file', mtimeMs: 0, isLink: false }])],
+    ['/r/a', toNodes('/r/a', [{ name: 'w', kind: 'file', mtimeMs: 0, size: 0, isLink: false }])],
     ['/r/b', []],
-    ['/r/b/y', toNodes('/r/b/y', [{ name: 'z', kind: 'file', mtimeMs: 0, isLink: false }])],
+    ['/r/b/y', toNodes('/r/b/y', [{ name: 'z', kind: 'file', mtimeMs: 0, size: 0, isLink: false }])],
   ]))
   expect(out.map(n => n.id).sort()).toEqual(['/r/a', '/r/a/w', '/r/b'])
   expect(out.find(n => n.id === '/r/b')?.loaded).toBe(true)

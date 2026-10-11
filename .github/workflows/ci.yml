@@ -16,7 +16,10 @@ jobs:
       - name: Compile mods into plugins/
         run: bun build.ts
       - name: plugins/ is up to date with mods/ and kit/
-        run: git diff --exit-code -- plugins
+        # New files too: `git diff` alone misses a compiled file that was never committed.
+        run: |
+          git status --porcelain -- plugins
+          test -z "$(git status --porcelain -- plugins)"
 
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.296
