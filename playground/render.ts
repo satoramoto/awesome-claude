@@ -41,7 +41,9 @@ const kebab = (k: string) => k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)
 
 const boxStyle = (surface: Surface, p: Record<string, any>) => {
   // border-box, as the desktop measures: padding and borders sit inside a box's width.
-  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'column', minWidth: '0', boxSizing: 'border-box' }
+  // No minWidth by default: as on the desktop, a box doesn't shrink below its content
+  // unless it's given `minWidth={0}`, so text that doesn't fit runs past the edge.
+  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'column', boxSizing: 'border-box' }
   for (const [k, v] of Object.entries(p)) {
     if (v === undefined || v === null || k === 'key' || k === 'hover' || k === 'display') continue
     if (k === 'marginX' || k === 'paddingX') {
@@ -67,7 +69,8 @@ const boxStyle = (surface: Surface, p: Record<string, any>) => {
 }
 
 const textStyle = (p: Record<string, any>) => {
-  const s: Record<string, string> = {}
+  // The desktop keeps a Text on one line: it runs past its box rather than wrapping.
+  const s: Record<string, string> = { whiteSpace: 'nowrap' }
   if (p.color) s.color = THEME[p.color] ?? p.color
   if (p.backgroundColor) s.background = THEME[p.backgroundColor] ?? p.backgroundColor
   if (p.dimColor) s.opacity = '0.6'

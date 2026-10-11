@@ -240,9 +240,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {groups.map((col, c) => (
           <Box key={`${key}-col-${c}`} flexGrow={1} width={0} flexDirection="column">
             {col.map(t => (
-              <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair}>
+              // The full column's width (the desktop doesn't stretch it); the label gives way first.
+              <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%">
                 {swatch(t.color)}
-                <Box flexGrow={1} flexShrink={1}>
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text dimColor wrap="truncate">
                     {t.label}
                   </Text>
@@ -265,16 +266,20 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * a dim lowercase unit, SPACE.group apart. A figure is coloured only when the
    * colour is a status.
    */
-  const summary = (items: ([string, string?, string?] | null | false)[]) => (
-    <Box flexDirection="row" gap={SPACE.group}>
-      {items.filter((x): x is [string, string?, string?] => Boolean(x)).map(([figure, unit, color]) => (
-        <Text key={`${figure}-${unit ?? ''}`}>
-          <Text color={color}>{figure}</Text>
-          {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
-        </Text>
-      ))}
-    </Box>
-  )
+  const summary = (items: ([string, string?, string?] | null | false)[]) => {
+    const shown = items.filter((x): x is [string, string?, string?] => Boolean(x))
+    // Too wide for the band, the last item ends in an ellipsis and what's past it is cut.
+    return (
+      <Box flexDirection="row" gap={SPACE.group} minWidth={0} flexShrink={1} overflow="hidden">
+        {shown.map(([figure, unit, color], i) => (
+          <Text key={`${figure}-${unit ?? ''}`} wrap={i === shown.length - 1 ? 'truncate' : undefined}>
+            <Text color={color}>{figure}</Text>
+            {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
+          </Text>
+        ))}
+      </Box>
+    )
+  }
 
   /**
    * Labels under a chart, each centred under its place: `at` from 0 to 1 across
@@ -362,7 +367,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             paddingY: terminal ? 0 : BAND_PAD_Y,
           },
           [
-            <Box key="title" flexDirection="row" alignItems="center" flexShrink={1}>
+            // The title keeps its room; the right side gives way.
+            <Box key="title" flexDirection="row" alignItems="center" flexShrink={0}>
               <Box width={terminal ? GUTTER : 1.6} flexShrink={0}>
                 {toggle}
               </Box>
@@ -375,7 +381,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
                 {s.title}
               </Text>
             </Box>,
-            s.right ?? null,
+            s.right ? (
+              <Box key="right" flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
+                {s.right}
+              </Box>
+            ) : null,
           ],
         )}
         {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
@@ -391,10 +401,14 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   /** A property row: the dim label on the left edge, the value right-aligned on the right edge. */
   const prop = (key: string, label: string, value: RenderElement | string) => (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
-      <Text dimColor wrap="truncate">
-        {label}
-      </Text>
-      {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
+      <Box minWidth={0} flexShrink={1}>
+        <Text dimColor wrap="truncate">
+          {label}
+        </Text>
+      </Box>
+      <Box minWidth={0} flexShrink={1}>
+        {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
+      </Box>
     </Box>
   )
 
@@ -431,7 +445,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const rail = (key: string, r: { color: string; text: string; note?: string; figures?: string[]; indent?: number }) => (
     <Box key={key} flexDirection="row" gap={terminal ? 1 : 0.75} paddingLeft={r.indent ?? 0}>
       {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
-      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} gap={SPACE.item}>
+      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} flexShrink={1} minWidth={0} gap={SPACE.item}>
         <Text wrap="truncate">
           {r.text}
           {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}

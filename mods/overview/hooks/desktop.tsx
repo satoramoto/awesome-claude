@@ -106,7 +106,12 @@ const prColor = (pr: GitPr) =>
 /** "2h18", "3d4h", from "resets in 2h 18m". */
 const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 
-const shortTool = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
+/** The context bar's free room: a step brighter than the empty track. */
+const FREE = 'rgba(128,128,128,0.34)'
+/** The context bar's buffer past compaction: the compaction mark's amber, faint. */
+const BUFFER = 'rgba(227,163,59,0.32)'
+
+const shortTool =(name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
 
 /**
  * The footer's lead: the session's share of the machine, ours against the
@@ -130,27 +135,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
 
-  // ---- header: the session's totals, four across ----
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
-  const metric = (key: string, value: string, label: string) => (
-    <Box key={key} flexDirection="column" alignItems={key === 'time' ? 'flex-start' : key === 'files' ? 'flex-end' : 'center'}>
-      <Text>{value}</Text>
-      {k.caption(label)}
-    </Box>
-  )
-  const header = (
-    <Box key="header" flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right}>
-      {running ? <Text color={C.blue}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : null}
-      {/* Spread edge to edge: the first total on the left edge, the last on the right. */}
-      <Box flexDirection="row" justifyContent="space-between" marginTop={running ? SPACE.block : 0}>
-        {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'Elapsed')}
-        {metric('turns', String(a.turns), 'Turns')}
-        {metric('calls', String(toolCalls), 'Calls')}
-        {metric('files', String(a.files.length), 'Files Δ')}
-      </Box>
-    </Box>
-  )
 
   // ---- context: the instrument's main meter ----
   // Used segments summed into their groups, in the groups' order.
@@ -161,6 +147,14 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     const at = parts.find(p => p.label === c.name)
     if (at) at.value += s.tokens
     else parts.push({ value: s.tokens, color: c.color, label: c.name })
+  }
+  // What's left, as two more shades of the same bar: the free room up to compaction,
+  // then the buffer past it (amber, as the compaction mark is), with their own legend entries.
+  const room = [...parts]
+  if (snap) {
+    const free = Math.max(0, (snap.compactAt ?? snap.max) - snap.total)
+    if (free > 0) room.push({ value: free, color: FREE, label: 'Free' })
+    if (snap.compactAt && snap.max > snap.compactAt) room.push({ value: snap.max - snap.compactAt, color: BUFFER, label: 'Buffer' })
   }
   const context = k.section({
     id: 'context',
@@ -178,8 +172,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     children: snap
       ? [
           <Box key="meter" flexDirection="column">
-            {k.bar(parts, snap.max, { height: 0.5 })}
-            {k.scale(snap.compactAt ? snap.compactAt / snap.max : undefined, C.warn)}
+            {k.bar(room, snap.max, { height: 0.5 })}
+            {/* No compaction mark: the buffer's shade starts where it falls. */}
+            {k.scale()}
             {k.axis(
               'ctx-axis',
               [0, 0.25, 0.5, 0.75, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
@@ -188,18 +183,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           <Box key="legend" marginTop={SPACE.block} width="100%">
             {k.legend(
               'ctx',
-              parts.map(p => ({ label: p.label!, color: p.color, figure: tokens(p.value) })),
+              room.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
+              2,
             )}
-          </Box>,
-          <Box key="room" flexDirection="row" justifyContent="space-between" marginTop={SPACE.block}>
-            <Box flexDirection="row" gap={SPACE.pair}>
-              {k.caption(snap.compactAt ? 'Compaction' : 'No auto-compact')}
-              {snap.compactAt ? <Text color={C.warn}>{tokens(snap.compactAt)}</Text> : null}
-            </Box>
-            <Box flexDirection="row" gap={SPACE.pair}>
-              {k.caption('Headroom')}
-              <Text>{tokens(Math.max(0, (snap.compactAt ?? snap.max) - snap.total))}</Text>
-            </Box>
           </Box>,
         ]
       : null,
@@ -343,7 +329,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
 
   return k.pinned(
-    [header, context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
+    [context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
