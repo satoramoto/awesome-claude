@@ -1,6 +1,11 @@
 // Copyright 2026 Anthropic PBC
 // SPDX-License-Identifier: Apache-2.0
 //
+// Modified in the awesome-claude fork (2026): renamed from blast-radius.mjs to
+// register.tsx and typed for TypeScript; the drawing moved to view.tsx, which
+// keeps upstream's terminal drawing and adds a desktop one. The holding,
+// classifying and measuring logic is upstream's, unchanged.
+//
 // Blast Radius: holds a risky Bash command and shows what it would change.
 //
 // tool.call (Bash): if the command is risky, work out its blast radius, open a
@@ -15,17 +20,30 @@
 // The host reads `on(...)` and `$.noun.method(...)` from source, so they are
 // spelled literally, and helpers that take `$` are top-level functions.
 
+import type { EngineInterface, Register } from 'claude-code'
+
+import { renderApp, renderTerminal } from './view'
+import type { AppElements, Held, Report, Risk } from './view'
+
+type $ = EngineInterface
+
 const PANE_ID = "blast-radius";
 const POLL_SECONDS = "0.25";
 const HOLD_LIMIT_MS = 10 * 60 * 1000;
 const LIST_MAX = 10;
 
 // The call being held, or null. One at a time: Bash calls in a turn run in order.
-let held = null;
+let held: Held | null = null;
 
-export function register(on) {
+/** The report for the surface: upstream's on the terminal, the kit's elsewhere. */
+function draw($: $, e: any, state: Held, band: boolean) {
+  const els = $.ui.resolve(e);
+  return e.surface === "terminal" ? renderTerminal(els, state) : renderApp(els as unknown as AppElements, state, Number(e.props?.bodyColumns ?? 40), { band });
+}
+
+export const register: Register = (on) => {
   on("tool.call", { tool: "Bash" }, async ($, e, next) => {
-    const risk = classify(String(e.command ?? ""));
+    const risk = classify(String((e as any).command ?? ""));
     if (risk === null) {
       return next(e);
     }
@@ -38,11 +56,11 @@ export function register(on) {
       }
       await $.process.run(["sleep", POLL_SECONDS], { timeoutMs: 5000 });
     }
-    const mine = { command: String(e.command), risk, report: null, decision: null, where: "pane" };
+    const mine: Held = { command: String((e as any).command), risk, report: null, decision: null, where: "pane" };
     held = mine;
 
     let opened = { isPlaced: false };
-    let decision;
+    let decision: string | null;
     let summary = risk.label;
     try {
       // Measure where the command will run: the session folder, moved by any
@@ -95,12 +113,12 @@ export function register(on) {
       $.ui.toast("Blast Radius: running it");
       return next(e);
     }
-    const why = {
+    const why = ({
       cancel: "the user pressed Cancel",
       timeout: "no answer within 10 minutes",
       interrupted: "the turn was interrupted",
       error: "Blast Radius hit an error while holding it",
-    }[decision] ?? "no answer was recorded";
+    } as Record<string, string>)[decision ?? ""] ?? "no answer was recorded";
     return {
       deny: `Blast Radius held this command and did not run it: ${why}. It would have: ${summary}. Do not retry it unless the user asks you to.`,
     };
@@ -110,16 +128,16 @@ export function register(on) {
     if (e.requestId !== PANE_ID || held === null || held.report === null) {
       return next(e);
     }
-    return draw($.ui.resolve(e), held);
+    return draw($, e, held, false);
   });
 
   on("ui.render", { component: "AbovePrompt" }, ($, e, next) => {
     if (held === null || held.report === null || held.where !== "band") {
       return next(e);
     }
-    return draw($.ui.resolve(e), held);
+    return draw($, e, held, true);
   });
-}
+};
 
 // ---- What counts as risky -------------------------------------------------
 
@@ -129,7 +147,7 @@ const SUDO_VALUE_OPTIONS = new Set(["-u", "-g", "-C", "-D", "-h", "-p", "-r", "-
 const READ_ONLY = new Set(["ls", "cat", "echo", "printf", "grep", "rg", "find", "less", "head", "tail", "cd", "git"]);
 
 /** A folder a later `cd arg` moves to, given the folder so far (null = the session folder). */
-function joinDir(dir, arg) {
+function joinDir(dir: string | null, arg: string | undefined): string {
   if (arg === undefined || arg === "~" || arg.startsWith("/") || arg.startsWith("~/")) {
     return arg ?? "~";
   }
@@ -137,10 +155,10 @@ function joinDir(dir, arg) {
 }
 
 /** The first risky segment of a shell command, or null. */
-function classify(command) {
-  let dir = null; // where a `cd` earlier on the line moved to; null means the session folder
-  const scopes = []; // dir to restore when a ( subshell ) closes
-  const pushed = []; // pushd stack, for popd
+function classify(command: string): Risk | null {
+  let dir: string | null = null; // where a `cd` earlier on the line moved to; null means the session folder
+  const scopes: (string | null)[] = []; // dir to restore when a ( subshell ) closes
+  const pushed: (string | null)[] = []; // pushd stack, for popd
   for (const raw of command.split(/&&|\|\||;|\||\n/)) {
     const opens = (raw.match(/^\s*\(+/)?.[0].trim().length) ?? 0;
     // Trailing redirects and & don't hide a closing ) : `(cd sub && make) > log`.
@@ -157,7 +175,7 @@ function classify(command) {
       dir = risk.cd; // a cd, pushd or popd moved the folder
     }
     for (let k = 0; k < closes && scopes.length > 0; k += 1) {
-      dir = scopes.pop(); // a cd inside ( ... ) doesn't outlive it
+      dir = scopes.pop() as string | null; // a cd inside ( ... ) doesn't outlive it
     }
   }
   return null;
@@ -167,9 +185,9 @@ function classify(command) {
 const PREFIXES = new Set(["command", "exec", "env", "nohup", "time", "then", "do", "else", "!"]);
 
 /** One segment: a risk, { cd } for a folder change, or null. */
-function classifySegment(segment, dir, pushed) {
+function classifySegment(segment: string, dir: string | null, pushed: (string | null)[]): any {
   {
-    const words = tokenize(segment.trim().replace(/^[({]+\s*/, "").replace(/\s*[)}]+$/, ""));
+    const words: any[] = tokenize(segment.trim().replace(/^[({]+\s*/, "").replace(/\s*[)}]+$/, ""));
     while (words.length > 0 && /^[A-Za-z_][A-Za-z0-9_]*=/.test(words[0])) {
       words.shift(); // leading VAR=value
     }
@@ -271,7 +289,7 @@ function classifySegment(segment, dir, pushed) {
 // The target is passed as an argument, never as source.
 const CD_SCRIPT = `unset CDPATH; d="$1"; case "$d" in "~") d="$HOME";; "~/"*) d="$HOME/\${d#\\~/}";; esac; cd -- "$d" 2>/dev/null && pwd -P`;
 
-async function resolveDir($, sessionCwd, dir) {
+async function resolveDir($: $, sessionCwd: string, dir: string): Promise<string | null> {
   if (dir === "-") {
     return null; // `cd -` depends on the shell's history
   }
@@ -281,12 +299,12 @@ async function resolveDir($, sessionCwd, dir) {
 }
 
 /** Splits one segment into words, honouring quotes. Good enough to read flags and paths. */
-function tokenize(text) {
-  const words = [];
+function tokenize(text: string): string[] {
+  const words: string[] = [];
   const re = /"((?:[^"\\]|\\.)*)"|'([^']*)'|(\S+)/g;
   let m;
   while ((m = re.exec(text)) !== null) {
-    words.push(m[1] ?? m[2] ?? m[3]);
+    words.push((m[1] ?? m[2] ?? m[3])!);
   }
   return words;
 }
@@ -294,7 +312,7 @@ function tokenize(text) {
 // ---- Measuring the blast radius -------------------------------------------
 
 /** { summary, lines, note } for the pane. Never throws: a failed read is said, not hidden. */
-async function measure($, risk, cwd) {
+async function measure($: $, risk: Risk, cwd: string): Promise<Report> {
   try {
     if (risk.kind === "rm") {
       return await measureRm($, risk, cwd);
@@ -303,7 +321,7 @@ async function measure($, risk, cwd) {
       return await measureMigrations($, risk, cwd);
     }
     return await measureGit($, risk, cwd);
-  } catch (error) {
+  } catch (error: any) {
     return { summary: `${risk.label} (could not measure it)`, lines: [], note: `Could not measure: ${String(error?.message ?? error).slice(0, 200)}` };
   }
 }
@@ -330,7 +348,7 @@ echo "$files $(( \${kb:-0} * 1024 )) \${#paths[@]}"
 find "\${paths[@]}" \\( -type f -o -type l \\) 2>/dev/null | head -n ${LIST_MAX}
 `;
 
-async function measureRm($, risk, cwd) {
+async function measureRm($: $, risk: any, cwd: string): Promise<Report> {
   if (risk.targets.length === 0) {
     return { summary: "rm with no paths", lines: [], note: "No paths to expand." };
   }
@@ -344,14 +362,14 @@ async function measureRm($, risk, cwd) {
     return { summary: `delete ${found} ${found === 1 ? "path" : "paths"} with no files in ${found === 1 ? "it" : "them"}`, lines: [], note: `Paths: ${risk.targets.join(" ")}` };
   }
   return {
-    summary: `delete ${files} ${files === 1 ? "file" : "files"} (about ${size(bytes)})`,
+    summary: `delete ${files} ${files === 1 ? "file" : "files"} (about ${size(bytes as number)})`,
     lines: rest.map((l) => l.replace(/^\.\//, "")),
     more: Math.max(0, files - rest.length),
     note: `Paths: ${risk.targets.join(" ")}`,
   };
 }
 
-async function measureGit($, risk, cwd) {
+async function measureGit($: $, risk: any, cwd: string): Promise<Report> {
   if (risk.kind === "git-push-force") {
     return await measurePush($, risk, cwd);
   }
@@ -406,8 +424,8 @@ async function measureGit($, risk, cwd) {
   };
 }
 
-async function measurePush($, risk, cwd) {
-  const positional = risk.args.filter((a) => !a.startsWith("-"));
+async function measurePush($: $, risk: any, cwd: string): Promise<Report> {
+  const positional = risk.args.filter((a: string) => !a.startsWith("-"));
   const remote = positional[0] ?? "origin";
   // A refspec is src:dst. With no colon, the local branch of the same name is pushed.
   const spec = (positional[1] ?? "").replace(/^\+/, "");
@@ -439,22 +457,22 @@ async function measurePush($, risk, cwd) {
   };
 }
 
-const MIGRATION_LISTERS = {
+const MIGRATION_LISTERS: Record<string, { argv: string[]; pending: (l: string) => boolean; strip: (l: string) => string }> = {
   django: { argv: ["python3", "manage.py", "showmigrations", "--plan"], pending: (l) => l.startsWith("[ ]"), strip: (l) => l.slice(4) },
   alembic: { argv: ["alembic", "history", "-r", "current:head"], pending: (l) => l.includes("->"), strip: (l) => l },
   rails: { argv: ["bin/rails", "db:migrate:status"], pending: (l) => /^\s*down\b/.test(l), strip: (l) => l.trim() },
   prisma: { argv: ["npx", "--no-install", "prisma", "migrate", "status"], pending: (l) => /^\s{2}\S/.test(l), strip: (l) => l.trim() },
 };
 
-async function measureMigrations($, risk, cwd) {
+async function measureMigrations($: $, risk: any, cwd: string): Promise<Report> {
   const lister = MIGRATION_LISTERS[risk.tool];
   if (lister === undefined) {
     return { summary: "run migrations", lines: [], note: "I can't list the pending migrations for this tool, so the list is not shown." };
   }
-  let run;
+  let run: { exitCode: number; stdout: string; stderr: string };
   try {
     run = await $.process.run(lister.argv, { cwd, timeoutMs: 20000 });
-  } catch (error) {
+  } catch (error: any) {
     run = { exitCode: -1, stdout: "", stderr: String(error?.message ?? error) };
   }
   if (run.exitCode !== 0) {
@@ -469,7 +487,7 @@ async function measureMigrations($, risk, cwd) {
   };
 }
 
-function size(bytes) {
+function size(bytes: number) {
   if (!Number.isFinite(bytes) || bytes < 1024) {
     return `${bytes || 0} B`;
   }
@@ -485,44 +503,8 @@ function size(bytes) {
 
 // ---- Drawing --------------------------------------------------------------
 
-function paneRows(report) {
-  return Math.min(24, 9 + report.lines.length + (report.more ? 1 : 0));
-}
+// The drawing itself is in view.tsx.
 
-function draw(t, state) {
-  const { Box, Text, Button } = t;
-  const { report } = state;
-  const list = report.lines.map((line, i) => Text({ key: `l${i}`, children: `  ${line}`, wrap: "truncate-end" }));
-  if (report.more) {
-    list.push(Text({ key: "more", dimColor: true, children: `  + ${report.more} more` }));
-  }
-  // The buttons answer the call this pane was drawn for, never whichever one is held now.
-  const decide = (choice) => () => {
-    if (state.decision === null) {
-      state.decision = choice;
-    }
-  };
-  return Box({
-    flexDirection: "column",
-    borderStyle: "round",
-    borderColor: "yellow",
-    paddingX: 1,
-    children: [
-      Text({ key: "title", bold: true, color: "yellow", children: `⚠ Blast Radius · ${state.risk.label}` }),
-      Text({ key: "cmd", children: [Text({ dimColor: true, children: "Command  " }), Text({ bold: true, children: state.command })], wrap: "truncate-end" }),
-      Text({ key: "sum", children: [Text({ dimColor: true, children: "Would    " }), Text({ color: "red", bold: true, children: report.summary })] }),
-      Box({ key: "list", flexDirection: "column", marginTop: 1, children: list }),
-      report.note ? Text({ key: "note", dimColor: true, italic: true, children: report.note, wrap: "wrap" }) : null,
-      Box({
-        key: "buttons",
-        marginTop: 1,
-        gap: 2,
-        children: [
-          Button({ key: "proceed", label: "Proceed", hotkey: "1", plain: true, onPress: decide("proceed") }),
-          Button({ key: "cancel", label: "Cancel", hotkey: "2", plain: true, autoFocus: true, onPress: decide("cancel") }),
-          Text({ key: "hint", dimColor: true, children: "Claude is waiting on your answer" }),
-        ],
-      }),
-    ],
-  });
+function paneRows(report: Report) {
+  return Math.min(24, 9 + report.lines.length + (report.more ? 1 : 0));
 }

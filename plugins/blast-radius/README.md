@@ -157,5 +157,18 @@ Shared as-is as part of claude-code-playground. Not an official Anthropic produc
 From upstream [`569c528`](https://github.com/anthropics/claude-code-playground/tree/569c5283d9a0a7ee7938df85bb32e4f48cbb8c86/claude-code/mods/blast-radius):
 
 - Moved to `mods/blast-radius/` in awesome-claude, with the Apache License 2.0 text
-  beside it; the code is unchanged.
-- This README: the fork notice at the top and this section.
+  beside it.
+- 0.2.0: a desktop look. `hooks/blast-radius.mjs` became `hooks/register.tsx`
+  (TypeScript; the holding, classifying and measuring logic is unchanged) and
+  `hooks/view.tsx`, which keeps upstream's drawing for the terminal as it was and
+  adds one for the app surfaces (desktop, VS Code, mobile) built with the
+  collection's kit: the alert icon and what's held, the command as code, what it
+  would delete, discard or drop in red, each path, commit or migration with its
+  icon, the note in grey, and Proceed (its label red) and Cancel (the main
+  button, with the focus, so Enter refuses) as real buttons, hotkeys 1 and 2 kept.
+  `hooks/hooks.json` loads `./register.tsx`; `tsconfig.json` is new.
+- Tests: `hooks/blast-radius.test.ts` (new) draws the pane on the terminal and the
+  desktop and the band on the desktop through the engine's test kit, and checks
+  that Cancel refuses the command and Proceed lets it run.
+- This README: the fork notice at the top and this section. The rest still
+  describes upstream's terminal drawing, which is unchanged.
