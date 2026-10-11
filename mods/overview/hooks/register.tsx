@@ -503,8 +503,12 @@ const track = async ($: EngineInterface, branch: string, path: string, cwd: stri
 }
 
 /** One tracked branch's git state against the default branch. */
-const loadBranch = async ($: EngineInterface, t: Tracked, base: string, prs: Map<string, GitPr>): Promise<BranchView> => {
-  const run = (args: string[]) => $.process.run(['git', '--no-optional-locks', ...args], { cwd: t.path, timeoutMs: 10_000 }).catch(() => null)
+const loadBranch = async ($: EngineInterface, t: Tracked, base: string, prs: Map<string, GitPr>, root: string): Promise<BranchView> => {
+  // A worktree removed after its PR merged leaves the branch in the repository:
+  // read it from the session's checkout then, rather than calling it deleted.
+  const probe = await $.process.run(['git', 'rev-parse', '--git-dir'], { cwd: t.path, timeoutMs: 10_000 }).catch(() => null)
+  const cwd = probe?.exitCode === 0 ? t.path : root
+  const run = (args: string[]) => $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: 10_000 }).catch(() => null)
   const [head, exists, lr, committed, status, remote, top] = await Promise.all([
     run(['rev-parse', '--abbrev-ref', 'HEAD']),
     run(['rev-parse', '--verify', '--quiet', `refs/heads/${t.branch}`]),
@@ -554,15 +558,21 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
   try {
     const info = await read($, git)
     if (!info?.ok) return
-    // The session's own branch counts as started here.
-    if (!info.detached) await track($, info.branch, info.root, info.root)
-    const off = await read($, hidden)
-    const list = (await read($, tracked)).filter(t => !off.includes(t.branch)).slice(-MAX_BRANCHES).reverse()
     const run = (cmd: string[]) => $.process.run(cmd, { cwd: info.root, timeoutMs: 20_000 }).catch(() => null)
     if (baseCache === null) {
       const ref = await run(['git', 'rev-parse', '--abbrev-ref', 'origin/HEAD'])
       baseCache = ref?.exitCode === 0 ? ref.stdout.trim() : 'origin/main'
     }
+    // The default branch is what the others merge into, not a workspace of its own
+    // (it would offer "Create PR" against itself), even when the session sits on it.
+    const base = baseCache.replace(/^origin\//, '')
+    // The session's own branch counts as started here.
+    if (!info.detached && info.branch !== base) await track($, info.branch, info.root, info.root)
+    const off = await read($, hidden)
+    const list = (await read($, tracked))
+      .filter(t => !off.includes(t.branch) && t.branch !== base)
+      .slice(-MAX_BRANCHES)
+      .reverse()
     if (withGh) {
       const prList = await run(['gh', 'pr', 'list', '--state', 'all', '--limit', '40', '--json', GH_FIELDS])
       if (prList?.exitCode === 0) {
@@ -576,7 +586,7 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
         }
       }
     }
-    const loaded = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache)))
+    const loaded = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache, info.root)))
     // git and gh took a while: a branch hidden since `off` was read must not come
     // back. `hiding` is checked again inside the write, which retries on a miss.
     const offNow = await read($, hidden)
