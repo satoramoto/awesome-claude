@@ -4,8 +4,9 @@
 // which answer a `Client`'s posts (see client.ts).
 
 import type { ClientPost } from './client'
+import { read } from './engine'
 import { h } from './render'
-import type { Node, Surface } from './render'
+import type { Child, Node, Surface } from './render'
 
 type Hook = ($: unknown, e: any, next: (e: any) => Promise<unknown>) => unknown
 export type Registered = { event: string; matcher: Record<string, unknown>; hook: Hook }
@@ -14,14 +15,36 @@ const ELEMENTS = ['Box', 'Text', 'Button', 'Input', 'Select', 'Link', 'Code', 'M
 
 const noop: any = new Proxy(() => Promise.resolve(undefined), { get: () => noop, apply: () => Promise.resolve(undefined) })
 
-/** The engine as a render hook sees it. */
+/**
+ * The elements `$.ui.resolve` hands back: constructors taking props with
+ * `children`, as the engine's are, so a mod can call them (`Box({ children })`,
+ * as blast-radius does) or use them in JSX (`h` calls a function type).
+ */
+export const elements: Record<string, (props?: Record<string, any>) => Node> = Object.fromEntries(
+  ELEMENTS.map(type => [
+    type,
+    (props: Record<string, any> = {}): Node => {
+      const { children, ...rest } = props
+      return { type, props: rest, children: children === undefined ? [] : ([children] as Child[]).flat(Infinity as 1) }
+    },
+  ]),
+)
+
+/**
+ * The engine as a render hook sees it: `ui.resolve`, `state.get` (the stand-in
+ * store, as atoms read it) and `clock.now`; every other call resolves undefined.
+ */
 export const engine: any = new Proxy(
   {},
   {
     get: (_, noun) =>
       noun === 'ui'
-        ? new Proxy({}, { get: (_, verb) => (verb === 'resolve' ? () => Object.fromEntries(ELEMENTS.map(n => [n, n])) : noop) })
-        : noop,
+        ? new Proxy({}, { get: (_, verb) => (verb === 'resolve' ? () => elements : noop) })
+        : noun === 'state'
+          ? { get: async (ref: { plugin: string; key: string }) => ({ value: await read(null, { ...ref, initial: undefined }) }) }
+          : noun === 'clock'
+            ? { now: async () => Date.now() }
+            : noop,
   },
 )
 
