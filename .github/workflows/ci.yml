@@ -25,6 +25,13 @@ jobs:
           for dir in plugins/*/; do
             claude plugin validate "$dir"
           done
+      - name: Test each mod that has tests
+        run: |
+          for dir in plugins/*/; do
+            if [ -n "$(find "$dir" \( -name '*.test.ts' -o -name '*.test.tsx' \) -print -quit)" ]; then
+              claude plugin test "$dir"
+            fi
+          done
 
       - name: Validate the marketplace
         run: claude plugin validate .
