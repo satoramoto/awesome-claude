@@ -1,6 +1,21 @@
 /** A label as GitHub colours it. */
 export type Label = { name: string; color: string }
 
+/** A pull request linked to close an issue ("Closes #n"), with its state. */
+export type LinkedPr = {
+  number: number
+  title: string
+  url: string
+  /** `OPEN`, `MERGED` or `CLOSED`; empty when it lives in another repository and wasn't read. */
+  state: string
+  isDraft: boolean
+  /** GitHub can't merge it for conflicts with its base. */
+  conflicting: boolean
+  /** Checks failing, and still running. */
+  failing: number
+  pending: number
+}
+
 /** One open issue, slimmed to what the pane draws. */
 export type Issue = {
   number: number
@@ -12,6 +27,8 @@ export type Issue = {
   comments: number
   /** When it last changed (ms since epoch). */
   updatedAt: number
+  /** The pull requests linked to close it. */
+  prs: LinkedPr[]
 }
 
 /** The last `gh issue list`: the repository's open issues, newest change first. */

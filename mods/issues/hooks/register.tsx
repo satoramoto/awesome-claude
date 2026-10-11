@@ -8,7 +8,7 @@ import type { AppElements, TermElements } from './view'
 const PANE = 'issues'
 /** How many open issues are read; past this the count shows a "+". */
 const LIMIT = 100
-const FIELDS = 'number,title,url,author,labels,assignees,comments,updatedAt'
+const FIELDS = 'number,title,url,author,labels,assignees,comments,updatedAt,closedByPullRequestsReferences'
 
 const list = atom({ plugin: 'issues', key: 'list' } as const, null)
 const selected = atom({ plugin: 'issues', key: 'selected' } as const, [])
@@ -85,7 +85,54 @@ export const toIssue = (json: any): Issue => ({
   assignees: (json.assignees ?? []).map((a: any) => String(a.login ?? '')),
   comments: Array.isArray(json.comments) ? json.comments.length : Number(json.comments) || 0,
   updatedAt: Date.parse(json.updatedAt) || 0,
+  // Filled in from `gh pr list` once every issue is read (the references carry only a number and URL).
+  prs: (json.closedByPullRequestsReferences ?? []).map((r: any) => ({
+    number: Number(r.number),
+    title: '',
+    url: String(r.url ?? ''),
+    state: '',
+    isDraft: false,
+    conflicting: false,
+    failing: 0,
+    pending: 0,
+  })),
 })
+
+const FAILED = new Set(['FAILURE', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE', 'ERROR'])
+
+/** How many of a PR's checks fail and how many still run, from gh's `statusCheckRollup`. */
+export const checksOf = (rollup: any[] | undefined) => {
+  let failing = 0
+  let pending = 0
+  for (const c of rollup ?? []) {
+    const verdict = String(c.conclusion ?? c.state ?? '')
+    if (FAILED.has(verdict)) failing++
+    else if ((c.status && c.status !== 'COMPLETED') || verdict === 'PENDING' || verdict === 'EXPECTED') pending++
+  }
+  return { failing, pending }
+}
+
+/** Fills each linked PR's title and state from one `gh pr list`, by number. */
+const withPrs = async (issues: Issue[], gh: (args: string[]) => Promise<{ exitCode: number; stdout: string }>) => {
+  if (!issues.some(i => i.prs.length)) return issues
+  const run = await gh(['pr', 'list', '--state', 'all', '--limit', '100', '--json', 'number,title,url,state,isDraft,mergeable,statusCheckRollup']).catch(() => null)
+  if (!run || run.exitCode !== 0) return issues
+  let byNumber: Map<number, any>
+  try {
+    byNumber = new Map((JSON.parse(run.stdout) as any[]).map(p => [Number(p.number), p]))
+  } catch {
+    return issues
+  }
+  return issues.map(i => ({
+    ...i,
+    prs: i.prs.map(pr => {
+      const p = byNumber.get(pr.number)
+      // A PR in another repository isn't in this list: it keeps its number and URL alone.
+      if (!p || p.url !== pr.url) return pr
+      return { ...pr, title: String(p.title ?? ''), state: String(p.state ?? ''), isDraft: Boolean(p.isDraft), conflicting: p.mergeable === 'CONFLICTING', ...checksOf(p.statusCheckRollup) }
+    }),
+  }))
+}
 
 /** `owner/name` from an issue's URL. */
 export const repoOf = (url: string) => /github\.com\/([^/]+\/[^/]+)\//.exec(url)?.[1] ?? ''
@@ -122,7 +169,7 @@ const loadIssues = async ($: EngineInterface): Promise<IssueList> => {
     const view = await gh(['repo', 'view', '--json', 'nameWithOwner', '--jq', '.nameWithOwner']).catch(() => null)
     repo = view?.exitCode === 0 ? view.stdout.trim() : ''
   }
-  return { repo, issues: issues.slice(0, LIMIT), more: issues.length > LIMIT, at }
+  return { repo, issues: await withPrs(issues.slice(0, LIMIT), gh), more: issues.length > LIMIT, at }
 }
 
 // Nothing runs while the pane isn't shown: a timer reads gh again while it is,

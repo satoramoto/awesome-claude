@@ -2,9 +2,9 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { ago } from '../kit/format'
 import { C, MUTED } from '../kit/tokens'
-import { SPACE, kit } from '../kit/ui'
+import { EDGE, SPACE, kit } from '../kit/ui'
 
-import type { Issue, IssueList } from '../types'
+import type { Issue, IssueList, LinkedPr } from '../types'
 
 /** The app surfaces' elements; `Input` only where the surface draws fields (not mobile). */
 export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button' | 'Svg'> & Partial<Pick<Elements['desktop'], 'Input'>>
@@ -72,28 +72,40 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     return (
       <Box key={`issue-${issue.number}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
         {k.tile(`tile-${issue.number}`, [
-          row(
-            'l1',
-            [
-              // The sprint checkbox, in the icon's place: pressed, the issue joins the selection.
-              <Button key={`pick-${issue.number}`} plain dimColor={!picked(issue)} label={picked(issue) ? '☑' : '☐'} onPress={() => act.toggle(issue)} />,
-              k.icon('issue-opened', OPEN),
-              <Text key="t" wrap="truncate">
-                {issue.title}
-              </Text>,
-            ],
-            [<Link key="n" href={issue.url} label={`#${issue.number}`} />],
+          // The title line, then a little room before the rest of the tile.
+          <Box key="l1" width="100%" marginBottom={SPACE.block}>
+            {row(
+              'title',
+              [
+                k.icon('issue-opened', OPEN),
+                <Text key="t" wrap="truncate">
+                  {issue.title}
+                </Text>,
+              ],
+              [<Link key="n" href={issue.url} label={`#${issue.number}`} />],
+            )}
+          </Box>,
+          // Each PR linked to close it, as the overview's workspaces draw one: its state in the icon's glyph and colour.
+          ...issue.prs.map(pr =>
+            row(
+              `pr-${pr.number}`,
+              [
+                k.icon(prIcon(pr), prColor(pr)),
+                <Link key="n" href={pr.url} label={`#${pr.number}`} />,
+                pr.title ? (
+                  <Text key="t" dimColor wrap="truncate">
+                    {pr.title}
+                  </Text>
+                ) : null,
+              ],
+              [prNote(Text, pr)],
+            ),
           ),
-          // Every label on a line of its own, as the legends draw keys: a dot in its colour, the name dim.
+          // Every label on a line of its own, as GitHub draws them: a pill in the label's colour.
           issue.labels.length
             ? row(
                 'labels',
-                issue.labels.map(l => (
-                  <Box key={`label-${l.name}`} flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={0}>
-                    {k.swatch(l.color)}
-                    <Text dimColor>{l.name}</Text>
-                  </Box>
-                )),
+                issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)),
                 [],
               )
             : null,
@@ -117,9 +129,17 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               // Refine until it's refined; Start always (it asks to refine first when it isn't).
               refined ? null : <Button key={`refine-${issue.number}`} plain dimColor label="Refine" onPress={() => act.refine(issue)} />,
               <Button key={`start-${issue.number}`} plain label="Start" onPress={() => act.start(issue)} />,
+              // Picks it for a sprint: the word turns blue and the tile takes the selected fill.
+              picked(issue) ? (
+                <Button key={`pick-${issue.number}`} plain onPress={() => act.toggle(issue)}>
+                  <Text color={C.blue}>Selected</Text>
+                </Button>
+              ) : (
+                <Button key={`pick-${issue.number}`} plain dimColor label="Select" onPress={() => act.toggle(issue)} />
+              ),
             ],
           ),
-        ])}
+        ], { selected: picked(issue) })}
       </Box>
     )
   }
@@ -152,13 +172,32 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     ? [<Text key="note" dimColor>{list.note}</Text>]
     : [form, bar, ...(list.issues.length ? list.issues.map(tile) : [<Text key="none" dimColor>No open issues.</Text>])]
 
-  return k.section({
-    id: 'issues',
-    icon: 'issue-opened',
-    title: list.repo || 'Issues',
-    right: list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null]),
-    children: body,
-  })
+  // One repository, so no foldable header: its name as a plain line, the counts on the right.
+  const head = row('repo', [<Text key="r" dimColor wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
+  return (
+    <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={1}>
+      <Box key="head" width="100%" marginBottom={SPACE.block}>
+        {head}
+      </Box>
+      {body}
+    </Box>
+  )
+}
+
+/** A linked PR's icon: GitHub's for its state; unread (another repository), the open one. */
+const prIcon = (pr: LinkedPr) => (pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open')
+
+/** A linked PR's colour, as the overview's workspaces colour one: merged purple, closed or draft grey; open green, red on conflicts, amber while CI fails. */
+const prColor = (pr: LinkedPr) =>
+  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft || !pr.state ? MUTED : pr.conflicting ? C.bad : pr.failing ? C.warn : C.ok
+
+/** What an open PR's checks say, on the right of its line. */
+const prNote = (Text: AppElements['Text'], pr: LinkedPr): RenderElement | null => {
+  if (pr.state !== 'OPEN') return null
+  if (pr.conflicting) return <Text key="ci" color={C.bad}>conflicts</Text>
+  if (pr.failing) return <Text key="ci" color={C.warn}>{`${pr.failing} failing`}</Text>
+  if (pr.pending) return <Text key="ci" color={C.blue}>{`${pr.pending} pending`}</Text>
+  return null
 }
 
 /** The terminal: a line per issue, its number, title and age, cut to the pane's width. */
