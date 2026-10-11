@@ -56,7 +56,10 @@ const pane: Decorator = (story, ctx) => {
     app.innerHTML = `<div class="transcript"><div class="bubble-msg"></div><div class="bubble-msg short"></div><div class="bubble-msg"></div></div>`
     const side = document.createElement('div')
     side.className = 'side'
-    side.innerHTML = `<div class="side-head"><span>Overview</span><span class="marks"><span class="mark on">⤢</span><span class="mark">✕</span></span></div>`
+    // The pane's title, as the mod's `$.ui.open({ title })` gives it: a story's `paneTitle`, else the last part of its title (Mods/Issues → Issues).
+    const title = String(ctx.parameters.paneTitle ?? ctx.title.split('/').pop() ?? '')
+    side.innerHTML = `<div class="side-head"><span></span><span class="marks"><span class="mark on">⤢</span><span class="mark">✕</span></span></div>`
+    side.querySelector('.side-head > span')!.textContent = title
     const body = document.createElement('div')
     body.className = 'side-body'
     body.style.width = width
@@ -86,7 +89,8 @@ style.textContent = `
   .pane.light { background: #fbfbfa; color: #1d1d1f; color-scheme: light; }
   .pane.dark { background: #1f1f1e; color: #ececec; color-scheme: dark; }
   .pane.terminal { background: #101014; color: #d8d8d8; font: 13px/1.25 'SF Mono', Menlo, monospace; }
-  .link { color: #6e8efb; }
+  /* Links read by their colour alone, no underline. */
+  .link { color: #6e8efb; text-decoration: none; }
   /* The desktop app's side pane, from a capture of it (dark), and its light counterpart. */
   .app { display: flex; height: 640px; border-radius: 10px; overflow: hidden; font-size: 12.5px; }
   .app.dark { background: #1c1c1c; color: #e8e8e6; color-scheme: dark; --muted: #8f8f8c; --line: #2c2c2b; --mark: #2e5bd8; }

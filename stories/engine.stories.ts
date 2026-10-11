@@ -89,7 +89,8 @@ const card = (x: Experiment, ctx: StoryContext) => {
 
 const meta: Meta = {
   title: 'Engine',
-  parameters: { docs: { description: { component: 'What the rendering engine accepts, from the lab mod.' } } },
+  // The lab draws each experiment in its own pane; its index pane is titled Lab.
+  parameters: { paneTitle: 'Lab', docs:{ description: { component: 'What the rendering engine accepts, from the lab mod.' } } },
 }
 export default meta
 

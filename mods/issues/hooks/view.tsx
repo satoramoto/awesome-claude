@@ -1,7 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { ago } from '@kit/format'
-import { C, MUTED } from '@kit/tokens'
+import { C, GRAY, MUTED } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
 
 import type { Issue, IssueList, LinkedPr } from '../types'
@@ -66,6 +66,28 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     </Box>
   )
 
+  // Every line of a tile starts with the same icon column, as a section header's does,
+  // so the title and each linked PR start their text at one x.
+  const lead = (key: string, icon: RenderElement | null) => (
+    <Box key={key} width={2} flexShrink={0} flexDirection="row" alignItems="center">
+      {icon}
+    </Box>
+  )
+
+  /** A link that reads by its blue alone, no underline: its text handed to the Link as a child. */
+  const link = (key: string, href: string, text: string) => (
+    <Link key={key} href={href} label={text}>
+      <Text color={C.blue}>{text}</Text>
+    </Link>
+  )
+
+  /** A secondary action: its label in the mid grey, brightening under the pointer as a plain Button does. */
+  const quiet = (key: string, label: string, onPress: () => void) => (
+    <Button key={key} plain onPress={onPress}>
+      <Text color={GRAY.mid}>{label}</Text>
+    </Button>
+  )
+
   const picked = (issue: Issue) => act.selected.includes(issue.number)
   const tile = (issue: Issue, i: number) => {
     const refined = issue.labels.some(l => l.name === REFINED)
@@ -77,16 +99,13 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             {row(
               'title',
               [
-                // A little more room after the icon than between paired items.
-                <Box key="i" flexShrink={0} marginRight={SPACE.pair}>
-                  {k.icon('issue-opened', OPEN)}
-                </Box>,
+                lead('i', k.icon('issue-opened', OPEN)),
                 <Text key="t" wrap="truncate">
                   {issue.title}
                 </Text>,
               ],
               // Its labels as GitHub pills, then its number; the title gives way to them.
-              [...issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)), <Link key="n" href={issue.url} label={`#${issue.number}`} />],
+              [...issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)), link('n', issue.url, `#${issue.number}`)],
             )}
           </Box>,
           // Each PR linked to close it, as the overview's workspaces draw one: its state in the icon's glyph and colour.
@@ -94,10 +113,10 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             row(
               `pr-${pr.number}`,
               [
-                k.icon(prIcon(pr), prColor(pr)),
-                <Link key="n" href={pr.url} label={`#${pr.number}`} />,
+                lead('i', k.icon(prIcon(pr), prColor(pr))),
+                link('n', pr.url, `#${pr.number}`),
                 pr.title ? (
-                  <Text key="t" dimColor wrap="truncate">
+                  <Text key="t" color={GRAY.light} wrap="truncate">
                     {pr.title}
                   </Text>
                 ) : null,
@@ -105,25 +124,28 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               [prNote(Text, pr)],
             ),
           ),
-          row(
-            'l3',
+          // The footer, with the same room above it as the title has below, when PRs sit between.
+          <Box key="l3" width="100%" marginTop={issue.prs.length ? SPACE.block / 2 : 0}>
+          {row(
+            'footer',
             [
-              <Text key="by" dimColor wrap="truncate">
-                {issue.assignees.length ? `→ ${issue.assignees.join(', ')}` : `by ${issue.author}`}
+              // The byline sits flush left, under the icons rather than the titles.
+              <Text key="by" color={GRAY.mid} wrap="truncate">
+                {issue.assignees.length ? `assigned to ${issue.assignees.join(', ')}` : `by ${issue.author}`}
               </Text>,
             ],
             [
               issue.comments ? (
                 <Box key="c" flexDirection="row" alignItems="center" gap={SPACE.pair}>
-                  {k.icon('comment', MUTED)}
-                  <Text dimColor>{String(issue.comments)}</Text>
+                  {k.icon('comment', GRAY.dark)}
+                  <Text color={GRAY.mid}>{String(issue.comments)}</Text>
                 </Box>
               ) : null,
-              <Text key="age" dimColor>
+              <Text key="age" color={GRAY.dark}>
                 {ago(at - issue.updatedAt)}
               </Text>,
               // Refine until it's refined; Start always (it asks to refine first when it isn't).
-              refined ? null : <Button key={`refine-${issue.number}`} plain dimColor label="Refine" onPress={() => act.refine(issue)} />,
+              refined ? null : quiet(`refine-${issue.number}`, 'Refine', () => act.refine(issue)),
               <Button key={`start-${issue.number}`} plain label="Start" onPress={() => act.start(issue)} />,
               // Picks it for a sprint: the word turns blue and the tile takes the selected fill.
               picked(issue) ? (
@@ -131,10 +153,11 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
                   <Text color={C.blue}>Selected</Text>
                 </Button>
               ) : (
-                <Button key={`pick-${issue.number}`} plain dimColor label="Select" onPress={() => act.toggle(issue)} />
+                quiet(`pick-${issue.number}`, 'Select', () => act.toggle(issue))
               ),
             ],
-          ),
+          )}
+          </Box>,
         ], { selected: picked(issue) })}
       </Box>
     )
@@ -159,7 +182,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
         {row(
           'sprint-row',
           [<Text key="n">{`${chosen} selected`}</Text>],
-          [<Button key="clear" plain dimColor label="Clear" onPress={() => act.clear()} />, <Button key="go" plain label={`Sprint (${chosen})`} onPress={() => act.sprint()} />],
+          [quiet('clear', 'Clear', () => act.clear()), <Button key="go" plain label={`Sprint (${chosen})`} onPress={() => act.sprint()} />],
         )}
       </Box>
     ) : null
@@ -169,7 +192,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     : [form, bar, ...(list.issues.length ? list.issues.map(tile) : [<Text key="none" dimColor>No open issues.</Text>])]
 
   // One repository, so no foldable header: its name as a plain line, the counts on the right.
-  const head = row('repo', [<Text key="r" dimColor wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
+  const head = row('repo', [<Text key="r" color={GRAY.mid} wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
   return (
     <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={1}>
       <Box key="head" width="100%" marginBottom={SPACE.block}>

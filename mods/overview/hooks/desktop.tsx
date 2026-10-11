@@ -2,7 +2,7 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { bytes, money, short, tokens } from '@kit/format'
 import type { PerfSnapshot } from '@kit/perf'
-import { C, GLYPH, INK, MUTED, RAMP, TRACK, levelColor } from '@kit/tokens'
+import { C, GLYPH, GRAY, INK, MUTED, RAMP, TRACK, levelColor } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
 
 import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
@@ -174,10 +174,10 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     right: snap ? (
       <Text>
         <Text bold color={levelColor(snap.percent)}>{`${snap.percent}%`}</Text>
-        <Text dimColor>{` of ${tokens(snap.max)}`}</Text>
+        <Text color={GRAY.mid}>{` of ${tokens(snap.max)}`}</Text>
       </Text>
     ) : (
-      <Text dimColor>measuring…</Text>
+      <Text color={GRAY.mid}>measuring…</Text>
     ),
     ...fold('context'),
     children: snap
@@ -313,13 +313,13 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
                   'l1',
                   [k.icon(glyph, color), <Text key="d" wrap="truncate">{agent.description || agent.type}</Text>],
                   [
-                    x?.tokens !== undefined ? <Text key="t" color={MUTED}>{tokens(x.tokens)}</Text> : null,
-                    ms !== undefined ? <Text key="ms" color={MUTED}>{short(ms)}</Text> : null,
+                    x?.tokens !== undefined ? <Text key="t" color={GRAY.mid}>{tokens(x.tokens)}</Text> : null,
+                    ms !== undefined ? <Text key="ms" color={GRAY.dark}>{short(ms)}</Text> : null,
                   ],
                 ),
                 row(
                   'l2',
-                  [<Text key="type" color={MUTED} wrap="truncate">{agent.type}</Text>],
+                  [<Text key="type" color={GRAY.mid} wrap="truncate">{agent.type}</Text>],
                   [<Text key="s" color={color}>{agent.status.toLowerCase()}</Text>],
                 ),
               ])}
@@ -374,7 +374,7 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
       !Button || !b.exists
         ? null
         : d.creating === b.branch
-          ? <Text dimColor>creating PR…</Text>
+          ? <Text color={GRAY.mid}>creating PR…</Text>
           : !pr
             ? <Button key={`create-${b.branch}`} plain label="Create PR" onPress={() => d.createPr(b.branch)} />
             : open && !pr.isDraft
@@ -408,7 +408,13 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
                 {b.branch}
               </Text>,
             ],
-            [Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null],
+            [
+              Button ? (
+                <Button key={`hide-${b.branch}`} plain onPress={() => d.hideBranch(b.branch)}>
+                  <Text color={GRAY.mid}>hide</Text>
+                </Button>
+              ) : null,
+            ],
           ),
           pr ? (
             <Text key="title" wrap="truncate">
@@ -417,7 +423,17 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
           ) : null,
           row(
             'l3',
-            [pr ? <Link key="n" href={pr.url} label={`#${pr.number}`} /> : null, <Text key="p" dimColor wrap="truncate">{where}</Text>],
+            [
+              // The PR's number reads as a link by its blue alone, no underline.
+              pr ? (
+                <Link key="n" href={pr.url} label={`#${pr.number}`}>
+                  <Text color={C.blue}>{`#${pr.number}`}</Text>
+                </Link>
+              ) : null,
+              <Text key="p" color={GRAY.mid} wrap="truncate">
+                {where}
+              </Text>,
+            ],
             [
               b.insertions || b.deletions ? (
                 // Lines added green, removed red, as a diff colours them.
