@@ -179,10 +179,12 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'issues' }, async $ => {
-    // Opened by the person: read now rather than on the next tick.
+    // Opened by the person: read now rather than on the next tick. The pane is
+    // open (drawing "Reading issues…") while gh runs; awaited, so the command
+    // settles with the list in state.
     shownAt = 0
     await $.ui.open({ id: PANE, title: 'Issues' })
-    void refresh($).catch(() => undefined)
+    await refresh($).catch(() => undefined)
 
     return { text: 'Issues pane opened.' }
   })

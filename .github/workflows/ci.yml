@@ -25,3 +25,34 @@ jobs:
           for dir in plugins/*/; do
             claude plugin validate "$dir"
           done
+      - name: Test each mod that has tests
+        run: |
+          for dir in plugins/*/; do
+            if [ -n "$(find "$dir" \( -name '*.test.ts' -o -name '*.test.tsx' \) -print -quit)" ]; then
+              claude plugin test "$dir"
+            fi
+          done
+
+      - name: Validate the marketplace
+        run: claude plugin validate .
+      - name: marketplace.json lists every mod at its plugin.json version
+        run: |
+          status=0
+          market=.claude-plugin/marketplace.json
+          for name in $(jq -r '.plugins[].name' "$market"); do
+            source=$(jq -r --arg n "$name" '.plugins[] | select(.name == $n) | .source' "$market")
+            listed=$(jq -r --arg n "$name" '.plugins[] | select(.name == $n) | .version' "$market")
+            actual=$(jq -r '.version' "$source/.claude-plugin/plugin.json")
+            if [ "$listed" != "$actual" ]; then
+              echo "::error file=$market::$name is $listed in marketplace.json but $actual in $source/.claude-plugin/plugin.json"
+              status=1
+            fi
+          done
+          for dir in plugins/*/; do
+            name=$(jq -r '.name' "${dir}.claude-plugin/plugin.json")
+            if ! jq -e --arg n "$name" '.plugins[] | select(.name == $n)' "$market" > /dev/null; then
+              echo "::error file=$market::$name (${dir}) is not listed in marketplace.json"
+              status=1
+            fi
+          done
+          exit $status
