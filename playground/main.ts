@@ -1,9 +1,11 @@
 import { load, onChange } from './engine'
-import { CELL, draw, h } from './render'
+import { messages } from './host'
+import { CELL, Fragment, draw, h } from './render'
 import type { Node, Surface } from './render'
 
-// The mods compile against a global `h`, as in the engine.
+// The mods and their surface modules compile against a global `h` and `Fragment`, as in the engine.
 ;(globalThis as any).h = h
+;(globalThis as any).Fragment = Fragment
 
 type Hook = ($: unknown, e: any, next: (e: any) => Promise<unknown>) => unknown
 type Registered = { event: string; matcher: Record<string, unknown>; hook: Hook }
@@ -102,7 +104,11 @@ const renderPane = async (key: string): Promise<HTMLElement> => {
     }
     try {
       const tree = (await r.hook(engine(() => surface), e, async () => h('Text', { dimColor: true }, '(the engine draws its own)'))) as Node
-      const drawn = draw(tree, surface, fn => fn())
+      // Each pane its own site, so a Client drawn in two panes runs twice, as in two windows.
+      const mod = mods.find(m => m.name === state.mod)!
+      const requestId = typeof r.matcher.requestId === 'string' ? r.matcher.requestId : undefined
+      const client = { site: `${key}:${requestId ?? ''}`, from: mod.path.replace(/^\.\.\//, ''), post: messages(hooks), requestId }
+      const drawn = draw(tree, surface, fn => fn(), { client })
       if (drawn) body.append(drawn)
     } catch (err) {
       const pre = document.createElement('pre')
@@ -114,9 +120,14 @@ const renderPane = async (key: string): Promise<HTMLElement> => {
   return card
 }
 
+/** Counts redraws: an older one still awaiting its hooks when a newer starts is dropped, not drawn over it. */
+let redraws = 0
+
 const redraw = async () => {
+  const mine = ++redraws
   const stage = $('#stage')
   const cards = await Promise.all(state.panes.map(renderPane))
+  if (mine !== redraws) return
   stage.replaceChildren(...cards)
 }
 

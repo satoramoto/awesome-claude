@@ -23,10 +23,16 @@ export const kitFor = (ctx: StoryContext) => {
 export const show = (tree: unknown, ctx: StoryContext, redraw?: () => void): HTMLElement => {
   const { surface } = where(ctx)
   const host = document.createElement('div')
-  const d = draw(tree as Node, surface, fn => {
-    fn()
-    redraw?.()
-  })
+  // The story is the drawing's site: its hover groups, hotkeys, typed text and Client instances are its own.
+  const d = draw(
+    tree as Node,
+    surface,
+    fn => {
+      fn()
+      redraw?.()
+    },
+    { client: { site: ctx.id } },
+  )
   if (d) host.append(d)
   return host
 }
