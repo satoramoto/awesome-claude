@@ -1,10 +1,11 @@
 import { addons } from '@storybook/preview-api'
 import type { Decorator, Preview } from '@storybook/html'
 
-import { CELL, h } from '../playground/render'
+import { CELL, Fragment, h } from '../playground/render'
 
-// The kit and the mods compile against a global `h`, as in the engine.
+// The kit, the mods and their surface modules compile against a global `h` and `Fragment`, as in the engine.
 ;(globalThis as any).h = h
+;(globalThis as any).Fragment = Fragment
 
 /** The canvas's margin around the frame, each side. */
 const GUTTER = 16
