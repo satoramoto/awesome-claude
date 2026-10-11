@@ -205,7 +205,7 @@ export const renderApp = (els: AppElements, state: Held, columns: number, opts: 
       ) : null}
       {report.note ? (
         <Box key="note" width="100%" minWidth={0} marginTop={SPACE.block}>
-          <Text color={GRAY.mid} wrap="truncate">
+          <Text color={GRAY.mid} wrap="wrap">
             {report.note}
           </Text>
         </Box>
