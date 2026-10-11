@@ -1,7 +1,9 @@
+// Changed in this fork (awesome-claude) for the desktop version: the desktop surface draws hooks/desktop.tsx.
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import type { Activity, FileNode, FileTree, Theme } from '../types'
+import { renderDesktop } from './desktop'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
@@ -63,6 +65,7 @@ const HOME_PRUNE = ['Library', 'AppData', '.Trash']
 const SIZE_TIMEOUT_MS = 15_000
 const SIZE_JOBS = 2
 const SIZE_WALK_LIMIT = 50_000
+const ROW_SCROLL_MS = 100
 
 let blink: Timer | null = null
 let themePoll: Timer | null = null
@@ -491,11 +494,43 @@ async function flash($: EngineInterface, tones: Record<string, string>): Promise
     }
   })
   if (generation !== mine) return
+  // The desktop scrolls the pane itself, so following Claude there means asking it to show the row.
+  if (followClaude) scrollToRow($, [...unique].reverse().find(id => id !== BRANCH_ROW) ?? '')
   blink = $.clock.after(FLASH_MS, () => {
     if (generation !== mine) return
     blink = null
     void patch($, cur => (generation === mine ? { flash: [], flashDim: [], flashOn: false, flashTones: {} } : {}))
   })
+}
+
+/** On the desktop, brings a row into the pane's view once it's drawn; the terminal scrolls by `scroll`. */
+function scrollToRow($: EngineInterface, id: string): void {
+  if (!nativeScroll || !id) return
+  $.clock.after(ROW_SCROLL_MS, () => void $.ui.scroll({ to: { key: id }, in: PANE }).catch(() => undefined))
+}
+
+async function goUp($: EngineInterface): Promise<void> {
+  follow = false
+  await reset($, dirname((await get($)).root))
+}
+
+async function goHome($: EngineInterface): Promise<void> {
+  follow = true
+  await reset($, await cwdOf($))
+}
+
+async function refreshAll($: EngineInterface): Promise<void> {
+  const cur = await get($)
+  searchIndex = null
+  await staleSizes($)
+  await loadDirs($, [cur.root, ...cur.expanded])
+  await detectRepo($)
+  await refreshGit($)
+  if (cur.query.trim()) await search($, cur.query)
+}
+
+function collapseAll($: EngineInterface): Promise<void> {
+  return patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))
 }
 
 async function followCwd($: EngineInterface): Promise<boolean> {
@@ -781,6 +816,7 @@ async function reveal($: EngineInterface, paths: string[]): Promise<void> {
     for (const p of paths) for (const a of ancestorsOf(p, cur.root)) open.add(a)
     return { expanded: [...open], cursor: paths[paths.length - 1] ?? cur.cursor, scroll: null }
   })
+  scrollToRow($, paths[paths.length - 1] ?? '')
 }
 
 async function walk($: EngineInterface, root: string, depth: number, limit: number): Promise<string[]> {
@@ -853,6 +889,7 @@ async function jump($: EngineInterface, query: string): Promise<void> {
     for (const p of hits) for (const a of ancestorsOf(p, cur.root)) open.add(a)
     return { query: '', expanded: [...open], cursor: hits[0] ?? cur.cursor, scroll: null }
   })
+  scrollToRow($, hits[0] ?? '')
 }
 
 async function fontState($: EngineInterface, charset: string): Promise<'ok' | 'stale' | 'missing'> {
@@ -1321,6 +1358,45 @@ export const register: Register = (on, options) => {
     view = { from, max }
     const shown = rows.slice(from, from + room - pinned.length)
     if (t.showSize) wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
+    if (e.surface === 'desktop') {
+      const els = $.ui.resolve(e)
+      return renderDesktop(
+        els,
+        {
+          t,
+          rows,
+          latest,
+          follow,
+          now,
+          columns: width,
+          bodyRows: e.props.scroll?.bodyRows ?? 1,
+          shown: p => (p !== t.root && inside(t.root, p) ? relative(t.root, p) : shortPath(p)),
+          branchRow: BRANCH_ROW,
+        },
+        {
+          up: () => void goUp($),
+          home: () => void goHome($),
+          refresh: () => void refreshAll($),
+          hidden: () => void patch($, cur => ({ showHidden: !cur.showHidden })),
+          sizes: () => void patch($, cur => ({ showSize: !cur.showSize })),
+          collapse: () => void collapseAll($),
+          unselect: () => void patch($, () => ({ selected: '' })),
+          press: id =>
+            void (async () => {
+              void sync($)
+              const n = (await get($)).nodes.find(x => x.id === id)
+              if (n) await press($, n)
+            })(),
+          open: id =>
+            void (async () => {
+              const n = (await get($)).nodes.find(x => x.id === id)
+              if (n) await openNode($, n)
+            })(),
+          search: q => void search($, q),
+          jump: q => void jump($, q),
+        },
+      )
+    }
     const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
     const countSegs = (c: [number, number, number] | undefined): Seg[] => {
       if (!c) return []
@@ -1461,41 +1537,21 @@ export const register: Register = (on, options) => {
               plain
               dimColor
               label={unicode ? '↑' : '\u{f005d}'}
-              onPress={() =>
-                void (async () => {
-                  follow = false
-                  await reset($, dirname(t.root))
-                })()
-              }
+              onPress={() => void goUp($)}
             />
             <Button
               key="cwd"
               plain
               dimColor={!follow}
               label={unicode ? '⌂' : '\u{f02dc}'}
-              onPress={() =>
-                void (async () => {
-                  follow = true
-                  await reset($, await cwdOf($))
-                })()
-              }
+              onPress={() => void goHome($)}
             />
             <Button
               key="refresh"
               plain
               dimColor
               label={unicode ? '↻' : '\u{f0450}'}
-              onPress={() =>
-                void (async () => {
-                  const cur = await get($)
-                  searchIndex = null
-                  await staleSizes($)
-                  await loadDirs($, [cur.root, ...cur.expanded])
-                  await detectRepo($)
-                  await refreshGit($)
-                  if (cur.query.trim()) await search($, cur.query)
-                })()
-              }
+              onPress={() => void refreshAll($)}
             />
             <Button
               key="hidden"
@@ -1511,7 +1567,7 @@ export const register: Register = (on, options) => {
               label={unicode ? 'Σ' : '\u{f02ca}'}
               onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
             />
-            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void patch($, cur => ({ expanded: [], nodes: dropBelow(cur.nodes, cur.nodes.filter(x => x.parent === cur.root && x.kind === 'dir').map(x => x.id)) }))} />
+            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void collapseAll($)} />
             {t.selected && (
               <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
             )}
