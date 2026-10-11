@@ -115,7 +115,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             [
               lead('i', null),
               <Text key="by" dimColor wrap="truncate">
-                {issue.assignees.length ? `→ ${issue.assignees.join(', ')}` : `by ${issue.author}`}
+                {issue.assignees.length ? `assigned to ${issue.assignees.join(', ')}` : `by ${issue.author}`}
               </Text>,
             ],
             [
