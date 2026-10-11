@@ -6,7 +6,9 @@ const ROOT = resolve(__dirname, '..')
 
 const config: StorybookConfig = {
   stories: ['../stories/**/*.stories.@(ts|tsx)'],
-  addons: ['@storybook/addon-essentials'],
+  // Only the toolbar items the stories use, so the toolbar fits a narrow window
+  // without scrolling: no backgrounds, viewports, measure or outline.
+  addons: [{ name: '@storybook/addon-essentials', options: { backgrounds: false, viewport: false, measure: false, outline: false } }],
   framework: { name: '@storybook/html-vite', options: {} },
   core: { disableTelemetry: true },
   // The same setup as the playground: the engine stood in for, the kit by its alias,
