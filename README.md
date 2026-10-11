@@ -18,7 +18,7 @@ version CI pins.
 
 ### Requirements
 
-- **Claude Code** 2.1.296 or later.
+- **Claude Code**: tested on 2.1.296.
 - **git**, for `overview`'s Workspaces section.
 - **The [GitHub CLI](https://cli.github.com), signed in** (`gh auth login`), for
   `issues` and for the pull requests in `overview`'s Workspaces. Without it
@@ -44,6 +44,8 @@ it. Its sections, each folding open and shut:
   request's state, checks and lines changed. Pull requests are read with `gh`
   every 30 seconds while any is open.
 - **Accounting**: the session's cost and model.
+
+A footer shows the session's share of the machine's cpu, memory and network.
 
 ### `/issues`
 
@@ -83,8 +85,8 @@ Pick a scope when asked (user scope loads the mod in every session). Each mod is
 active straight away. Or from a shell: `claude plugin marketplace add
 satoramoto/awesome-claude`, then `claude plugin install overview@awesome-claude`.
 
-`/plugin` isn't offered in the desktop app's Code tab, so install from a terminal;
-a mod installed at user scope then loads in the desktop app too.
+Run these from a terminal session; a mod installed at user scope then loads in
+the desktop app too.
 
 ### Try it from a clone, for one session
 
@@ -151,7 +153,7 @@ bun run playground
 At http://localhost:5173 (set `PORT` for another). Every mod's `ui.render` hooks,
 drawn with the scenarios in `playground/fixtures/<mod>.ts`, side by side in
 desktop light, desktop dark and terminal, at any pane width. On each save it also
-compiles and runs `claude plugin test` on the mod, and shows the result in the
+compiles and runs `claude plugin validate plugins/<mod>`, and shows the result in the
 bar.
 
 ### Storybook

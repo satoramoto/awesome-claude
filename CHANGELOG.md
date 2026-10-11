@@ -6,10 +6,12 @@ The first release: the repository is a Claude Code plugin marketplace,
 `awesome-claude`, with two mods. The repository's release is 0.1.0; each mod is
 versioned on its own in its `plugin.json` (`overview` 0.5.0, `issues` 0.1.0).
 
-- **`overview`** (0.5.0): a pane with the session at a glance: context use,
-  cost, time, turns and tools (as Activity), files, subagents, usage limits, and
-  each git workspace with its pull request. Opens on its own when a session
-  starts, or with `/overview`. Cells in the terminal, charts in the desktop app.
+- **`overview`** (0.5.0): a pane with the session at a glance, in sections:
+  Context, Limits, Activity, Agents, Workspaces (the branches the session
+  started, with their pull requests) and Accounting, and a footer with the
+  session's share of the machine's cpu, memory and network. Opens on its own
+  when a session starts, or with `/overview`. Cells in the terminal, charts in
+  the desktop app.
 - **`issues`** (0.1.0): a pane with the open GitHub issues of the session's
   repository, newest change first, opened with `/issues`. Quick add; Refine
   (the session clarifies an issue with you and rewrites it) and Start (a
