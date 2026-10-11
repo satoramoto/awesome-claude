@@ -309,7 +309,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             </Box>
           )
           return (
-            <Box key={`agent-${agent.id}`} width="100%" marginLeft={depth * 2} marginTop={i === 0 ? 0 : SPACE.block}>
+            // Indented by padding, inside the full width, so a nested tile ends at the same right edge.
+            <Box key={`agent-${agent.id}`} width="100%" paddingLeft={depth * 2} marginTop={i === 0 ? 0 : SPACE.block}>
               {k.tile(`tile-${agent.id}`, [
                 row(
                   'l1',
