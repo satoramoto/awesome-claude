@@ -99,14 +99,30 @@ export const tagOf = (name: string): string => {
 const statusColor = (status: string): string =>
   status === 'running' || status === 'pending' ? C.blue : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
 
-/** A PR's state as one colour: merged purple, closed or draft grey, else by its checks. */
-const prColor = (pr: GitPr) =>
-  pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft ? MUTED : pr.checks.failed ? C.bad : pr.checks.pending ? C.blue : C.ok
+/**
+ * A PR's state as one colour: merged purple; closed or draft grey; an open one green,
+ * red while it has conflicts (on GitHub or in the checkout), amber while CI fails.
+ */
+const prColor = (pr: GitPr, conflicted: boolean) =>
+  pr.state === 'MERGED'
+    ? C.purple
+    : pr.state === 'CLOSED' || pr.isDraft
+      ? MUTED
+      : conflicted || pr.conflicting
+        ? C.bad
+        : pr.checks.failed
+          ? C.warn
+          : C.ok
 
 /** "2h18", "3d4h", from "resets in 2h 18m". */
 const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 
-const shortTool = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
+/** The context bar's free room: a step brighter than the empty track. */
+const FREE = 'rgba(128,128,128,0.34)'
+/** The context bar's buffer past compaction: the compaction mark's amber, faint. */
+const BUFFER = 'rgba(227,163,59,0.32)'
+
+const shortTool =(name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
 
 /**
  * The footer's lead: the session's share of the machine, ours against the
@@ -130,27 +146,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
 
-  // ---- header: the session's totals, four across ----
   const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
-  const metric = (key: string, value: string, label: string) => (
-    <Box key={key} flexDirection="column" alignItems={key === 'time' ? 'flex-start' : key === 'files' ? 'flex-end' : 'center'}>
-      <Text>{value}</Text>
-      {k.caption(label)}
-    </Box>
-  )
-  const header = (
-    <Box key="header" flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right}>
-      {running ? <Text color={C.blue}>{`● ${running} agent${running === 1 ? '' : 's'} running`}</Text> : null}
-      {/* Spread edge to edge: the first total on the left edge, the last on the right. */}
-      <Box flexDirection="row" justifyContent="space-between" marginTop={running ? SPACE.block : 0}>
-        {metric('time', a.startedAt ? short(d.at - a.startedAt) : '–', 'Elapsed')}
-        {metric('turns', String(a.turns), 'Turns')}
-        {metric('calls', String(toolCalls), 'Calls')}
-        {metric('files', String(a.files.length), 'Files Δ')}
-      </Box>
-    </Box>
-  )
 
   // ---- context: the instrument's main meter ----
   // Used segments summed into their groups, in the groups' order.
@@ -161,6 +158,14 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     const at = parts.find(p => p.label === c.name)
     if (at) at.value += s.tokens
     else parts.push({ value: s.tokens, color: c.color, label: c.name })
+  }
+  // What's left, as two more shades of the same bar: the free room up to compaction,
+  // then the buffer past it (amber, as the compaction mark is), with their own legend entries.
+  const room = [...parts]
+  if (snap) {
+    const free = Math.max(0, (snap.compactAt ?? snap.max) - snap.total)
+    if (free > 0) room.push({ value: free, color: FREE, label: 'Free' })
+    if (snap.compactAt && snap.max > snap.compactAt) room.push({ value: snap.max - snap.compactAt, color: BUFFER, label: 'Buffer' })
   }
   const context = k.section({
     id: 'context',
@@ -178,8 +183,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     children: snap
       ? [
           <Box key="meter" flexDirection="column">
-            {k.bar(parts, snap.max, { height: 0.5 })}
-            {k.scale(snap.compactAt ? snap.compactAt / snap.max : undefined, C.warn)}
+            {k.bar(room, snap.max, { height: 0.5 })}
+            {/* No compaction mark: the buffer's shade starts where it falls. */}
+            {k.scale()}
             {k.axis(
               'ctx-axis',
               [0, 0.25, 0.5, 0.75, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
@@ -188,18 +194,9 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
           <Box key="legend" marginTop={SPACE.block} width="100%">
             {k.legend(
               'ctx',
-              parts.map(p => ({ label: p.label!, color: p.color, figure: tokens(p.value) })),
+              room.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
+              2,
             )}
-          </Box>,
-          <Box key="room" flexDirection="row" justifyContent="space-between" marginTop={SPACE.block}>
-            <Box flexDirection="row" gap={SPACE.pair}>
-              {k.caption(snap.compactAt ? 'Compaction' : 'No auto-compact')}
-              {snap.compactAt ? <Text color={C.warn}>{tokens(snap.compactAt)}</Text> : null}
-            </Box>
-            <Box flexDirection="row" gap={SPACE.pair}>
-              {k.caption('Headroom')}
-              <Text>{tokens(Math.max(0, (snap.compactAt ?? snap.max) - snap.total))}</Text>
-            </Box>
           </Box>,
         ]
       : null,
@@ -309,7 +306,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             </Box>
           )
           return (
-            <Box key={`agent-${agent.id}`} width="100%" marginLeft={depth * 2} marginTop={i === 0 ? 0 : SPACE.block}>
+            // Indented by padding, inside the full width, so a nested tile ends at the same right edge.
+            <Box key={`agent-${agent.id}`} width="100%" paddingLeft={depth * 2} marginTop={i === 0 ? 0 : SPACE.block}>
               {k.tile(`tile-${agent.id}`, [
                 row(
                   'l1',
@@ -342,7 +340,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
 
   return k.pinned(
-    [header, context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
+    [context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
@@ -358,14 +356,15 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
   const entries = d.branches.map((b, i) => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
-    const color = pr ? prColor(pr) : MUTED
-    const word = !b.exists ? 'DELETED' : pr ? (open ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
+    const color = pr ? prColor(pr, b.conflicted > 0) : MUTED
     const ci: [string, string] | null = b.conflicted
       ? [`${b.conflicted} conflict${b.conflicted === 1 ? '' : 's'}`, C.bad]
       : !pr || !open
         ? null
-        : pr.checks.failed
-          ? [`${pr.checks.failed} failing`, C.bad]
+        : pr.conflicting
+          ? ['conflicts', C.bad]
+          : pr.checks.failed
+          ? [`${pr.checks.failed} failing`, C.warn]
           : pr.checks.pending
             ? [`${pr.checks.pending} pending`, C.blue]
             : pr.checks.passed
@@ -382,9 +381,10 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
               ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} />
               : null
     // A tile per branch, three lines:
-    //   [pr icon] branch                    OPEN
+    //   [pr icon] branch                    hide
     //   A neater inspector, the PR's title, the full width
-    //   #9  awesome-claude      +412 −96  1 failing  Merge  hide
+    //   #9  awesome-claude      +412 −96  1 failing  Merge
+    // The PR's state is the icon's glyph and colour, no word; a deleted branch's name is struck through.
     const iconKey = !pr ? GLYPH.branch : pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open'
     const where = b.worktree ? `${b.place} (worktree)` : b.place
     const row = (key: string, l: RenderElement | (RenderElement | null)[], r: (RenderElement | null)[]) => (
@@ -400,7 +400,16 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     return (
       <Box key={`branch-${b.branch}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
         {k.tile(`tile-${b.branch}`, [
-          row('l1', [k.icon(iconKey, color), <Text key="b" wrap="truncate">{b.branch}</Text>], [<Text key="w" color={color}>{word}</Text>]),
+          row(
+            'l1',
+            [
+              k.icon(iconKey, color),
+              <Text key="b" wrap="truncate" strikethrough={!b.exists} dimColor={!b.exists}>
+                {b.branch}
+              </Text>,
+            ],
+            [Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null],
+          ),
           pr ? (
             <Text key="title" wrap="truncate">
               {pr.title}
@@ -413,7 +422,6 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
               b.insertions || b.deletions ? <Text key="d" dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
               ci ? <Text key="ci" color={ci[1]}>{ci[0]}</Text> : null,
               action,
-              Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null,
             ],
           ),
         ])}

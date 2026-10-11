@@ -389,6 +389,7 @@ export const toGitPr = (json: any, branch: string): GitPr => ({
   review: String(json.reviewDecision ?? ''),
   ...summarizeChecks(json.statusCheckRollup),
   current: json.headRefName === branch,
+  conflicting: json.mergeable === 'CONFLICTING',
 })
 
 /** A one-line reason from gh's stderr. */
@@ -432,7 +433,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
   }
 }
 
-const GH_FIELDS = 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName'
+const GH_FIELDS = 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url,headRefName,mergeable'
 
 const loadGh = async ($: EngineInterface, info: GitInfo): Promise<GhInfo> => {
   const at = Date.now()
@@ -575,15 +576,26 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
         }
       }
     }
-    const fresh = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache)))
-    if (!same(await read($, branches), fresh)) await update($, branches, () => fresh)
+    const loaded = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache)))
+    // git and gh took a while: a branch hidden since `off` was read must not come
+    // back. `hiding` is checked again inside the write, which retries on a miss.
+    const offNow = await read($, hidden)
+    const shown = () => loaded.filter(b => !offNow.includes(b.branch) && !hiding.has(b.branch))
+    if (!same(await read($, branches), shown())) await update($, branches, shown)
   } finally {
     branchesBusy = false
   }
 }
 
+/**
+ * Branches hidden in this process, set before any await: a refresh already
+ * running read `hidden` before the press, and filters by this when it writes.
+ */
+const hiding = new Set<string>()
+
 /** The ✕ on a branch: stop showing it. */
 const hideBranch = async ($: EngineInterface, branch: string) => {
+  hiding.add(branch)
   await update($, hidden, list => (list.includes(branch) ? list : [...list, branch]))
   await update($, branches, list => list.filter(b => b.branch !== branch))
 }
@@ -992,7 +1004,7 @@ export const register: Register = on => {
         resources: await read($, resources),
         branches: await read($, branches),
         creating: await read($, creating),
-        hideBranch: (branch: string) => void hideBranch($, branch).catch(() => undefined),
+        hideBranch: (branch: string) => void hideBranch($, branch).catch(err => $.ui.toast(`Hide ${branch}: ${err?.message ?? err}`)),
         // Merge, like Create PR: the session does it, and reports back.
         mergePr: (pr: GitPr) =>
           void $.prompt
