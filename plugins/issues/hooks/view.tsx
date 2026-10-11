@@ -66,6 +66,14 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     </Box>
   )
 
+  // Every line of a tile starts with the same icon column, as a section header's does,
+  // so the title, each linked PR and the byline all start their text at one x.
+  const lead = (key: string, icon: RenderElement | null) => (
+    <Box key={key} width={2} flexShrink={0} flexDirection="row" alignItems="center">
+      {icon}
+    </Box>
+  )
+
   const picked = (issue: Issue) => act.selected.includes(issue.number)
   const tile = (issue: Issue, i: number) => {
     const refined = issue.labels.some(l => l.name === REFINED)
@@ -77,10 +85,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             {row(
               'title',
               [
-                // A little more room after the icon than between paired items.
-                <Box key="i" flexShrink={0} marginRight={SPACE.pair}>
-                  {k.icon('issue-opened', OPEN)}
-                </Box>,
+                lead('i', k.icon('issue-opened', OPEN)),
                 <Text key="t" wrap="truncate">
                   {issue.title}
                 </Text>,
@@ -94,7 +99,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             row(
               `pr-${pr.number}`,
               [
-                k.icon(prIcon(pr), prColor(pr)),
+                lead('i', k.icon(prIcon(pr), prColor(pr))),
                 <Link key="n" href={pr.url} label={`#${pr.number}`} />,
                 pr.title ? (
                   <Text key="t" dimColor wrap="truncate">
@@ -108,6 +113,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
           row(
             'l3',
             [
+              lead('i', null),
               <Text key="by" dimColor wrap="truncate">
                 {issue.assignees.length ? `→ ${issue.assignees.join(', ')}` : `by ${issue.author}`}
               </Text>,
