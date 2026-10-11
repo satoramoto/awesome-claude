@@ -29,6 +29,12 @@ export type IssueList = {
 
 declare module 'claude-code' {
   interface PluginState {
-    issues: { list: IssueList | null }
+    issues: {
+      list: IssueList | null
+      /** Issues selected for a sprint, by number. */
+      selected: number[]
+      /** The title of the issue being added, while gh runs. */
+      adding: string | null
+    }
   }
 }
