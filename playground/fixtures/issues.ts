@@ -31,7 +31,17 @@ export const busy = {
   },
 }
 
-export const empty = { list: { repo: 'satoramoto/awesome-claude', more: false, at: now, issues: [] } }
+/** Two issues picked for a sprint, one refined. */
+export const sprint = {
+  ...busy,
+  list: {
+    ...busy.list,
+    issues: busy.list.issues.map(i => (i.number === 21 ? { ...i, labels: [...i.labels, { name: 'refined', color: '#0e8a16' }] } : i)),
+  },
+  selected: [24, 21],
+}
+
+export const empty ={ list: { repo: 'satoramoto/awesome-claude', more: false, at: now, issues: [] } }
 
 export const noRepo = { list: { repo: '', more: false, at: now, issues: [], note: 'No GitHub repository for this session' } }
 
