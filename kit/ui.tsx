@@ -66,10 +66,11 @@ const GUTTER = 2
 const BAND_PAD_Y = 0.2
 
 /**
- * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
- * ▶ a text glyph; without it macOS can draw it as an emoji.
+ * The fold arrow: the small disclosure triangles, which are text glyphs only (no
+ * emoji form to guard against). The full-size ▼ drew lopsided in the desktop's
+ * native button.
  */
-export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
+export const fold = (collapsed: boolean) => (collapsed ? '▸' : '▾')
 
 /**
  * A section header's band: a tonal step that marks where each section starts. Solid,
