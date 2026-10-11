@@ -10,6 +10,8 @@ import { CELL, h } from '../playground/render'
 const GUTTER = 16
 /** What a frame adds around its body, left and right together: the side pane's padding and divider, or the plain pane's padding. */
 const CHROME = { sidebar: 21, pane: 24 }
+/** The narrowest the transcript beside the side pane is drawn. */
+const TRANSCRIPT = 120
 
 // The fitted width depends on the canvas, which settles after the first draw and
 // changes as the window resizes; whenever it differs from the one last drawn at,
@@ -45,7 +47,9 @@ const pane: Decorator = (story, ctx) => {
 
   if (sidebar) {
     const app = document.createElement('div')
-    app.className = `app ${theme}`
+    // With too little room left for the transcript, the side pane takes the whole window, without the divider.
+    const alone = room - columns * CELL.col < TRANSCRIPT
+    app.className = `app ${theme}${alone ? ' alone' : ''}`
     app.innerHTML = `<div class="transcript"><div class="bubble-msg"></div><div class="bubble-msg short"></div><div class="bubble-msg"></div></div>`
     const side = document.createElement('div')
     side.className = 'side'
@@ -89,6 +93,8 @@ style.textContent = `
   .app .bubble-msg { margin: 0 16px; height: 34px; border-radius: 8px; background: var(--line); opacity: 0.6; }
   .app .bubble-msg.short { width: 60%; align-self: flex-end; }
   .app .side { flex: none; display: flex; flex-direction: column; border-left: 1px solid var(--line); }
+  .app.alone .transcript { display: none; }
+  .app.alone .side { flex: 1; border-left: none; }
   .app .side-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; color: var(--muted); }
   .app .marks { display: flex; gap: 10px; }
   .app .mark.on { color: var(--mark); border: 1px solid var(--mark); border-radius: 5px; padding: 0 3px; }
