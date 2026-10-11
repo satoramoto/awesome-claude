@@ -56,7 +56,10 @@ const pane: Decorator = (story, ctx) => {
     app.innerHTML = `<div class="transcript"><div class="bubble-msg"></div><div class="bubble-msg short"></div><div class="bubble-msg"></div></div>`
     const side = document.createElement('div')
     side.className = 'side'
-    side.innerHTML = `<div class="side-head"><span>Overview</span><span class="marks"><span class="mark on">⤢</span><span class="mark">✕</span></span></div>`
+    // The pane's title, as the mod's `$.ui.open({ title })` gives it: a story's `paneTitle`, else the last part of its title (Mods/Issues → Issues).
+    const title = String(ctx.parameters.paneTitle ?? ctx.title.split('/').pop() ?? '')
+    side.innerHTML = `<div class="side-head"><span></span><span class="marks"><span class="mark on">⤢</span><span class="mark">✕</span></span></div>`
+    side.querySelector('.side-head > span')!.textContent = title
     const body = document.createElement('div')
     body.className = 'side-body'
     body.style.width = width
