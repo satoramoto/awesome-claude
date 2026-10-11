@@ -236,8 +236,8 @@ const injectStyles = () => {
 const STYLES = `
   :root, .dark { --r-bg: #1f1f1e; --r-fg: #ececec; --r-accent: #0a84ff; --r-field: rgba(255,255,255,0.06); --r-edge: rgba(255,255,255,0.16); --r-btn: rgba(255,255,255,0.14); --r-btn-top: rgba(255,255,255,0.08); --r-code: rgba(255,255,255,0.05); --r-kw: #c792ea; --r-str: #a5d6a7; --r-num: #f2b179; --r-add: rgba(48,164,108,0.18); --r-del: rgba(229,72,77,0.18); }
   .light { --r-bg: #fbfbfa; --r-fg: #1d1d1f; --r-accent: #007aff; --r-field: #ffffff; --r-edge: rgba(0,0,0,0.16); --r-btn: #ffffff; --r-btn-top: rgba(0,0,0,0); --r-code: rgba(0,0,0,0.04); --r-kw: #8e3fbf; --r-str: #2f7d32; --r-num: #b5651d; --r-add: rgba(48,164,108,0.14); --r-del: rgba(229,72,77,0.12); }
-  .app.dark { --r-bg: #1c1c1c; }
-  .app.light { --r-bg: #faf9f5; }
+  .app.dark { --r-bg: #1c1c1c; --r-fg: #e8e8e6; }
+  .app.light { --r-bg: #faf9f5; --r-fg: #1f1e1d; }
   .terminal { --r-bg: #101014; --r-fg: #d8d8d8; --r-accent: #d77757; --r-field: transparent; --r-edge: #5a5a5a; --r-code: transparent; --r-kw: #c792ea; --r-str: #a5d6a7; --r-num: #f2b179; --r-add: rgba(48,164,108,0.22); --r-del: rgba(229,72,77,0.22); }
 
   /* A desktop's native push button, after macOS's: a rounded bezel, the primary filled with the accent. */
@@ -256,7 +256,7 @@ const STYLES = `
   .button.dismiss:hover { opacity: 1; background: var(--r-btn); }
 
   .r-field { display: flex; align-items: center; gap: 6px; white-space: nowrap; }
-  .r-field input, .r-field select { font: inherit; color: var(--r-fg); min-width: 0; }
+  .r-field input, .r-field select { font: inherit; color: inherit; min-width: 0; }
   .r-field.desktop input { flex: 1; height: 19px; box-sizing: border-box; padding: 0 6px; border-radius: 5px; border: 0.5px solid var(--r-edge); background: var(--r-field); outline: none; }
   .r-field.desktop input:focus { box-shadow: 0 0 0 3px color-mix(in srgb, var(--r-accent) 45%, transparent); border-color: var(--r-accent); }
   .r-field.desktop select { height: 19px; padding: 0 4px; border-radius: 5px; border: 0.5px solid var(--r-edge); background: var(--r-btn); }
