@@ -99,6 +99,10 @@ style.textContent = `
   .app .marks { display: flex; gap: 10px; }
   .app .mark.on { color: var(--mark); border: 1px solid var(--mark); border-radius: 5px; padding: 0 3px; }
   .app .side-body { padding: 4px 10px 10px; overflow: auto; }
+  /* The app's thin, rounded scrollbar on a bare track, rather than the browser's own. */
+  .app .side-body::-webkit-scrollbar { width: 8px; background: transparent; }
+  .app .side-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, currentColor 22%, transparent); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }
+  .app .side-body::-webkit-scrollbar-thumb:hover { background-color: color-mix(in srgb, currentColor 38%, transparent); }
   .button { font: inherit; color: inherit; background: none; border: none; padding: 0; cursor: pointer; }
 `
 document.head.append(style)
