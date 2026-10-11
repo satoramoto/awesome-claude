@@ -21,6 +21,13 @@
       "author": { "name": "Ryan Gavin" }
     },
     {
+      "name": "launcher",
+      "source": "./plugins/launcher",
+      "version": "0.1.0",
+      "description": "The project's dev servers from .claude/launch.json in a pane: start, stop and restart each, see which answer and read their output",
+      "author": { "name": "Ryan Gavin" }
+    },
+    {
       "name": "lab",
       "source": "./plugins/lab",
       "version": "0.1.0",
