@@ -16,7 +16,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/Claude_Code-%E2%89%A5_2.1.287-D97757?logo=claude&logoColor=fff" alt="Claude Code 2.1.287 or newer">
-  <img src="https://img.shields.io/badge/version-0.2.24-blue" alt="Version">
+  <img src="https://img.shields.io/badge/version-0.3.0-blue" alt="Version">
   <img src="https://img.shields.io/badge/type-mod-6f42c1" alt="Claude Code mod">
   <img src="https://img.shields.io/badge/license-MIT-green" alt="License">
 </p>
@@ -111,7 +111,19 @@ Linux CI weren't brought over; this repository's CI runs on Linux only.
 
 From upstream [`bf8de32`](https://github.com/data-goblin/claude-code-filetree/commit/bf8de321fcd03a9edb893b9ef3e3cc0e4af5bee5):
 
-- Moved to `mods/filetree/` in awesome-claude; the code is unchanged.
+- Moved to `mods/filetree/` in awesome-claude.
+- A desktop version (0.3.0): in the desktop app the pane is drawn with the shared kit,
+  as the other mods are (`hooks/desktop.tsx`). A header with the folder and its actions
+  as icons, the branch line with ahead/behind and lines changed, the search field,
+  then rows with GitHub's file and folder icons, git status colours, lines changed and
+  dates or sizes in greys, the picked row highlighted, and a footer with the selection
+  (and an open button) and git's latest step. The rows are drawn by the render hook
+  rather than the terminal's `Client`, which can't draw icons; Claude's reads and
+  writes light their rows (blue for reads, amber for writes, green for commits, with a
+  rail beside them) for as long as the terminal's shimmer runs, and the pane scrolls
+  to them. A press on a row selects it and opens a folder, a second press opens a
+  file; arrow keys stay the terminal's. The terminal draws exactly as before.
+  Changed files say so in their first line.
 - Not brought over: the demo GIFs in `media/` (this README links upstream's), the
   repository's own marketplace, its pre-commit hook and its platforms CI.
 - This README: the fork notice, install from awesome-claude, and this section.

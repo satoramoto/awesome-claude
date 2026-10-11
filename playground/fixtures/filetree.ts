@@ -123,6 +123,32 @@ export const pushing = {
   activity: [activity('git push', 'pushing', 'running', 'teal', '\u{f0552}', '↑')],
 }
 
+/** A push that failed: the footer says so in red. */
+export const pushFailed = {
+  tree: base,
+  activity: [activity('git push', 'push failed', 'failed', 'teal', '\u{f0552}', '↑')],
+}
+
+/** A file picked in the tree, which Claude gets as context: bold in the tree, its path in the footer. */
+export const selected = {
+  tree: { ...base, selected: p('src/lib/api.ts'), cursor: p('src/lib/api.ts') },
+  activity: [],
+}
+
+/** Claude reading inside a closed folder: the folder opens, dimly lit, and the file it read is lit. */
+export const reading = {
+  tree: {
+    ...base,
+    expanded: [...base.expanded, p('public')],
+    nodes: [...nodes.map(n => (n.id === p('public') ? { ...n, loaded: true } : n)), node('public/favicon.svg', 'file', 12 * day, 1_204), node('public/robots.txt', 'file', 30 * day, 24)],
+    flash: [p('public/robots.txt')],
+    flashDim: [p('public')],
+    flashOn: true,
+    flashTones: { [p('public/robots.txt')]: 'purple', [p('public')]: 'purple' },
+  },
+  activity: [],
+}
+
 /** The right column as sizes: files in bytes, folders' disk usage. */
 export const sizes = {
   tree: { ...base, showSize: true, dirSizes: { [p('.github')]: 8_192, [p('node_modules')]: 312_000_000, [p('public')]: 1_840_000, [p('src')]: 61_440, [p('src/components')]: 12_288, [p('src/lib')]: 16_384 } },

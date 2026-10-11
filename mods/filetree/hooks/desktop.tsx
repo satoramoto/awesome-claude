@@ -56,6 +56,9 @@ export type DesktopActions = {
   jump: (query: string) => void
 }
 
+/** The branch name's least width in cells, however many figures share its line. */
+const HEAD_MIN = 6
+
 /** The most rows drawn: a tree past it would outgrow what the desktop takes in one drawing. */
 export const MAX_ROWS = 1500
 
@@ -137,7 +140,8 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
       {k.icon(icon, color)}
       <Box position="absolute" top={0} left={0}>
         <Button key={key} plain label={label} onPress={onPress}>
-          <Text>{'  '}</Text>
+          {/* An em space and a no-break space, about the icon's two cells: plain spaces collapse to a sliver. */}
+          <Text>{'  '}</Text>
         </Button>
       </Box>
     </Box>
@@ -193,7 +197,7 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
       iconButton('cwd', 'Follow the working directory', 'home', v.follow ? GRAY.light : GRAY.dark, act.home),
       iconButton('refresh', 'Refresh', 'sync', GRAY.mid, act.refresh),
       iconButton('hidden', t.showHidden ? 'Hide hidden files' : 'Show hidden files', 'eye', t.showHidden ? GRAY.light : GRAY.dark, act.hidden),
-      iconButton('size', t.showSize ? 'Show dates' : 'Show sizes', GLYPH.layers, t.showSize ? GRAY.light : GRAY.dark, act.sizes),
+      iconButton('size', t.showSize ? 'Show dates' : 'Show sizes', GLYPH.context, t.showSize ? GRAY.light : GRAY.dark, act.sizes),
       iconButton('collapse', 'Collapse all', 'fold', GRAY.mid, act.collapse),
       t.selected ? iconButton('unselect', 'Clear the selection', GLYPH.failed, GRAY.mid, act.unselect) : null,
     ],
@@ -216,15 +220,17 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
       'branch',
       [
         lead('icon', k.icon(GLYPH.branch, tone ?? GRAY.mid)),
-        <Box key="head" flexShrink={1} minWidth={0}>
+        // Never squeezed out: the figures on the right leave it a few letters.
+        <Box key="head" flexShrink={1} minWidth={HEAD_MIN}>
           <Text color={tone} wrap="truncate">
             {b.head}
           </Text>
         </Box>,
         b.ahead > 0 ? <Text key="ahead" color={GRAY.mid}>{` ↑${b.ahead}`}</Text> : null,
         b.behind > 0 ? <Text key="behind" color={GRAY.mid}>{` ↓${b.behind}`}</Text> : null,
+        // The upstream, dim, and first to give way when the line is short.
         b.upstream ? (
-          <Box key="up" flexShrink={10} minWidth={0} marginLeft={SPACE.pair}>
+          <Box key="up" flexShrink={1000} minWidth={0} marginLeft={SPACE.pair}>
             <Text color={GRAY.dark} wrap="truncate">
               {b.upstream}
             </Text>
@@ -235,19 +241,18 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
     )
   }
 
-  // The search field.
-  const search = line(
-    'search',
-    [
-      lead('icon', k.icon('search', GRAY.dark)),
-      Input ? (
-        <Box key="field" flexGrow={1} flexShrink={1} minWidth={0}>
+  // The search field, as wide as the pane.
+  const search = (
+    <Box key="search" flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%" marginTop={SPACE.block} marginBottom={SPACE.block}>
+      {lead('icon', k.icon('search', GRAY.dark))}
+      {Input ? (
+        // A column, so the field stretches across the box.
+        <Box key="field" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
           <Input key="q" placeholder="Search files" submitLabel="jump" autoFocus value={t.query} onInput={(q: string) => act.search(q)} onSubmit={(q: string) => act.jump(q)} />
         </Box>
-      ) : null,
-    ],
-    [t.query ? iconButton('clear', 'Clear the search', GLYPH.failed, GRAY.mid, () => act.search('')) : null],
-    { marginTop: SPACE.block, marginBottom: SPACE.block },
+      ) : null}
+      {t.query ? iconButton('clear', 'Clear the search', GLYPH.failed, GRAY.mid, () => act.search('')) : null}
+    </Box>
   )
 
   // One file or folder.
@@ -276,6 +281,12 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
         : ago(v.now - n.mtime)
     const dirCounts = n.kind === 'dir' ? counts(n.id, t.counts[n.id]) : []
     const isCursor = n.id === t.cursor
+    // A Button sizes to its label, so the name is cut to the room left here, with an ellipsis,
+    // rather than clipped mid-letter: the pane less the indent, arrow, icon, figures and badge.
+    const c = n.kind === 'dir' ? t.counts[n.id] : undefined
+    const figures = [meta, loc?.[0] ? `+${loc[0]}` : '', loc?.[1] ? `−${loc[1]}` : '', ...(c ?? []).filter(x => x > 0).map(x => `?${x}`)].filter(Boolean)
+    const room = Math.floor(v.columns - EDGE.left - EDGE.right - r.depth * SPACE.item - SPACE.item * 2 - 2 - figures.join(' ').length - SPACE.pair)
+    const label = n.name.length > Math.max(4, room) ? `${n.name.slice(0, Math.max(3, room - 1))}…` : n.name
     return (
       <Box key={`row-${n.id}`} flexDirection="row" alignItems="center" width="100%" backgroundColor={isCursor ? TRACK : undefined}>
         {/* A rail in the activity's colour while Claude reads or writes it. */}
@@ -288,7 +299,7 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
         <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
           <Button key={n.id} plain label={n.name} onPress={() => act.press(n.id)}>
             <Text color={nameColor} bold={n.id === t.selected || isBright} strikethrough={status === 'D' && n.kind !== 'dir'} wrap="truncate">
-              {n.name}
+              {label}
             </Text>
           </Button>
         </Box>
