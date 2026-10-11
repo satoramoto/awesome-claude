@@ -1,0 +1,24 @@
+{
+  "name": "awesome-claude",
+  "owner": { "name": "Ryan Gavin" },
+  "metadata": {
+    "description": "Claude Code mods: panes and other interface drawn by the engine's hooks API",
+    "version": "0.1.0"
+  },
+  "plugins": [
+    {
+      "name": "overview",
+      "source": "./plugins/overview",
+      "version": "0.5.0",
+      "description": "A session overview pane: context, cost, time, turns, tools, files, subagents, limits and git; cells in the terminal, charts in the desktop app",
+      "author": { "name": "Ryan Gavin" }
+    },
+    {
+      "name": "issues",
+      "source": "./plugins/issues",
+      "version": "0.1.0",
+      "description": "A pane listing the open GitHub issues of the session's repository",
+      "author": { "name": "Ryan Gavin" }
+    }
+  ]
+}
