@@ -1,5 +1,14 @@
 # Changelog
 
+## Unreleased
+
+- **`filetree`** (0.2.24): forked from
+  [data-goblin/claude-code-filetree](https://github.com/data-goblin/claude-code-filetree)
+  at `bf8de32`, MIT, code unchanged.
+- **`blast-radius`** (0.1.0): forked from
+  [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods/blast-radius)
+  at `569c528`, Apache-2.0, code unchanged.
+
 ## 0.1.0
 
 The first release: the repository is a Claude Code plugin marketplace,
