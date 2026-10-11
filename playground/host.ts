@@ -1,7 +1,9 @@
 // Runs a mod's ui.render hooks outside the engine, for the playground and the
 // stories: a `$` with the ui noun (every other call resolves undefined), and an
-// `on` that collects the hooks register() adds.
+// `on` that collects the hooks register() adds; and their ui.message hooks,
+// which answer a `Client`'s posts (see client.ts).
 
+import type { ClientPost } from './client'
 import { h } from './render'
 import type { Node, Surface } from './render'
 
@@ -35,6 +37,20 @@ export const collect = (mod: { register: (on: any, options: any) => void }): Reg
   mod.register(on, {})
   return hooks
 }
+
+/**
+ * A `Client`'s post as the engine delivers it: the hooks' `ui.message` chain,
+ * matchers compared by equality, outermost (first registered) first. What it
+ * answers (`{ props }`) goes back to the instance. Pass to `draw`'s
+ * `client.post`, or to `configureClients({ post })`.
+ */
+export const messages =
+  (hooks: Registered[]): ClientPost =>
+  async message => {
+    const chain = hooks.filter(r => r.event === 'ui.message' && Object.entries(r.matcher).every(([k, v]) => (message as any)[k] === v))
+    const at = async (i: number, e: any): Promise<unknown> => (i < chain.length ? chain[i]!.hook(engine, e, next => at(i + 1, next)) : undefined)
+    return at(0, { ...message })
+  }
 
 /** Every Pane the hooks draw, for `surface` at `columns` wide. */
 export const panes = async (hooks: Registered[], surface: Surface, columns: number): Promise<Node[]> => {
