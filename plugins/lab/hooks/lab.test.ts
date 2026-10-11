@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { SURFACES, experiments } from './experiments'
+import { DESKTOP_REFUSED, SURFACES, experiments, galleryExperiments } from './experiments'
 
 /*
  * Mounts every experiment's pane on every surface and records what the engine
@@ -172,6 +172,9 @@ test('every experiment on every surface', { timeoutMs: 120_000 }, async $ => {
   }
   console.log(`VERDICTS ${JSON.stringify(verdicts)}`)
   expect(Object.keys(verdicts)).toHaveLength(experiments.length)
+  // The gallery's skip list is what this run found the desktop refusing.
+  const refused = experiments.filter(x => !verdicts[x.id]?.desktop?.accepted).map(x => x.id)
+  expect([...refused].sort()).toEqual([...DESKTOP_REFUSED].sort())
   // Plain elements every surface lists are accepted everywhere.
   for (const surface of SURFACES) expect(verdicts['text-styles']?.[surface]?.accepted).toBe(true)
 })
@@ -184,11 +187,20 @@ test('the index lists every experiment and a row opens its pane', async ($, on) 
   })
   for (const surface of SURFACES) {
     const ui: Ui = await $.ui.mount({ plugin: 'lab', surface, component: 'Pane', props: PANE, requestId: 'lab' })
-    expect(await ui.findAll({ type: 'Button' })).toHaveLength(experiments.length)
+    expect(await ui.findAll({ type: 'Button' })).toHaveLength(experiments.length + 1)
     await ui.press({ key: 'open-svg-blur' })
+    await ui.press({ key: 'gallery' })
     await ui.unmount()
   }
-  expect(opened).toEqual(['lab-svg-blur', 'lab-svg-blur', 'lab-svg-blur', 'lab-svg-blur'])
+  expect(opened).toEqual(SURFACES.flatMap(() => ['lab-svg-blur', 'lab-gallery']))
+})
+
+test('the gallery draws every experiment the desktop accepts in one tree', async $ => {
+  const ui: Ui = await $.ui.mount({ plugin: 'lab', surface: 'desktop', component: 'Pane', props: PANE, requestId: 'lab-gallery', viewport: VIEWPORT })
+  const headers = await ui.findAll({ type: 'Text', text: / — / })
+  expect(headers.map((t: any) => t.text.split(' — ')[0])).toEqual(galleryExperiments().map(x => x.id))
+  expect(galleryExperiments()).toHaveLength(experiments.length - DESKTOP_REFUSED.length)
+  await ui.unmount()
 })
 
 test('a Client post comes back as props', async $ => {

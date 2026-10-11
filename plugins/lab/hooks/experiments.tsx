@@ -1084,3 +1084,31 @@ export const experiments: Experiment[] = [
 export const GROUPS: Group[] = ['Graphics', 'Animation', 'Interaction', 'Layout', 'Text', 'Elements']
 
 export const byId = (id: string) => experiments.find(x => x.id === id)
+
+/**
+ * The experiments verdicts.json records the desktop refusing; the gallery
+ * leaves them out so its one tree validates. lab.test.ts checks this list
+ * against the run's own verdicts.
+ */
+export const DESKTOP_REFUSED = [
+  'svg-limit-over',
+  'button-bad-hotkey',
+  'button-box-child',
+  'select-duplicate',
+  'link-too-long',
+  'bg-radial-gradient',
+  'pct-fraction',
+  'flexgrow-limit',
+  'text-hover-unkeyed',
+  'code-bad-wrap',
+]
+
+/**
+ * What the gallery draws, in group order: every experiment the desktop
+ * accepts. `text-long` goes last: a tree draws its first 100000 characters of
+ * text, and its 120000 would cut every experiment after it.
+ */
+export const galleryExperiments = () => {
+  const shown = GROUPS.flatMap(g => experiments.filter(x => x.group === g && !DESKTOP_REFUSED.includes(x.id)))
+  return [...shown.filter(x => x.id !== 'text-long'), ...shown.filter(x => x.id === 'text-long')]
+}

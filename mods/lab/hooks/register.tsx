@@ -1,9 +1,14 @@
 import type { EngineInterface, Register } from 'claude-code'
 
-import { GROUPS, byId, experiments } from './experiments'
+import { GROUPS, byId, experiments, galleryExperiments } from './experiments'
+import type { Experiment } from './experiments'
 
 const INDEX = 'lab'
 const PREFIX = 'lab-'
+const GALLERY = 'lab-gallery'
+
+/** Every experiment the desktop accepts, in one pane, for checking paint by eye. */
+const openGallery = ($: EngineInterface) => $.ui.open({ id: GALLERY, title: 'Lab: gallery' })
 
 const openExperiment = ($: EngineInterface, id: string) => {
   const x = byId(id)
@@ -56,6 +61,10 @@ export const register: Register = on => {
       await $.ui.open({ id: INDEX, title: 'Lab' })
       return { text: `Lab opened: ${experiments.length} experiments.` }
     }
+    if (id === 'gallery') {
+      await openGallery($)
+      return { text: `Lab gallery opened: ${galleryExperiments().length} experiments the desktop accepts.` }
+    }
     if (!byId(id)) return { text: `No experiment "${id}". Run /lab for the list.` }
     await openExperiment($, id)
     return { text: `Lab experiment ${id} opened.` }
@@ -66,6 +75,7 @@ export const register: Register = on => {
     const { Box, Button, Text } = $.ui.resolve(e)
     return (
       <Box flexDirection="column" gap={1}>
+        <Button key="gallery" variant="primary" label="Gallery" onPress={() => void openGallery($)} />
         <Text dimColor>
           {experiments.length} experiments on what the {e.surface} surface draws. Each opens in a pane of its own.
         </Text>
@@ -89,25 +99,35 @@ export const register: Register = on => {
     )
   })
 
-  // One pane per experiment, all drawn by this hook.
+  // One pane per experiment, and the gallery, all drawn by this hook.
   on('ui.render', { component: 'Pane', requestId: /^lab-/ }, async ($, e) => {
-    const x = byId(e.requestId.slice(PREFIX.length))
     const { Box, Button, Text } = $.ui.resolve(e)
-    if (!x) return <Text dimColor>No such experiment.</Text>
     const absent = new Set<string>()
     const els = elementsOf($.ui.resolve(e), e.surface, absent)
     // An element constructor may refuse its props as it is called (a bad
     // hotkey): that is a verdict too, drawn in place of the experiment.
-    let body: any
-    try {
-      body = x.draw(els, e.surface)
-    } catch (err) {
-      body = (
-        <Text color="error">
-          {`draw threw: ${String((err as Error)?.message ?? err)}`}
-        </Text>
+    const drawBody = (x: Experiment) => {
+      try {
+        return x.draw(els, e.surface)
+      } catch (err) {
+        return <Text color="error">{`draw threw: ${String((err as Error)?.message ?? err)}`}</Text>
+      }
+    }
+    if (e.requestId === GALLERY) {
+      return (
+        <Box flexDirection="column" gap={1}>
+          {galleryExperiments().map(x => (
+            <Box flexDirection="column">
+              <Text dimColor wrap="truncate-end">{`${x.id} — ${x.question}`}</Text>
+              {drawBody(x)}
+            </Box>
+          ))}
+        </Box>
       )
     }
+    const x = byId(e.requestId.slice(PREFIX.length))
+    if (!x) return <Text dimColor>No such experiment.</Text>
+    const body = drawBody(x)
     const listed = x.surfaces.includes(e.surface)
     return (
       <Box flexDirection="column" gap={1}>
