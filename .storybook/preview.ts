@@ -18,8 +18,10 @@ const TRANSCRIPT = 120
 // the story draws again.
 let drawnAt = 0
 let redraw: ReturnType<typeof setTimeout> | undefined
+/** The canvas's width less its scrollbar: Storybook's body is what scrolls, so it's measured, not the page. */
+const canvas = () => (document.body ?? document.documentElement).clientWidth
 new ResizeObserver(() => {
-  if (document.documentElement.clientWidth === drawnAt) return
+  if (canvas() === drawnAt) return
   clearTimeout(redraw)
   redraw = setTimeout(() => addons.getChannel().emit('forceReRender'), 100)
 }).observe(document.documentElement)
@@ -37,7 +39,7 @@ const pane: Decorator = (story, ctx) => {
   const surface = ctx.globals.surface as string
   const theme = surface === 'terminal' ? 'terminal' : (ctx.globals.theme as string)
   const sidebar = ctx.globals.frame === 'sidebar' && surface !== 'terminal'
-  drawnAt = document.documentElement.clientWidth
+  drawnAt = canvas()
   const room = drawnAt - 2 * GUTTER - (sidebar ? CHROME.sidebar : CHROME.pane)
   // A terminal cell (1ch of 13px SF Mono) is as wide as a desktop cell.
   const columns = Math.max(1, Math.min(Number(ctx.globals.columns), Math.floor(room / CELL.col)))

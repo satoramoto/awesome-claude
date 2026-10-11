@@ -346,7 +346,6 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     const pr = b.pr
     const open = pr?.state === 'OPEN'
     const color = pr ? prColor(pr) : MUTED
-    const word = !b.exists ? 'DELETED' : pr ? (open ? (pr.isDraft ? 'DRAFT' : 'OPEN') : pr.state) : b.pushed ? 'NO PR' : 'LOCAL'
     const ci: [string, string] | null = b.conflicted
       ? [`${b.conflicted} conflict${b.conflicted === 1 ? '' : 's'}`, C.bad]
       : !pr || !open
@@ -369,9 +368,10 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
               ? <Button key={`merge-${pr.number}`} plain label="Merge" onPress={() => d.mergePr(pr)} />
               : null
     // A tile per branch, three lines:
-    //   [pr icon] branch                    OPEN
+    //   [pr icon] branch                    hide
     //   A neater inspector, the PR's title, the full width
-    //   #9  awesome-claude      +412 −96  1 failing  Merge  hide
+    //   #9  awesome-claude      +412 −96  1 failing  Merge
+    // The PR's state is the icon's glyph and colour, no word; a deleted branch's name is struck through.
     const iconKey = !pr ? GLYPH.branch : pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open'
     const where = b.worktree ? `${b.place} (worktree)` : b.place
     const row = (key: string, l: RenderElement | (RenderElement | null)[], r: (RenderElement | null)[]) => (
@@ -387,7 +387,16 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
     return (
       <Box key={`branch-${b.branch}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
         {k.tile(`tile-${b.branch}`, [
-          row('l1', [k.icon(iconKey, color), <Text key="b" wrap="truncate">{b.branch}</Text>], [<Text key="w" color={color}>{word}</Text>]),
+          row(
+            'l1',
+            [
+              k.icon(iconKey, color),
+              <Text key="b" wrap="truncate" strikethrough={!b.exists} dimColor={!b.exists}>
+                {b.branch}
+              </Text>,
+            ],
+            [Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null],
+          ),
           pr ? (
             <Text key="title" wrap="truncate">
               {pr.title}
@@ -400,7 +409,6 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
               b.insertions || b.deletions ? <Text key="d" dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
               ci ? <Text key="ci" color={ci[1]}>{ci[0]}</Text> : null,
               action,
-              Button ? <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} /> : null,
             ],
           ),
         ])}

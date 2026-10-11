@@ -372,7 +372,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
           [
             // The title keeps its room; the right side gives way.
             <Box key="title" flexDirection="row" alignItems="center" flexShrink={0}>
-              <Box width={terminal ? GUTTER : 1.6} flexShrink={0}>
+              {/* A minimum, not a width: the desktop draws a Button natively, with padding, and clips it to a box too narrow for that. */}
+              <Box minWidth={terminal ? GUTTER : 1.6} flexShrink={0}>
                 {toggle}
               </Box>
               {s.icon ? (
