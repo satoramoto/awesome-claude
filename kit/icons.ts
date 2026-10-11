@@ -19,8 +19,9 @@ const PATHS: Record<string, string> = {
   [GLYPH.tools]: '<path d="M10.5 2.5a3 3 0 0 0-3.3 4.1L2.6 11.2l2.2 2.2 4.6-4.6a3 3 0 0 0 4.1-3.3l-1.9 1.9-1.9-.4-.4-1.9z"/>',
   [GLYPH.files]: '<path d="M3 13l.9-3.4L10.8 2.7l2.5 2.5-6.9 6.9z"/>',
   [GLYPH.agents]: '<path d="M8 2l1.4 4.6L14 8l-4.6 1.4L8 14l-1.4-4.6L2 8l4.6-1.4z"/>',
-  // A gauge's dial and needle.
-  [GLYPH.limits]: '<path d="M2.5 11.5a5.5 5.5 0 1 1 11 0"/><path d="M8 11.5l2.6-3.2"/>',
+  // A gauge: a dial three-quarters round, open at the bottom, centred like the
+  // other icons (a half dial sat low in its square and read as cut off), and a needle.
+  [GLYPH.limits]: '<path d="M3.76 12.24a6 6 0 1 1 8.48 0"/><path d="M8 8l2.6-2.6"/>',
   [GLYPH.branch]: '<circle cx="5" cy="3.5" r="1.5"/><circle cx="5" cy="12.5" r="1.5"/><circle cx="11" cy="5" r="1.5"/><path d="M5 5v6M11 6.5c0 2.6-6 2.2-6 4.5"/>',
   [GLYPH.cost]: '<circle cx="8" cy="8" r="6"/><path d="M10 6.2c-.4-.8-1.2-1.2-2-1.2-1.1 0-2 .6-2 1.5S6.9 7.8 8 8s2 .6 2 1.5-.9 1.5-2 1.5c-.8 0-1.6-.4-2-1.2M8 4v1M8 11v1"/>',
   // Events: a bolt.
