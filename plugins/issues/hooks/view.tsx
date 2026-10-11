@@ -42,12 +42,12 @@ export type Actions = {
 }
 
 /**
- * The app surfaces: one section, the repository as its title, a field to add an
- * issue, then a tile per issue.
+ * The app surfaces: the repository as a plain line, a field to add an issue,
+ * then a tile per issue.
  *
- *   [issue icon] Title of the issue                       #12
- *   ● bug ● refined
- *   by someone                     [💬] 3  2d   Refine  Start
+ *   [issue icon]  Title of the issue…           (bug) (refined)  #12
+ *   [pr icon] #31 Title of a linked PR                    1 failing
+ *   by someone                 [💬] 3  2d   Refine  Start  Select
  */
 export const renderApp = (els: AppElements, list: IssueList | null, columns: number, at: number, act: Actions): RenderElement => {
   const { Box, Text, Link, Button, Input } = els
@@ -77,12 +77,16 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
             {row(
               'title',
               [
-                k.icon('issue-opened', OPEN),
+                // A little more room after the icon than between paired items.
+                <Box key="i" flexShrink={0} marginRight={SPACE.pair}>
+                  {k.icon('issue-opened', OPEN)}
+                </Box>,
                 <Text key="t" wrap="truncate">
                   {issue.title}
                 </Text>,
               ],
-              [<Link key="n" href={issue.url} label={`#${issue.number}`} />],
+              // Its labels as GitHub pills, then its number; the title gives way to them.
+              [...issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)), <Link key="n" href={issue.url} label={`#${issue.number}`} />],
             )}
           </Box>,
           // Each PR linked to close it, as the overview's workspaces draw one: its state in the icon's glyph and colour.
@@ -101,14 +105,6 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               [prNote(Text, pr)],
             ),
           ),
-          // Every label on a line of its own, as GitHub draws them: a pill in the label's colour.
-          issue.labels.length
-            ? row(
-                'labels',
-                issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)),
-                [],
-              )
-            : null,
           row(
             'l3',
             [
