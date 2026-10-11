@@ -25,12 +25,12 @@ Point Claude Code at the compiled folders, in `~/.claude/settings.json`:
 
 ```json
 "env": {
-  "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/satoramoto/awesome-claude/plugins/overview:~/Code/satoramoto/awesome-claude/plugins/issues",
+  "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/satoramoto/awesome-claude/plugins",
   "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
 }
 ```
 
-One folder per mod, separated by `:` (`;` on Windows).
+A folder of plugins loads each one in it, so a new mod loads with no change here.
 
 | Mod | What it is | Opens with |
 | --- | --- | --- |
