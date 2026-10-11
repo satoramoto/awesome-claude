@@ -123,9 +123,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     if (!Svg) return null
     const r = px / 2
     const d = side === 'left' ? `M${r} 0H${px}V${px}H${r}A${r} ${r} 0 0 1 ${r} 0Z` : `M0 0H${r}A${r} ${r} 0 0 1 ${r} ${px}H0Z`
+    // Over the track, as the bar's middle paints its parts: a see-through part's end
+    // then comes out the same shade as the rest of it.
+    const under = color === TRACK ? '' : `<path d="${d}" fill="${TRACK}"/>`
     const source =
       `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${px} ${px}">` +
-      `<path d="${d}" fill="${color}"/></svg>`
+      `${under}<path d="${d}" fill="${color}"/></svg>`
     return (
       <Box flexShrink={0}>
         <Svg source={source} alt="rounded end" width={px} height={px} />
