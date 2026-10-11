@@ -19,6 +19,13 @@
       "version": "0.1.0",
       "description": "A pane listing the open GitHub issues of the session's repository",
       "author": { "name": "Ryan Gavin" }
+    },
+    {
+      "name": "lab",
+      "source": "./plugins/lab",
+      "version": "0.1.0",
+      "description": "Experiments that probe what the rendering engine accepts: SVG, animation, interaction and every element, each in its own pane",
+      "author": { "name": "Ryan Gavin" }
     }
   ]
 }

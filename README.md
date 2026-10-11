@@ -15,6 +15,7 @@ version CI pins.
 | --- | --- | --- | --- |
 | `overview` | the current session at a glance: context, limits, activity, agents, the branches it started and their pull requests, cost | on its own when a session starts; `/overview` opens it again | `git` for Workspaces; `gh` signed in for pull requests |
 | `issues` | the open GitHub issues of the session's repository, newest change first, with actions on each | `/issues` | a GitHub repository; `gh` signed in |
+| `lab` | for mod authors: 77 experiments probing what the engine draws (SVG gradients and filters, animation, hover, `Client` modules, every element), with the engine's verdict on each surface in `mods/lab/verdicts.json` | `/lab`, `/lab <id>`, `/lab gallery` | nothing |
 
 ### Requirements
 
