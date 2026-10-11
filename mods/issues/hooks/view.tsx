@@ -67,7 +67,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
   )
 
   // Every line of a tile starts with the same icon column, as a section header's does,
-  // so the title, each linked PR and the byline all start their text at one x.
+  // so the title and each linked PR start their text at one x.
   const lead = (key: string, icon: RenderElement | null) => (
     <Box key={key} width={2} flexShrink={0} flexDirection="row" alignItems="center">
       {icon}
@@ -113,7 +113,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
           row(
             'l3',
             [
-              lead('i', null),
+              // The byline sits flush left, under the icons rather than the titles.
               <Text key="by" dimColor wrap="truncate">
                 {issue.assignees.length ? `assigned to ${issue.assignees.join(', ')}` : `by ${issue.author}`}
               </Text>,
