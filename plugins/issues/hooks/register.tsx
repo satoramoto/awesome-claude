@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Issue, IssueList } from '../types'
-import { renderApp, renderTerminal } from './view'
+import { REFINED, renderApp, renderTerminal } from './view'
 import type { AppElements, TermElements } from './view'
 
 const PANE = 'issues'
@@ -11,6 +11,69 @@ const LIMIT = 100
 const FIELDS = 'number,title,url,author,labels,assignees,comments,updatedAt'
 
 const list = atom({ plugin: 'issues', key: 'list' } as const, null)
+const selected = atom({ plugin: 'issues', key: 'selected' } as const, [])
+const adding = atom({ plugin: 'issues', key: 'adding' } as const, null)
+/** Bumped after each add, so the quick-add field is drawn afresh, empty. */
+let formKey = 0
+
+const ref = (i: Issue) => `#${i.number} (${i.url})`
+
+/** Refine: the session reads the issue, asks about whatever is unclear, then writes it up and labels it. */
+export const refinePrompt = (i: Issue) =>
+  [
+    `Refine GitHub issue ${ref(i)}: "${i.title}".`,
+    `Read it with \`gh issue view ${i.number} --comments\`, then ask me about anything ambiguous or underspecified, one round of questions at a time, until the scope is clear.`,
+    `Then rewrite the issue body with the clarified scope and acceptance criteria (\`gh issue edit ${i.number} --body-file <file>\`) and add the label \`${REFINED}\` (\`gh label create ${REFINED} --color 0e8a16\` first if the repository doesn't have it; \`gh issue edit ${i.number} --add-label ${REFINED}\`).`,
+  ].join('\n\n')
+
+/** Start: one subagent takes the issue; unrefined, the session asks first whether to refine it. */
+export const startPrompt = (i: Issue) => {
+  const work = `start on it with a subagent: brief one agent (a lane lead, if this setup has one) with the issue as an outcome, working in its own worktree and branch off the default branch, and report back when it's pushed.`
+  const refined = i.labels.some(l => l.name === REFINED)
+  return refined
+    ? `Start GitHub issue ${ref(i)}: "${i.title}". Read it with \`gh issue view ${i.number} --comments\`, then ${work}`
+    : `Start GitHub issue ${ref(i)}: "${i.title}". It isn't labelled \`${REFINED}\` yet: first ask me whether to refine it (clarify what's ambiguous, rewrite it, label it \`${REFINED}\`) or start it as it is. Then do what I pick, and ${work}`
+}
+
+/** Sprint: every selected issue at once, in parallel, integrated on one branch for approval. */
+export const sprintPrompt = (issues: Issue[], at: number) => {
+  const name = `sprint/${new Date(at).toISOString().slice(0, 10)}`
+  const unrefined = issues.filter(i => !i.labels.some(l => l.name === REFINED))
+  return [
+    `Run a sprint on these GitHub issues, in parallel:`,
+    issues.map(i => `- ${ref(i)}: "${i.title}"`).join('\n'),
+    unrefined.length
+      ? `Not labelled \`${REFINED}\` yet: ${unrefined.map(i => `#${i.number}`).join(', ')}. Before starting, ask me whether to refine those first (clarify, rewrite, label \`${REFINED}\`) or take them as they are.`
+      : null,
+    `Read each with \`gh issue view <n> --comments\`. Then plan them as lanes that own disjoint files, and start one subagent per issue at the same time, each in its own worktree and branch off the default branch, briefed with its issue as an outcome.`,
+    `Integrate as they land: keep one integration branch, \`${name}\`, that is the default branch merged with every issue branch, and run the checks there. Fixes go to the issue's own branch, then merge again.`,
+    `When every issue is in and the checks pass, push \`${name}\` and open one PR from it for my approval, listing each issue (with "Closes #<n>") and what was decided. Don't turn on auto-merge for it: I'll review and merge it myself.`,
+  ]
+    .filter(Boolean)
+    .join('\n\n')
+}
+
+/** Hands a request to the session as the person's own prompt; it runs as a turn once the session is free. */
+const ask = ($: EngineInterface, text: string, what: string) =>
+  void $.prompt.submit({ text, asUser: true }).catch(() => $.ui.toast(`${what}: could not send the request to the session`))
+
+/** Quick add: `gh issue create` with the title, then the list read again. */
+const addIssue = async ($: EngineInterface, title: string) => {
+  const clean = title.trim()
+  if (!clean || (await read($, adding))) return
+  await update($, adding, () => clean)
+  try {
+    const cwd = await $.session.cwd()
+    const run = await $.process.run(['gh', 'issue', 'create', '--title', clean, '--body', ''], { cwd, timeoutMs: 30_000 })
+    if (run.exitCode !== 0) await $.ui.toast(`New issue: ${ghNote(run.stderr)}`)
+  } catch {
+    await $.ui.toast('New issue: gh not installed')
+  } finally {
+    formKey++
+    await update($, adding, () => null)
+  }
+  await refresh($)
+}
 
 /** One issue from `gh issue list --json`, as plain data. */
 export const toIssue = (json: any): Issue => ({
@@ -137,6 +200,24 @@ export const register: Register = on => {
     const data = await read($, list)
     const at = Date.now()
     if (e.surface === 'terminal') return renderTerminal($.ui.resolve(e) as TermElements, data, at)
-    return renderApp($.ui.resolve(e) as AppElements, data, e.props.bodyColumns, at)
+    const picked = await read($, selected)
+    const pick = (n: number) => update($, selected, s => (s.includes(n) ? s.filter(x => x !== n) : [...s, n]))
+    return renderApp($.ui.resolve(e) as AppElements, data, e.props.bodyColumns, at, {
+      add: title => void addIssue($, title).catch(() => undefined),
+      refine: issue => ask($, refinePrompt(issue), 'Refine'),
+      start: issue => ask($, startPrompt(issue), 'Start'),
+      toggle: issue => void pick(issue.number).catch(() => undefined),
+      clear: () => void update($, selected, () => []).catch(() => undefined),
+      sprint: () =>
+        void (async () => {
+          const chosen = (data?.issues ?? []).filter(i => picked.includes(i.number))
+          if (!chosen.length) return
+          ask($, sprintPrompt(chosen, Date.now()), 'Sprint')
+          await update($, selected, () => [])
+        })().catch(() => undefined),
+      selected: picked,
+      adding: await read($, adding),
+      formKey,
+    })
   })
 }

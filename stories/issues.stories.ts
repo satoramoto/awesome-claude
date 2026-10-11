@@ -28,6 +28,7 @@ const scenario = (name: keyof typeof fixtures): StoryObj => ({
 })
 
 export const Busy = scenario('busy')
+export const Sprint = scenario('sprint')
 export const Empty = scenario('empty')
 export const NoRepo = scenario('noRepo')
 export const Reading = scenario('reading')
