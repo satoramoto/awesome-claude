@@ -73,7 +73,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
       <Box key={`issue-${issue.number}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
         {k.tile(`tile-${issue.number}`, [
           // The title line, then a little room before the rest of the tile.
-          <Box key="l1" width="100%" marginBottom={SPACE.block}>
+          <Box key="l1" width="100%" marginBottom={SPACE.block / 2}>
             {row(
               'title',
               [

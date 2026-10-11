@@ -46,7 +46,7 @@ const ROW_PX = 8.5 / 0.45
  * - BODY_INDENT: a body's left edge, just past the header's fold arrow.
  * - Reading columns: LABEL | gauge (grows) | FIG right-aligned | FIG2 right-aligned.
  */
-export const SPACE = { pair: 0.5, item: 1, group: 2, block: 0.5 } as const
+export const SPACE = { pair: 0.75, item: 1.25, group: 2, block: 0.8 } as const
 const INSET = 1
 const BODY_INDENT = 1.6
 /**
@@ -63,7 +63,10 @@ const FIG2 = 6
 /** The terminal's fold-arrow gutter. */
 const GUTTER = 2
 /** A band's height: one text row plus this above and below. */
-const BAND_PAD_Y = 0.2
+const BAND_PAD_Y = 0.3
+/** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
+const TILE_PAD_Y = 0.6
+const TILE_ROW_GAP = 0.2
 
 /**
  * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
@@ -195,7 +198,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {children}
       </Box>
     ) : (
-      rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: 0.3, width: '100%' }, children)
+      rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' }, children)
     )
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
