@@ -97,11 +97,12 @@ export const resolverFrom = (map: Record<string, ModuleLike | (() => Promise<unk
     const want = normal(module)
     const exts = /\.(tsx|ts|jsx|js|mjs)$/.test(want) ? [''] : ['', '.tsx', '.ts', '.jsx', '.js', '.mjs']
     const candidates = [...(from ? exts.map(e => normal(`${dirname(normal(from))}/${module}`) + e) : []), ...exts.map(e => want + e)]
-    const plugin = from ? normal(from).match(/^(mods\/[^/]+)\//)?.[1] : undefined
+    // Given `from`, the suffix match stays within its plugin (`mods/<mod>/`), else its folder: never another mod's file.
+    const within = from ? (normal(from).match(/^(mods\/[^/]+)\//)?.[1] ?? dirname(normal(from))) : undefined
     const hit =
       entries.find(e => e.raw === module) ??
       candidates.map(c => entries.find(e => e.path === c)).find(Boolean) ??
-      entries.find(e => (!plugin || e.path.startsWith(`${plugin}/`)) && exts.some(x => e.path.endsWith(`/${want}${x}`)))
+      entries.find(e => (within === undefined || e.path.startsWith(`${within}/`)) && exts.some(x => e.path.endsWith(`/${want}${x}`)))
     if (!hit) return undefined
     const mod = (typeof hit.m === 'function' ? await (hit.m as () => Promise<unknown>)() : hit.m) as ModuleLike
     const fn = componentOf(mod)
@@ -185,11 +186,24 @@ type Instance = {
 
 const instances = new Map<string, Instance>()
 
+const UNSERIALIZABLE = '<unserializable>'
+
+/** Plain data as JSON text, `undefined` as itself, anything else (a cycle, a BigInt) as UNSERIALIZABLE; never throws. */
 const json = (v: unknown) => {
   try {
     return JSON.stringify(v) ?? 'undefined'
   } catch {
-    return '<unserializable>'
+    return UNSERIALIZABLE
+  }
+}
+
+/** json()'s text back as a fresh copy, as the engine hands data across; undefined for what wasn't plain data. Never throws. */
+const parse = (text: string): unknown => {
+  if (text === 'undefined' || text === UNSERIALIZABLE) return undefined
+  try {
+    return JSON.parse(text)
+  } catch {
+    return undefined
   }
 }
 
@@ -248,7 +262,7 @@ const render = (inst: Instance) => {
   inst.loops = inst.setInRender && !inst.event ? inst.loops + 1 : 0
   inst.event = false
   if (inst.loops >= 3) return unmount(inst, 'render loop (setState on three renders in a row)')
-  const drawn = drawInClient(tree, inst.surface, fn => act(inst, fn))
+  const drawn = drawInClient(tree, inst.surface, fn => act(inst, fn), `${inst.surface}|client:${inst.id}`)
   inst.region.replaceChildren(...(drawn ? [drawn] : []))
 }
 
@@ -277,21 +291,29 @@ const deliver = async (inst: Instance) => {
   inst.pending = null
   if (!pending || inst.dead) return
   const text = json(pending.data)
-  if (text === '<unserializable>' || text.length > 100_000) return console.warn(`[Client ${inst.key}] post not sent: not plain data within 100000 characters`)
+  if (text === UNSERIALIZABLE || text.length > 100_000) return console.warn(`[Client ${inst.key}] post not sent: not plain data within 100000 characters`)
   const message: ClientMessage = {
     surface: inst.surface,
     component: inst.opts.component ?? 'Pane',
     requestId: inst.opts.requestId ?? '',
     element: inst.key,
     module: inst.path.replace(/^mods\/[^/]+\//, ''),
-    data: JSON.parse(text),
+    data: parse(text),
   }
   const post = inst.opts.post ?? defaults.post
   if (!post) return console.info(`[Client ${inst.key}] post`, message.data)
-  const answer = (await post(message)) as { props?: unknown } | undefined
+  let answer: { props?: unknown } | undefined
+  try {
+    answer = (await post(message)) as { props?: unknown } | undefined
+  } catch (err) {
+    // A hook that throws answers nothing; the instance keeps its props.
+    return console.warn(`[Client ${inst.key}] ui.message failed:`, err)
+  }
   if (answer && typeof answer === 'object' && answer.props !== undefined && !inst.dead) {
-    inst.props = answer.props
-    inst.propsJson = json(answer.props)
+    const props = json(answer.props)
+    if (props === UNSERIALIZABLE) return console.warn(`[Client ${inst.key}] ui.message answered props that aren't plain data`)
+    inst.props = parse(props)
+    inst.propsJson = props
     inst.event = true
     schedule(inst)
   }
@@ -412,6 +434,8 @@ const listen = (inst: Instance) => {
   })
   r.addEventListener('pointermove', e => send(e, 'move'))
   r.addEventListener('pointerup', e => send(e, 'up'))
+  // A cancelled pointer (the browser took the gesture) ends the hold as an up would.
+  r.addEventListener('pointercancel', e => send(e, 'up'))
   r.addEventListener('pointerenter', e => send(e, 'enter'))
   r.addEventListener('pointerleave', e => send(e, 'leave'))
   r.addEventListener('keydown', e => {
@@ -421,7 +445,9 @@ const listen = (inst: Instance) => {
     if (['Shift', 'Control', 'Alt', 'Meta', 'CapsLock'].includes(e.key)) return
     const fn = inst.key_
     if (!fn) return
-    e.preventDefault()
+    // The page keeps its own: meta/ctrl chords (copy, reload), function keys, and Tab moving the focus on.
+    const own = e.metaKey || e.ctrlKey || /^F\d{1,2}$/.test(e.key) || e.key === 'Tab'
+    if (!own) e.preventDefault()
     const ev: ClientKeyEvent = { key: KEYS[e.key] ?? (e.key.length === 1 ? e.key : e.key.toLowerCase()) }
     if (e.ctrlKey) ev.ctrl = true
     if (e.shiftKey) ev.shift = true
@@ -449,7 +475,7 @@ export const drawClient = (p: Record<string, any>, surface: Surface, own: Client
     size(inst.region, surface, p)
     if (propsJson !== inst.propsJson) {
       // New props reach the running instance, its state kept.
-      inst.props = p.props === undefined ? undefined : JSON.parse(propsJson)
+      inst.props = parse(propsJson)
       inst.propsJson = propsJson
       inst.event = true
       schedule(inst)
@@ -469,7 +495,7 @@ export const drawClient = (p: Record<string, any>, surface: Surface, own: Client
     path: module,
     surface,
     opts,
-    props: p.props === undefined ? undefined : JSON.parse(propsJson),
+    props: parse(propsJson),
     propsJson,
     region,
     state: undefined,
