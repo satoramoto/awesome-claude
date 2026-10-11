@@ -80,7 +80,8 @@ const boxStyle = (surface: Surface, p: Record<string, any>) => {
   // No minWidth by default: as on the desktop, a box doesn't shrink below its content
   // unless it's given `minWidth={0}`, so text that doesn't fit runs past the edge.
   // Every box is positioned, as Yoga's are, so an absolute child is placed against its parent.
-  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'column', boxSizing: 'border-box', position: 'relative' }
+  // A Box lays its children in a row unless told otherwise, as Ink's does and the engine's.
+  const s: Record<string, string> = { display: p.display === 'none' ? 'none' : 'flex', flexDirection: p.flexDirection ?? 'row', boxSizing: 'border-box', position: 'relative' }
   for (const [k, v] of Object.entries(p)) {
     if (v === undefined || v === null || k === 'key' || k === 'hover' || k === 'display' || k === 'children') continue
     if (k === 'marginX' || k === 'paddingX') {
@@ -104,8 +105,9 @@ const boxStyle = (surface: Surface, p: Record<string, any>) => {
 }
 
 const textStyle = (p: Record<string, any>) => {
-  // The desktop keeps a Text on one line: it runs past its box rather than wrapping.
-  const s: Record<string, string> = { whiteSpace: 'nowrap' }
+  // The desktop keeps a Text on one line: it runs past its box rather than wrapping,
+  // unless it's told `wrap="wrap"`. Spaces are kept, as in a cell grid.
+  const s: Record<string, string> = { whiteSpace: p.wrap === 'wrap' ? 'pre-wrap' : 'pre' }
   let fg = p.color ? color(p.color) : undefined
   let bg = p.backgroundColor ? color(p.backgroundColor) : undefined
   if (p.inverse) [fg, bg] = [bg ?? 'var(--r-bg)', fg ?? 'var(--r-fg)']
@@ -120,7 +122,7 @@ const textStyle = (p: Record<string, any>) => {
   const lines = [p.underline && 'underline', p.strikethrough && 'line-through'].filter(Boolean)
   if (lines.length) s.textDecoration = lines.join(' ')
   else if (p.underline === false || p.strikethrough === false) s.textDecoration = 'none'
-  if (typeof p.wrap === 'string' && p.wrap.startsWith('truncate')) Object.assign(s, { whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: '0' })
+  if (typeof p.wrap === 'string' && p.wrap.startsWith('truncate')) Object.assign(s, { whiteSpace: 'pre', overflow: 'hidden', textOverflow: 'ellipsis', minWidth: '0' })
   if (p.wrap === 'truncate-start') s.direction = 'rtl'
   return s
 }
