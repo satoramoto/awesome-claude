@@ -419,7 +419,13 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             'l3',
             [pr ? <Link key="n" href={pr.url} label={`#${pr.number}`} /> : null, <Text key="p" dimColor wrap="truncate">{where}</Text>],
             [
-              b.insertions || b.deletions ? <Text key="d" dimColor>{`+${b.insertions} −${b.deletions}`}</Text> : null,
+              b.insertions || b.deletions ? (
+                // Lines added green, removed red, as a diff colours them.
+                <Text key="d">
+                  <Text color={C.ok}>{`+${b.insertions}`}</Text>
+                  <Text color={C.bad}>{` −${b.deletions}`}</Text>
+                </Text>
+              ) : null,
               ci ? <Text key="ci" color={ci[1]}>{ci[0]}</Text> : null,
               action,
             ],
