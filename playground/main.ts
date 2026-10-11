@@ -106,7 +106,8 @@ const renderPane = async (key: string): Promise<HTMLElement> => {
       const tree = (await r.hook(engine(() => surface), e, async () => h('Text', { dimColor: true }, '(the engine draws its own)'))) as Node
       // Each pane its own site, so a Client drawn in two panes runs twice, as in two windows.
       const mod = mods.find(m => m.name === state.mod)!
-      const client = { site: key, from: mod.path.replace(/^\.\.\//, ''), post: messages(hooks), requestId: String(r.matcher.requestId) }
+      const requestId = typeof r.matcher.requestId === 'string' ? r.matcher.requestId : undefined
+      const client = { site: `${key}:${requestId ?? ''}`, from: mod.path.replace(/^\.\.\//, ''), post: messages(hooks), requestId }
       const drawn = draw(tree, surface, fn => fn(), { client })
       if (drawn) body.append(drawn)
     } catch (err) {
@@ -119,9 +120,14 @@ const renderPane = async (key: string): Promise<HTMLElement> => {
   return card
 }
 
+/** Counts redraws: an older one still awaiting its hooks when a newer starts is dropped, not drawn over it. */
+let redraws = 0
+
 const redraw = async () => {
+  const mine = ++redraws
   const stage = $('#stage')
   const cards = await Promise.all(state.panes.map(renderPane))
+  if (mine !== redraws) return
   stage.replaceChildren(...cards)
 }
 

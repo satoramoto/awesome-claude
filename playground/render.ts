@@ -132,28 +132,54 @@ const apply = <E extends HTMLElement>(el: E, style: Record<string, string>) => {
 
 // ---- hover ----
 
-/** An element a hover restyles: `on` applies its hover, `off` restores it. */
-type Member = { el: HTMLElement; on: () => void; off: () => void }
+/** An element a hover restyles: `on` applies its hover, `off` restores it; `born` is the task that drew it. */
+type Member = { el: HTMLElement; on: () => void; off: () => void; born: number }
 /** The nearest keyed Box: its members light while the pointer is over it. */
 type Scope = { members: Member[] }
 
-/** The hover groups `hover.scope` names, across every drawing on the page. */
-const groups = new Map<string, { members: Set<Member>; hot: Set<Element> }>()
+/**
+ * Counts tasks that drew, so what was drawn in this task and is not on the page
+ * yet (the host inserts it once the draw returns) isn't taken for discarded.
+ */
+let generation = 0
+let turning = false
+const now = () => {
+  if (!turning) {
+    turning = true
+    queueMicrotask(() => {
+      generation++
+      turning = false
+    })
+  }
+  return generation
+}
 
-const groupOf = (name: string) => {
-  let g = groups.get(name)
-  if (!g) groups.set(name, (g = { members: new Set(), hot: new Set() }))
+type Group = { members: Set<Member>; hot: Set<Element> }
+
+/**
+ * The hover groups `hover.scope` names, per drawing site (surface and site):
+ * as the engine keeps a plugin's groups to its own drawing, two panes or two
+ * stories under one scope name never light each other.
+ */
+const groups = new Map<string, Group>()
+
+const groupOf = (site: string, name: string) => {
+  const id = `${site}\u0000${name}`
+  let g = groups.get(id)
+  if (!g) groups.set(id, (g = { members: new Set(), hot: new Set() }))
   return g
 }
 
-const relight = (name: string) => {
-  const g = groupOf(name)
+/** Drops what a redraw discarded: hot elements off the page, members off the page from an earlier draw. */
+const prune = (g: Group) => {
   for (const el of [...g.hot]) if (!el.isConnected) g.hot.delete(el)
-  for (const m of [...g.members]) {
-    if (!m.el.isConnected) {
-      g.members.delete(m)
-      continue
-    }
+  for (const m of [...g.members]) if (!m.el.isConnected && m.born < generation) g.members.delete(m)
+}
+
+const relight = (g: Group) => {
+  prune(g)
+  for (const m of g.members) {
+    if (!m.el.isConnected) continue
     if (g.hot.size) m.on()
     else m.off()
   }
@@ -163,9 +189,12 @@ const relight = (name: string) => {
 const watch = (el: HTMLElement, enter: () => void, leave: () => void) => {
   el.addEventListener('mouseenter', enter)
   el.addEventListener('mouseleave', leave)
-  requestAnimationFrame(() => {
+  // Once the host has put the drawing on the page (the same task, usually), else the next frame.
+  const check = () => {
     if (el.isConnected && el.matches(':hover')) enter()
-  })
+  }
+  queueMicrotask(check)
+  requestAnimationFrame(check)
 }
 
 /** A member whose hover style is `lit()`, restored to what it was drawn with. */
@@ -173,6 +202,7 @@ const member = (el: HTMLElement, lit: () => Record<string, string>): Member => {
   let base: string | null = null
   return {
     el,
+    born: now(),
     on: () => {
       if (base === null) base = el.style.cssText
       el.style.cssText = base
@@ -185,24 +215,26 @@ const member = (el: HTMLElement, lit: () => Record<string, string>): Member => {
 }
 
 /** Joins `m` to its `scope` group (given one) or the nearest keyed Box's scope. */
-const join = (m: Member, hover: Record<string, any>, scope: Scope | null) => {
+const join = (m: Member, hover: Record<string, any>, scope: Scope | null, site: string) => {
   if (typeof hover.scope === 'string' && hover.scope) {
-    const name = hover.scope
-    const g = groupOf(name)
+    const g = groupOf(site, hover.scope)
+    prune(g)
     g.members.add(m)
     // The element heats its group too.
     watch(
       m.el,
       () => {
         g.hot.add(m.el)
-        relight(name)
+        relight(g)
       },
       () => {
         g.hot.delete(m.el)
-        relight(name)
+        relight(g)
       },
     )
-    if ([...g.hot].some(el => el.isConnected)) requestAnimationFrame(() => relight(name))
+    // Drawn while its group is lit (a redraw under a resting pointer): lit from the start, no flicker.
+    // After the draw finishes, so the base it restores includes what the parent sets (an inline Text).
+    if (g.hot.size) queueMicrotask(() => g.hot.size && m.on())
     return
   }
   scope?.members.push(m)
@@ -437,26 +469,45 @@ const drawImage = (p: Record<string, any>) => {
 
 // ---- form fields ----
 
-/** What the person typed into each Input, by key, kept until the hook draws a different value. */
+/** What the person typed into each Input, by site and key, kept until the hook draws a different value. */
 const typed = new Map<string, { drawn: string | undefined; value: string }>()
-/** The Input that had the focus, so a redraw while typing keeps it. */
-let focused: { key: string; start: number | null; end: number | null } | null = null
+/** The Input that had the focus (site and key), so a redraw of that site while typing keeps it. */
+let focused: { id: string; el: HTMLInputElement; start: number | null; end: number | null } | null = null
 
 // ---- hotkeys ----
 
-const hotkeys: { key: string; el: HTMLElement; run: () => void }[] = []
+/**
+ * A Button's hotkey presses it while its site holds the focus: the site the
+ * person last clicked or focused in, by the `data-r-site` its drawing's root
+ * elements carry. So one story's or pane's hotkey never fires another's.
+ */
+const hotkeys: { site: string; key: string; el: HTMLElement; run: () => void; born: number }[] = []
+let activeSite: string | null = null
 let hotkeysWired = false
+/** Drops the hotkeys of buttons a redraw of `site` discarded. */
+const pruneHotkeys = (site: string) => {
+  for (let i = hotkeys.length - 1; i >= 0; i--) {
+    const h = hotkeys[i]!
+    if (h.site === site && !h.el.isConnected && h.born < generation) hotkeys.splice(i, 1)
+  }
+}
 const wireHotkeys = () => {
   if (hotkeysWired) return
   hotkeysWired = true
+  const take = (e: Event) => {
+    const t = e.target as Element | null
+    activeSite = (t?.closest?.('[data-r-site]') as HTMLElement | null)?.dataset.rSite ?? null
+  }
+  document.addEventListener('pointerdown', take, true)
+  document.addEventListener('focusin', take, true)
   document.addEventListener('keydown', e => {
-    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat) return
+    if (e.metaKey || e.ctrlKey || e.altKey || e.repeat || !activeSite) return
     const t = e.target as HTMLElement | null
     if (t?.closest?.('input, textarea, select, [contenteditable], .r-client')) return
     const key = e.key.toLowerCase()
     for (let i = hotkeys.length - 1; i >= 0; i--) if (!hotkeys[i]!.el.isConnected) hotkeys.splice(i, 1)
     // Two on one hotkey: the later wins.
-    const hit = [...hotkeys].reverse().find(h => h.key === key)
+    const hit = [...hotkeys].reverse().find(h => h.key === key && h.site === activeSite)
     if (!hit) return
     e.preventDefault()
     hit.run()
@@ -466,21 +517,52 @@ const wireHotkeys = () => {
 // ---- drawing ----
 
 export type DrawOptions = {
+  /**
+   * Names the drawing (a pane, a story: Storybook's `ctx.id`): hover groups,
+   * hotkeys, typed text and Client instances are kept per site. Defaults to
+   * `client.site`, else a fresh name per draw.
+   */
+  site?: string
   /** Where a `Client` finds its module and sends its posts; see playground/client.ts. */
   client?: ClientOptions
 }
 
-type Ctx = { surface: Surface; press: (fn: () => void) => void; scope: Scope | null; opts: DrawOptions; inClient: boolean }
+type Ctx = { surface: Surface; press: (fn: () => void) => void; scope: Scope | null; opts: DrawOptions; inClient: boolean; site: string }
+
+let draws = 0
+
+/** Marks the drawing's root elements with its site, which the hotkeys read. */
+const root = (drawn: globalThis.Node | null, site: string) => {
+  const els = drawn instanceof DocumentFragment ? [...drawn.children] : drawn instanceof HTMLElement ? [drawn] : []
+  for (const el of els) (el as HTMLElement).dataset.rSite = site
+  return drawn
+}
+
+const start = (site: string) => {
+  now()
+  // A field focused in another site and gone from the page is no longer anyone's to restore,
+  // so a new story drawing an Input under the same key doesn't take the focus.
+  if (focused && !focused.id.startsWith(`${site}\u0000`) && !focused.el.isConnected) focused = null
+  // What the person typed stays per site; past a few hundred fields, the oldest go.
+  for (const k of [...typed.keys()].slice(0, Math.max(0, typed.size - 200))) typed.delete(k)
+  pruneHotkeys(site)
+}
 
 /** Draws `node` for `surface`; `press` runs a Button's onPress (and an Input's, a Select's or a Markdown link's handler). */
 export const draw = (node: Child, surface: Surface, press: (fn: () => void) => void, opts: DrawOptions = {}): globalThis.Node | null => {
   injectStyles()
-  return paint(node, { surface, press, scope: null, opts, inClient: false })
+  const name = opts.site ?? opts.client?.site
+  const site = `${surface}|${name ?? `draw-${++draws}`}`
+  const client: ClientOptions = name === undefined ? { ...opts.client } : { ...opts.client, site: name }
+  start(site)
+  return root(paint(node, { surface, press, scope: null, opts: { ...opts, client }, inClient: false, site }), site)
 }
 
-/** Draws a Client's tree into its region: the Client's own press, no nested Client. */
-export const drawInClient = (node: Child, surface: Surface, press: (fn: () => void) => void): globalThis.Node | null =>
-  paint(node, { surface, press, scope: null, opts: {}, inClient: true })
+/** Draws a Client's tree into its region (`site` names the instance): the Client's own press, no nested Client. */
+export const drawInClient = (node: Child, surface: Surface, press: (fn: () => void) => void, site: string): globalThis.Node | null => {
+  start(site)
+  return root(paint(node, { surface, press, scope: null, opts: {}, inClient: true, site }), site)
+}
 
 const textOf = (c: Child): string =>
   c === null || c === undefined || c === false ? '' : Array.isArray(c) ? c.map(textOf).join('') : typeof c === 'object' ? (c.children ?? []).map(textOf).join('') : String(c)
@@ -503,7 +585,7 @@ const paint = (node: Child, ctx: Ctx): globalThis.Node | null => {
       const own: Scope | null = typeof p.key === 'string' && p.key ? { members: [] } : null
       if (hover) {
         const lit = boxHover(p, hover)
-        join(member(el, () => boxStyle(surface, { ...p, ...lit })), hover, own ?? ctx.scope)
+        join(member(el, () => boxStyle(surface, { ...p, ...lit })), hover, own ?? ctx.scope, ctx.site)
       }
       withKids(el, kids({ ...ctx, scope: own ?? ctx.scope }))
       if (own) watch(el, () => own.members.forEach(m => m.on()), () => own.members.forEach(m => m.off()))
@@ -511,7 +593,7 @@ const paint = (node: Child, ctx: Ctx): globalThis.Node | null => {
     }
     case 'Text': {
       const el = apply(document.createElement('span'), { display: 'block', ...textStyle(p) })
-      if (hover) join(member(el, () => textStyle({ ...p, ...without(hover, 'scope') })), hover, ctx.scope)
+      if (hover) join(member(el, () => textStyle({ ...p, ...without(hover, 'scope') })), hover, ctx.scope, ctx.site)
       return withKids(el, kids(), true)
     }
     case 'Link': {
@@ -569,7 +651,8 @@ const button = (node: Node, ctx: Ctx, children: globalThis.Node[]) => {
   const run = () => ctx.press(() => p.onPress?.({ surface, element: p.key ?? label }))
   const body = (into: HTMLElement) => (children.length ? withKids(into, children, true) : into.append(label))
   if (surface === 'terminal') {
-    b.className = `button terminal${p.variant === 'primary' ? ' primary' : ''}`
+    // `plain` wins: a plain Button draws the same whatever its variant.
+    b.className = `button terminal${p.variant === 'primary' && !p.plain ? ' primary' : ''}`
     if (p.plain) {
       // As a survey's row: the hotkey in the accent colour, a colon, the label.
       if (p.hotkey) b.append(Object.assign(document.createElement('span'), { className: 'hotkey', textContent: p.hotkey }), ': ')
@@ -586,6 +669,8 @@ const button = (node: Node, ctx: Ctx, children: globalThis.Node[]) => {
     b.title = label
     b.textContent = '✕'
   } else if (p.plain) {
+    // Chromeless on purpose: the docs say a desktop draws its native button either way,
+    // but the app as we see it draws a plain Button as its label alone.
     b.className = 'button plain'
     body(b)
   } else {
@@ -596,11 +681,12 @@ const button = (node: Node, ctx: Ctx, children: globalThis.Node[]) => {
     b.classList.add('dim')
     b.style.opacity = '0.6'
   }
-  if (hover) join(member(b, () => textStyle(without(hover, 'scope'))), hover, ctx.scope)
+  if (hover) join(member(b, () => textStyle(without(hover, 'scope'))), hover, ctx.scope, ctx.site)
   b.onclick = run
   if (typeof p.hotkey === 'string' && /^[0-9a-z]$/.test(p.hotkey)) {
     wireHotkeys()
-    hotkeys.push({ key: p.hotkey, el: b, run })
+    pruneHotkeys(ctx.site)
+    hotkeys.push({ site: ctx.site, key: p.hotkey, el: b, run, born: now() })
   }
   return b
 }
@@ -614,32 +700,37 @@ const input = (p: Record<string, any>, ctx: Ctx) => {
   const field = document.createElement('input')
   field.type = 'text'
   field.placeholder = p.placeholder ?? ''
-  // The person's typing stands until the hook draws another value.
-  const kept = typed.get(key)
+  // The person's typing stands until the hook draws another value; kept per site and key.
+  const id = `${ctx.site}\u0000${key}`
+  const kept = typed.get(id)
   field.value = kept && kept.drawn === p.value ? kept.value : (p.value ?? '')
-  typed.set(key, { drawn: p.value, value: field.value })
+  typed.delete(id)
+  typed.set(id, { drawn: p.value, value: field.value })
   const arg = (kind: 'change' | 'submit') => ({ surface, element: key, kind, value: field.value })
+  const hold = () => (focused = { id, el: field, start: field.selectionStart, end: field.selectionEnd })
   field.oninput = () => {
-    typed.set(key, { drawn: p.value, value: field.value })
-    focused = { key, start: field.selectionStart, end: field.selectionEnd }
+    typed.set(id, { drawn: p.value, value: field.value })
+    hold()
     ctx.press(() => p.onInput?.(field.value, arg('change')))
   }
   field.onkeydown = ev => {
     if (ev.key === 'Enter') ctx.press(() => p.onSubmit?.(field.value, arg('submit')))
     if (ev.key === 'Escape') field.blur()
   }
-  field.onfocus = () => (focused = { key, start: field.selectionStart, end: field.selectionEnd })
+  field.onfocus = hold
   field.onblur = () => {
     // A blur because the field left the page (a redraw) keeps the focus to restore.
-    if (field.isConnected && focused?.key === key) focused = null
+    if (field.isConnected && focused?.el === field) focused = null
   }
   wrap.append(field)
   wrap.append(Object.assign(document.createElement('span'), { className: 'r-submit', textContent: `↵ ${p.submitLabel ?? 'submit'}` }))
   // A redraw while typing keeps the focus and the caret.
-  if (focused?.key === key) {
-    const { start, end } = focused
+  if (focused?.id === id) {
+    const { start, end, el: was } = focused
     requestAnimationFrame(() => {
-      if (!field.isConnected) return
+      // Only where this field replaced the focused one, on the page.
+      if (!field.isConnected || was.isConnected) return
+      focused = { id, el: field, start, end }
       field.focus()
       if (start !== null) field.setSelectionRange(start, end)
     })
