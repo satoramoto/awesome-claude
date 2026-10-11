@@ -25,10 +25,17 @@ Point Claude Code at the compiled folders, in `~/.claude/settings.json`:
 
 ```json
 "env": {
-  "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/satoramoto/awesome-claude/plugins/overview",
+  "CLAUDE_CODE_PLUGIN_DIRS": "~/Code/satoramoto/awesome-claude/plugins/overview:~/Code/satoramoto/awesome-claude/plugins/issues",
   "CLAUDE_CODE_PLUGIN_DIR_WATCH": "1"
 }
 ```
+
+One folder per mod, separated by `:` (`;` on Windows).
+
+| Mod | What it is | Opens with |
+| --- | --- | --- |
+| `overview` | the session at a glance: context, limits, activity, agents, workspaces, cost | on its own, or `/overview` |
+| `issues` | the open GitHub issues of the session's repository, newest change first | `/issues` |
 
 With `bun run watch` running, a save under `mods/` or `kit/` recompiles and the
 session reloads the mod.
