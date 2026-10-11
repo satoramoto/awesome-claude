@@ -60,7 +60,8 @@ surfaces, in the sidebar frame, in both themes.
 
 It lays out like the desktop app, so problems show here first:
 
-- Text never wraps. Long text needs `wrap="truncate"`.
+- A Box lays its children in a row unless given `flexDirection="column"`, as Ink's does.
+- Text never wraps (unless `wrap="wrap"`) and keeps its spaces. Long text needs `wrap="truncate"`.
 - A box doesn't shrink below its content unless it has `minWidth={0}`: a row
   that overflows the frame means a Box between the text and the row is missing it.
 - Columns fit the canvas: if the chosen width doesn't fit the window, the pane
@@ -89,5 +90,9 @@ refuses can differ. Before calling a look done, load the mod in the real app.
 For what the engine itself accepts, use the `lab` mod: `/lab` lists its
 experiments, `/lab <id>` opens one, `/lab gallery` shows them all, and
 `mods/lab/verdicts.json` records the engine's verdict on each per surface.
-README's "Drawing for the desktop" sums up the limits. An `Engine` section in
-Storybook with those experiments is coming (branch `bench-engine`).
+README's "Drawing for the desktop" sums up the limits. The `Engine` section in
+Storybook shows those experiments.
+
+A mod that keeps its state in its own module rather than in plugin state
+(`blast-radius`) can't be loaded from a fixture: its story drives the mod's real
+hooks with a stand-in `$` instead (see `stories/blast-radius.stories.ts`).
