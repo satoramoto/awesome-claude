@@ -25,6 +25,19 @@ export const short = (ms: number): string => {
   return `${Math.floor(h / 24)}d${h % 24}h`
 }
 
+/** How long ago, coarsely, as GitHub lists things: 5m, 3h, 2d, 3w, 4mo, 2y. */
+export const ago = (ms: number): string => {
+  const m = Math.max(0, Math.floor(ms / 60_000))
+  if (m < 60) return `${m}m`
+  const h = Math.floor(m / 60)
+  if (h < 24) return `${h}h`
+  const d = Math.floor(h / 24)
+  if (d < 14) return `${d}d`
+  if (d < 60) return `${Math.floor(d / 7)}w`
+  if (d < 365) return `${Math.floor(d / 30)}mo`
+  return `${Math.floor(d / 365)}y`
+}
+
 /** US dollars: $1.50, $123. */
 /** Bytes, short: 812, 41K, 3.2M, 16G. */
 export const bytes = (n: number): string => {
