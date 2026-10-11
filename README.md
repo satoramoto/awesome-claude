@@ -2,8 +2,9 @@
 
 Mods for [Claude Code](https://claude.com/claude-code). A **mod** is a Claude Code
 plugin that adds interface to Claude Code itself (a pane, a slash command) through
-the engine's hooks API. This repository holds two mods and is a plugin
-marketplace that installs them.
+the engine's hooks API. This repository holds our own mods, forks of others'
+(each kept under its own license, with a link back), and is a plugin marketplace
+that installs them.
 
 The panes draw in the desktop app (as a side pane, with charts) and in the
 terminal (a simpler pane of text cells). Tested on Claude Code 2.1.296, the
@@ -16,6 +17,17 @@ version CI pins.
 | `overview` | the current session at a glance: context, limits, activity, agents, the branches it started and their pull requests, cost | on its own when a session starts; `/overview` opens it again | `git` for Workspaces; `gh` signed in for pull requests |
 | `issues` | the open GitHub issues of the session's repository, newest change first, with actions on each | `/issues` | a GitHub repository; `gh` signed in |
 | `lab` | for mod authors: 77 experiments probing what the engine draws (SVG gradients and filters, animation, hover, `Client` modules, every element), with the engine's verdict on each surface in `mods/lab/verdicts.json` | `/lab`, `/lab <id>`, `/lab gallery` | nothing |
+
+### Forked mods
+
+Copies of other people's mods, changed here to fit these. Each keeps its
+original license and author; its README opens with where it came from, the
+upstream commit it was taken at, and what this fork changed.
+
+| Mod | What it does | Original | License |
+| --- | --- | --- | --- |
+| `filetree` | an IDE-style file tree of the session's folder: git status and lines changed per file, and a shimmer on what Claude reads, writes and commits. `/filetree` opens it | [data-goblin/claude-code-filetree](https://github.com/data-goblin/claude-code-filetree), by Kurt Buhler | [MIT](mods/filetree/LICENSE) |
+| `blast-radius` | holds a risky shell command (`rm -rf`, `git reset --hard`, `git clean`, force push, migrations) and shows what it would change, with Proceed and Cancel | [anthropics/claude-code-playground](https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods/blast-radius), by Anthropic | [Apache-2.0](mods/blast-radius/LICENSE) |
 
 ### Requirements
 
@@ -188,4 +200,7 @@ blurs as the pane resizes: draw with boxes and text.
 
 ## License
 
-[MIT](LICENSE)
+[MIT](LICENSE), except the forked mods, which keep their own licenses:
+`mods/filetree` is MIT, copyright Kurt Buhler ([LICENSE](mods/filetree/LICENSE)),
+and `mods/blast-radius` is Apache-2.0, copyright Anthropic PBC
+([LICENSE](mods/blast-radius/LICENSE)).
