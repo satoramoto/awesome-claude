@@ -74,6 +74,13 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     </Box>
   )
 
+  /** A link that reads by its blue alone, no underline: its text handed to the Link as a child. */
+  const link = (key: string, href: string, text: string) => (
+    <Link key={key} href={href} label={text}>
+      <Text color={C.blue}>{text}</Text>
+    </Link>
+  )
+
   /** A secondary action: its label in the mid grey, brightening under the pointer as a plain Button does. */
   const quiet = (key: string, label: string, onPress: () => void) => (
     <Button key={key} plain onPress={onPress}>
@@ -98,7 +105,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
                 </Text>,
               ],
               // Its labels as GitHub pills, then its number; the title gives way to them.
-              [...issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)), <Link key="n" href={issue.url} label={`#${issue.number}`} />],
+              [...issue.labels.map(l => k.pill(`label-${l.name}`, l.name, l.color)), link('n', issue.url, `#${issue.number}`)],
             )}
           </Box>,
           // Each PR linked to close it, as the overview's workspaces draw one: its state in the icon's glyph and colour.
@@ -107,7 +114,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               `pr-${pr.number}`,
               [
                 lead('i', k.icon(prIcon(pr), prColor(pr))),
-                <Link key="n" href={pr.url} label={`#${pr.number}`} />,
+                link('n', pr.url, `#${pr.number}`),
                 pr.title ? (
                   <Text key="t" color={GRAY.light} wrap="truncate">
                     {pr.title}

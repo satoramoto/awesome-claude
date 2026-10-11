@@ -4,7 +4,7 @@ import { pct, short } from './format'
 import { ICON_PX, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, MUTED, TRACK } from './tokens'
+import { C, GRAY, MUTED, TRACK } from './tokens'
 
 /**
  * The shared components. Each draws for the surface it is given: on the app
@@ -107,6 +107,8 @@ const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resourc
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
+  /** Text a step below the main text: one of the three greys on the app surfaces; plain dim in the terminal, whose greys are its own. */
+  const tone = (level: keyof typeof GRAY) => (terminal ? { dimColor: true } : { color: GRAY[level] })
 
   /*
    * Rounding on the desktop. Boxes have no corner radius; what rounds is:
@@ -278,7 +280,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
               <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%">
                 {swatch(t.color)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate">
+                  <Text {...tone('light')} wrap="truncate">
                     {t.label}
                   </Text>
                 </Box>
@@ -293,7 +295,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   }
 
   /** A caption: dim uppercase, for a chart's or a column's heading. The only uppercase besides a state word. */
-  const caption = (text: string) => <Text dimColor>{text.toUpperCase()}</Text>
+  const caption = (text: string) => <Text {...tone('mid')}>{text.toUpperCase()}</Text>
 
   /**
    * A header's right side, one form for every section: figures, each followed by
@@ -308,7 +310,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {shown.map(([figure, unit, color], i) => (
           <Text key={`${figure}-${unit ?? ''}`} wrap={i === shown.length - 1 ? 'truncate' : undefined}>
             <Text color={color}>{figure}</Text>
-            {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
+            {unit ? <Text {...tone('mid')}>{` ${unit}`}</Text> : null}
           </Text>
         ))}
       </Box>
@@ -329,7 +331,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       const align = i === 0 && l.at === 0 ? 'flex-start' : i === sorted.length - 1 && l.at === 1 ? 'flex-end' : 'center'
       row.push(
         <Box key={`${key}-${i}`} flexGrow={Math.max(1, Math.round((to - from) * 1000))} width={0} flexDirection="row" justifyContent={align}>
-          <Text dimColor>{l.text}</Text>
+          <Text {...tone('dark')}>{l.text}</Text>
         </Box>,
       )
     })
@@ -437,7 +439,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const prop = (key: string, label: string, value: RenderElement | string) => (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
       <Box minWidth={0} flexShrink={1}>
-        <Text dimColor wrap="truncate">
+        <Text {...tone('mid')} wrap="truncate">
           {label}
         </Text>
       </Box>
@@ -460,7 +462,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
     <Box key={key} flexDirection="row" alignItems="center" gap={SPACE.item}>
       <Box width={r.labelWidth ?? LABEL} flexShrink={0}>
-        <Text dimColor wrap="truncate">
+        <Text {...tone('light')} wrap="truncate">
           {r.label}
         </Text>
       </Box>
@@ -469,7 +471,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         <Text>{r.figure}</Text>
       </Box>
       <Box width={FIG2} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        <Text color={r.unitColor} dimColor={!r.unitColor}>
+        <Text {...(r.unitColor ? { color: r.unitColor } : tone('mid'))}>
           {r.unit ?? ''}
         </Text>
       </Box>
@@ -483,13 +485,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       <Box flexDirection="row" justifyContent="space-between" flexGrow={1} flexShrink={1} minWidth={0} gap={SPACE.item}>
         <Text wrap="truncate">
           {r.text}
-          {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
+          {r.note ? <Text {...tone('mid')}>{`  ${r.note}`}</Text> : null}
         </Text>
         {/* Figures in fixed right-aligned columns, so they line up row to row. */}
         <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
           {(r.figures ?? []).map((f, i) => (
             <Box key={`f${i}`} width={FIG} flexDirection="row" justifyContent="flex-end">
-              <Text dimColor>{f}</Text>
+              <Text {...tone('mid')}>{f}</Text>
             </Box>
           ))}
         </Box>
@@ -575,10 +577,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const share = (key: string, glyph: string, ours: string, whole: string, hot?: string) => (
     // The glyph in its own box: the desktop drops a space at the start of a Text.
     <Box key={key} flexDirection="row" gap={SPACE.pair} flexShrink={1}>
-      <Text color={MUTED}>{glyph}</Text>
+      <Text {...tone('mid')}>{glyph}</Text>
       <Text wrap="truncate">
         <Text color={hot}>{ours}</Text>
-        {whole ? <Text dimColor>{`/${whole}`}</Text> : null}
+        {whole ? <Text {...tone('dark')}>{`/${whole}`}</Text> : null}
       </Text>
     </Box>
   )
