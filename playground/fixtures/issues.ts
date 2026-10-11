@@ -4,15 +4,35 @@ const hour = 3_600_000
 const day = 24 * hour
 
 const url = (n: number) => `https://github.com/satoramoto/awesome-claude/issues/${n}`
-const issue = (number: number, title: string, ageMs: number, extra: Partial<{ labels: { name: string; color: string }[]; assignees: string[]; comments: number; author: string }> = {}) => ({
+
+type Pr = { number: number; title: string; url: string; state: string; isDraft: boolean; conflicting: boolean; failing: number; pending: number }
+const pr = (number: number, title: string, extra: Partial<Pr> = {}): Pr => ({
+  number,
+  title,
+  url: `https://github.com/satoramoto/awesome-claude/pull/${number}`,
+  state: 'OPEN',
+  isDraft: false,
+  conflicting: false,
+  failing: 0,
+  pending: 0,
+  ...extra,
+})
+
+const issue = (
+  number: number,
+  title: string,
+  ageMs: number,
+  extra: Partial<{ labels: { name: string; color: string }[]; assignees: string[]; comments: number; author: string; prs: Pr[] }> = {},
+) => ({
   number,
   title,
   url: url(number),
   author: 'satoramoto',
-  labels: [],
-  assignees: [],
+  labels: [] as { name: string; color: string }[],
+  assignees: [] as string[],
   comments: 0,
   updatedAt: now - ageMs,
+  prs: [] as Pr[],
   ...extra,
 })
 
@@ -22,10 +42,21 @@ export const busy = {
     more: false,
     at: now,
     issues: [
-      issue(24, 'Snapshot tests of what mods draw, so the bench and the app agree', 2 * hour, { labels: [{ name: 'tests', color: '#0e8a16' }], comments: 3 }),
-      issue(23, 'Fold arrow is clipped in the desktop pane', 5 * hour, { labels: [{ name: 'bug', color: '#d73a4a' }, { name: 'desktop', color: '#1d76db' }], assignees: ['satoramoto'] }),
+      issue(24, 'Snapshot tests of what mods draw, so the bench and the app agree', 2 * hour, {
+        labels: [{ name: 'tests', color: '#0e8a16' }],
+        comments: 3,
+        prs: [pr(31, 'Snapshot tests for the overview pane', { failing: 1 })],
+      }),
+      issue(23, 'Fold arrow is clipped in the desktop pane', 5 * hour, {
+        labels: [{ name: 'bug', color: '#d73a4a' }, { name: 'desktop', color: '#1d76db' }],
+        assignees: ['satoramoto'],
+        prs: [pr(29, 'A minimum width for the fold arrow', { state: 'MERGED' }), pr(30, 'Small disclosure triangles', { isDraft: true })],
+      }),
       issue(21, 'Workspaces: show which checks fail, not just how many', 3 * day, { labels: [{ name: 'overview', color: '#5319e7' }], comments: 1 }),
-      issue(18, 'A pane for the open issues of the session’s repository, with a very long title that has to truncate', 12 * day, { labels: [{ name: 'enhancement', color: '#a2eeef' }] }),
+      issue(18, 'A pane for the open issues of the session’s repository, with a very long title that has to truncate', 12 * day, {
+        labels: [{ name: 'enhancement', color: '#a2eeef' }],
+        prs: [pr(27, 'issues: a pane with the open issues', { pending: 2 })],
+      }),
       issue(9, 'Terminal: legends wrap at narrow widths', 70 * day, { author: 'someone-else', comments: 7 }),
     ],
   },
@@ -41,7 +72,7 @@ export const sprint = {
   selected: [24, 21],
 }
 
-export const empty ={ list: { repo: 'satoramoto/awesome-claude', more: false, at: now, issues: [] } }
+export const empty = { list: { repo: 'satoramoto/awesome-claude', more: false, at: now, issues: [] } }
 
 export const noRepo = { list: { repo: '', more: false, at: now, issues: [], note: 'No GitHub repository for this session' } }
 

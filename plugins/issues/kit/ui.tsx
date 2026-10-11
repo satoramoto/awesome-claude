@@ -46,7 +46,7 @@ const ROW_PX = 8.5 / 0.45
  * - BODY_INDENT: a body's left edge, just past the header's fold arrow.
  * - Reading columns: LABEL | gauge (grows) | FIG right-aligned | FIG2 right-aligned.
  */
-export const SPACE = { pair: 0.5, item: 1, group: 2, block: 0.5 } as const
+export const SPACE = { pair: 0.75, item: 1.25, group: 2, block: 0.8 } as const
 const INSET = 1
 const BODY_INDENT = 1.6
 /**
@@ -63,7 +63,10 @@ const FIG2 = 6
 /** The terminal's fold-arrow gutter. */
 const GUTTER = 2
 /** A band's height: one text row plus this above and below. */
-const BAND_PAD_Y = 0.2
+const BAND_PAD_Y = 0.3
+/** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
+const TILE_PAD_Y = 0.6
+const TILE_ROW_GAP = 0.2
 
 /**
  * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
@@ -80,6 +83,22 @@ const HEAD = '#272727'
 
 /** A tile's fill: between the pane and a header band. Solid, for the same reason as HEAD. */
 const TILE = '#222222'
+
+/** `a` blended with `b`: `share` of `a` (0 to 1) over `b`, as solid #rrggbb. Takes #rgb or #rrggbb; anything else comes back as `a`. */
+const mix = (a: string, b: string, share: number) => {
+  const rgb = (c: string) => {
+    const hex = c.replace('#', '')
+    const full = hex.length === 3 ? [...hex].map(x => x + x).join('') : hex
+    return /^[0-9a-f]{6}$/i.test(full) ? [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16)) : null
+  }
+  const x = rgb(a)
+  const y = rgb(b)
+  if (!x || !y) return a
+  return `#${x.map((v, i) => Math.round(v * share + y[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** A selected tile's fill: the tile's step, tinted towards the blue that marks what's live. Solid, as TILE. */
+const TILE_SELECTED = '#232a3c'
 
 
 /** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
@@ -170,15 +189,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * A tile: one item of a list that has several lines (a branch and its PR), in its
-   * own rounded fill a step lighter than the pane, so items read as units.
+   * own rounded fill a step lighter than the pane, so items read as units. A
+   * `selected` tile takes a blue-tinted fill: picked, without an outline.
    */
-  const tile = (key: string, children: (RenderElement | null)[]) =>
+  const tile = (key: string, children: (RenderElement | null)[], opts: { selected?: boolean } = {}) =>
     terminal ? (
       <Box key={key} flexDirection="column" marginTop={1}>
         {children}
       </Box>
     ) : (
-      rounded(TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: 0.3, width: '100%' }, children)
+      rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' }, children)
     )
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
@@ -220,6 +240,17 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const first = shown[0]?.color ?? TRACK
     const last = rest > 0 ? TRACK : (shown[shown.length - 1]?.color ?? TRACK)
     return capped(height, first, last, flat)
+  }
+
+  /**
+   * A label as GitHub draws one on a dark page: a rounded chip filled with the
+   * label's colour, faint, and its name in a lighter tint of the same colour.
+   * Blended to solid colours over the tile (rounding needs a solid fill). In the
+   * terminal, the name in the label's colour.
+   */
+  const pill = (key: string, text: string, color: string) => {
+    if (terminal) return <Text key={key} color={color}>{text}</Text>
+    return rounded(mix(color, TILE, 0.22), { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t" color={mix(color, '#ffffff', 0.45)}>{text}</Text>])
   }
 
   /** A small round dot of colour, a legend's key. */
@@ -567,7 +598,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, section, columns: columnsChart, perf: perfFooter }
+  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, pill, section, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>
