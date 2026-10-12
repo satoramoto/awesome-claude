@@ -123,12 +123,16 @@ test('on the terminal, labels show as pills while they fit beside the title', as
   await open($)
 
   const wide = await terminal($, 60)
-  expect((await wide.find({ type: 'Text', text: /^tests$/ }))?.props.color).toBe('#0e8a16')
+  // The label's colour (GitHub's hex) only tints its one-cell swatch; the name is the default foreground.
+  const pill = await wide.find({ type: 'Text', text: /^■ tests$/ })
+  expect(pill).toBeDefined()
+  expect(pill?.props.color).toBeUndefined()
+  expect((await wide.find({ type: 'Text', text: /^■$/ }))?.props.color).toBe('#0e8a16')
   await wide.unmount()
 
   // At 30 columns the title keeps its room and the label is left out; the number and age stay.
   const narrow = await terminal($, 30)
-  expect(await narrow.find({ type: 'Text', text: /^tests$/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /tests$/ })).toBeUndefined()
   expect(await narrow.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
   await narrow.unmount()
 })
