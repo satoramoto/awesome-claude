@@ -6,6 +6,7 @@ import type { PerfRow } from '@kit/perf'
 import { C, GLYPH, INK, RAMP, STATUS, levelColor } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { kit } from '@kit/ui'
+import type { KitOptions } from '@kit/ui'
 
 import * as filetreeMod from '../mods/filetree/hooks/register'
 import * as issuesMod from '../mods/issues/hooks/register'
@@ -17,8 +18,8 @@ import * as issuesFixtures from '../playground/fixtures/issues'
 import * as launcherFixtures from '../playground/fixtures/launcher'
 import * as overviewFixtures from '../playground/fixtures/overview'
 import { collect, panes } from '../playground/host'
-import { CELL, draw, h } from '../playground/render'
-import type { Node, Surface } from '../playground/render'
+import { CELL, TERMINAL_THEMES, draw, h, terminalPaneClass } from '../playground/render'
+import type { Node, Surface, TerminalTheme } from '../playground/render'
 import { kitFor, show } from './show'
 
 type Args = Record<string, any>
@@ -162,34 +163,78 @@ const WIDTHS = [30, 40, 60, 100]
 
 type K = ReturnType<typeof kit>
 
+/** The toolbar's terminal theme (dark when it names none). */
+const toolbarTheme = (ctx: { globals: Record<string, any> }): TerminalTheme => {
+  const t = String(ctx.globals.theme ?? 'dark') as TerminalTheme
+  return TERMINAL_THEMES.includes(t) ? t : 'dark'
+}
+
+/** The terminal themes a sheet's `theme` control picks: the toolbar's, one, or `all` four. */
+const pickThemes = (choice: unknown, ctx: { globals: Record<string, any> }): TerminalTheme[] =>
+  choice === 'all' ? [...TERMINAL_THEMES] : TERMINAL_THEMES.includes(choice as TerminalTheme) ? [choice as TerminalTheme] : [toolbarTheme(ctx)]
+
+/** The `theme` control of a sheet: follow the toolbar, one theme, or all four. */
+const THEME_CONTROL = {
+  args: { theme: 'toolbar' },
+  argTypes: { theme: { control: 'select', options: ['toolbar', ...TERMINAL_THEMES, 'all'] } },
+}
+
 /**
- * A sheet: what `build` draws, on the terminal at 30, 40, 60 and 100 columns,
- * each beside the desktop (dark) at the same width. Whatever the toolbar says:
- * the point is the comparison. Buttons redraw every copy.
+ * The sheet draws its own panes: the toolbar's frame around it steps aside, and
+ * drops its terminal theme class, whose variables would otherwise reach the
+ * panes inside it (the desktop's and other terminal themes').
  */
-const sheet = (build: (k: K, surface: Surface, columns: number) => unknown): Story => ({
+const stepAside = (host: HTMLElement) =>
+  setTimeout(() => {
+    const frame = host.closest('.pane') as HTMLElement | null
+    const body = host.closest('.body') as HTMLElement | null
+    if (frame) {
+      frame.className = 'pane'
+      frame.style.cssText = 'background:none;padding:0;display:block'
+    }
+    if (body) body.style.width = 'auto'
+  })
+
+/** A kit for `surface` at `columns`, as the engine hands one to a hook. */
+const kitAt = (surface: Surface, columns: number, opts: KitOptions = {}) =>
+  kit({ Box: 'Box' as any, Text: 'Text' as any, Button: 'Button' as any, Svg: surface === 'terminal' ? undefined : ('Svg' as any) }, surface, columns, opts)
+
+/** What a sheet's `build` gets besides the kit: a kit at the same surface and width with other options (`{ focused: false }`). */
+type More = { make: (opts: KitOptions) => K }
+
+/**
+ * A sheet: what `build` draws, on the terminal at 30, 40, 60 and 100 columns
+ * (or `widths`), each beside the desktop at the same width. The terminal follows
+ * the toolbar's Theme (the `theme` control picks one, or `all` four side by
+ * side); the desktop draws in that theme's light or dark look. Whatever the
+ * toolbar's surface: the point is the comparison. Buttons redraw every copy.
+ */
+const sheet = (build: (k: K, surface: Surface, columns: number, more: More) => unknown, opts: { widths?: number[] } = {}): Story => ({
   globals: { frame: 'pane', surface: 'terminal', columns: '110' },
-  render: (_, ctx) => {
+  ...THEME_CONTROL,
+  render: (args, ctx) => {
+    const themes = pickThemes(args.theme, ctx)
+    const desktop = (args.theme === 'all' ? toolbarTheme(ctx) : themes[0]!).replace(/-ansi$/, '')
     const host = document.createElement('div')
     host.style.cssText = 'display:flex;flex-direction:column;gap:18px;font:12px/1.4 -apple-system,system-ui,sans-serif;color:#8e8e93'
     const paint = () => {
       host.replaceChildren(
-        ...WIDTHS.map(w => {
+        ...(opts.widths ?? WIDTHS).map(w => {
           const row = document.createElement('div')
           row.style.cssText = 'display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start'
-          for (const surface of ['terminal', 'desktop'] as const) {
+          const panesAt = [...themes.map(theme => ({ surface: 'terminal' as const, theme: theme as string })), { surface: 'desktop' as const, theme: desktop }]
+          for (const { surface, theme } of panesAt) {
             const cell = document.createElement('div')
-            const label = Object.assign(document.createElement('div'), { textContent: `${surface} · ${w} columns` })
+            const label = Object.assign(document.createElement('div'), { textContent: `${surface} · ${theme} · ${w} columns` })
             label.style.marginBottom = '4px'
             const pane = document.createElement('div')
-            pane.className = `pane ${surface === 'terminal' ? 'terminal' : 'dark'}`
+            pane.className = surface === 'terminal' ? terminalPaneClass(theme as TerminalTheme) : `pane ${theme}`
             const body = document.createElement('div')
             body.className = 'body'
             body.style.width = surface === 'terminal' ? `${w}ch` : `${w * CELL.col}px`
             body.style.overflow = 'hidden'
-            const Svg = surface === 'terminal' ? undefined : ('Svg' as any)
-            const k = kit({ Box: 'Box' as any, Text: 'Text' as any, Button: 'Button' as any, Svg }, surface, w)
-            const drawn = draw(build(k, surface, w) as Node, surface, fn => (fn(), paint()), { client: { site: `${ctx.id}-${surface}-${w}` } })
+            const tree = build(kitAt(surface, w), surface, w, { make: o => kitAt(surface, w, o) })
+            const drawn = draw(tree as Node, surface, fn => (fn(), paint()), { client: { site: `${ctx.id}-${surface}-${theme}-${w}` } })
             if (drawn) body.append(drawn)
             pane.append(body)
             cell.append(label, pane)
@@ -200,13 +245,7 @@ const sheet = (build: (k: K, surface: Surface, columns: number) => unknown): Sto
       )
     }
     paint()
-    // The sheet draws its own panes: the toolbar's frame around it steps aside.
-    setTimeout(() => {
-      const frame = host.closest('.pane') as HTMLElement | null
-      const body = host.closest('.body') as HTMLElement | null
-      if (frame) frame.style.cssText = 'background:none;padding:0;display:block'
-      if (body) body.style.width = 'auto'
-    })
+    stepAside(host)
     return host
   },
 })
@@ -453,6 +492,223 @@ export const TerminalFitting = sheet(k => {
   )
 })
 
+const FILES = [
+  { name: 'tokens.ts', diff: '+48' },
+  { name: 'ui.tsx', diff: '+310' },
+  { name: 'icons.ts', diff: '+6' },
+  { name: 'format.ts', diff: '−2' },
+]
+
+/**
+ * A list that takes the keyboard, with its second row selected: while the pane
+ * is focused (`▌` and bold) and while it isn't (dim mark, plain weight). Then
+ * tiles: selected focused, selected unfocused, and not selected.
+ */
+export const TerminalSelection = sheet((k, _, __, { make }) => {
+  const blurred = make({ focused: false })
+  const list = (kk: K, id: string) => FILES.map((f, i) => kk.item(`${id}-${i}`, { lead: 'file', text: f.name, selected: i === 1, right: [f.diff] }))
+  const tileBody = (kk: K, id: string, text: string) => [kk.item(`${id}-i`, { lead: 'running', text, note: '4m', right: ['38k'] })]
+  return h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('focused'),
+    ...list(k, 'f'),
+    k.caption('unfocused'),
+    ...list(blurred, 'u'),
+    k.caption('tiles'),
+    k.tile('t-sel', tileBody(k, 't-sel', 'Selected, focused'), { selected: true }),
+    k.tile('t-blur', tileBody(k, 't-blur', 'Selected, unfocused'), { selected: true, focused: false }),
+    k.tile('t-plain', tileBody(k, 't-plain', 'Not selected'), {}),
+  )
+})
+
+const HINTS = [
+  { key: '↑↓', label: 'move' },
+  { key: 'enter', label: 'open' },
+  { key: 'o', label: 'browser' },
+  { key: 'r', label: 'refresh' },
+  { key: '/', label: 'filter' },
+  { key: 'esc', label: 'close' },
+]
+
+/**
+ * Key-hint footers: the full list, cut from the end with `…` as the pane
+ * narrows; one long hint cut at the edge; and the unfocused pane, which draws
+ * none. The desktop draws none either: its controls are buttons.
+ */
+export const TerminalHints = sheet((k, _, __, { make }) =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('focused'),
+    k.hints('all', HINTS),
+    k.caption('first two'),
+    k.hints('two', HINTS.slice(0, 2)),
+    k.caption('one long hint'),
+    k.hints('long', [{ key: 'ctrl+shift+r', label: 'reload every mod in this session from disk' }]),
+    k.caption('unfocused'),
+    make({ focused: false }).hints('blurred', HINTS) ?? k.note('none', 'nothing drawn'),
+  ),
+)
+
+/**
+ * A header's state before its figures: loading (no figures yet), kept figures
+ * with their age, a failed refresh with and without an age, and a folded
+ * section that is still loading.
+ */
+export const TerminalStaleStates = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.section({
+      id: 'loading',
+      icon: GLYPH.pr,
+      title: 'Pull requests',
+      right: k.summary([], { loading: true }),
+      children: [k.note('reading', 'Reading pull requests…', 'loading')],
+    }),
+    k.section({
+      id: 'aged',
+      icon: GLYPH.pr,
+      title: 'Issues',
+      right: k.summary([['4', 'open'], ['1', 'failing', C.bad]], { age: '2m' }),
+      children: [k.item('i1', { lead: 'issue-opened', leadColor: C.ok, text: 'The terminal versions of all our mods need love', right: ['#31'] })],
+    }),
+    k.section({
+      id: 'failed-age',
+      icon: GLYPH.limits,
+      title: 'Limits',
+      right: k.summary([['42%', '5-hour'], ['81%', 'weekly']], { failed: true, age: '5m' }),
+      children: [k.reading('5h', { label: '5-hour', value: 42, max: 100, color: levelColor(42), figure: '42%', unit: '2h18' })],
+    }),
+    k.section({
+      id: 'failed',
+      icon: GLYPH.context,
+      title: 'Context',
+      right: k.summary([['28%', 'of 1M']], { failed: true }),
+      collapsed: folded.has('failed'),
+      onToggle: toggle('failed'),
+      children: [k.bar([{ value: 28, color: INK }], 100)],
+    }),
+    k.section({ id: 'folded-loading', icon: GLYPH.agents, title: 'Tasks', loading: true, collapsed: !folded.has('open-loading'), onToggle: toggle('open-loading'), children: [k.note('tl', 'Reading tasks…', 'loading')] }),
+  ),
+)
+
+/**
+ * What goes first when a row runs out of room: each right part's `drop` rank
+ * (the age, then the diff, then the CI mark; the number never), and paths cut
+ * in the middle so their end shows, in `item` and in `prop`.
+ */
+export const TerminalDropOrder = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('drop: age 3, diff 2, ci 1, number never'),
+    k.item('pr1', {
+      lead: 'pr-open',
+      leadColor: C.blue,
+      text: 'kit: selection, hints and stale figures',
+      right: [{ part: k.status('done', 'passing'), drop: 1 }, { part: '+412 −96', drop: 2 }, { part: '#42' }, { part: '2d', drop: 3 }],
+    }),
+    k.item('pr2', {
+      lead: 'pr-open',
+      leadColor: C.blue,
+      text: 'issues: keep the list through a failed refresh',
+      right: [{ part: k.status('failed', 'failing'), drop: 1 }, { part: '+38 −4', drop: 2 }, { part: '#43' }, { part: '5h', drop: 3 }],
+    }),
+    k.caption('path: true'),
+    k.item('p1', { lead: 'file', text: 'mods/overview/hooks/sections/context/render.tsx', path: true, right: ['+12'] }),
+    k.item('p2', { lead: GLYPH.branch, text: 'feat/terminal-kit-selection-and-hints', path: true, textColor: C.blue }),
+    k.item('p3', { lead: 'file', text: 'mods/overview/hooks/sections/context/render.tsx', right: ['+12'] }),
+    k.caption('prop'),
+    k.prop('cwd', 'cwd', '/Users/ryan/Code/satoramoto/awesome-claude/.claude/worktrees/agent-ac393ad64d220a35d', { path: true }),
+    k.prop('branch', 'branch', 'lane-kit3/terminal-selection-hints-and-stale', { path: true }),
+    k.prop('cmd', 'command', 'bun run storybook --port 6006 --no-open --ci'),
+  ),
+)
+
+/** A day of requests a minute: a slow rise, a spike, a lull. */
+const SERIES = Array.from({ length: 120 }, (_, i) => Math.round(8 + 6 * Math.sin(i / 9) + (i % 37 === 20 ? 22 : 0) + (i > 90 && i < 100 ? -8 : 0) + i / 10))
+
+/** Sparklines: Braille one and two rows tall, the blocks fallback, and a coloured one. The desktop draws each as an SVG line. */
+export const TerminalSpark = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('braille, 1 row'),
+    k.spark(SERIES),
+    k.caption('braille, 2 rows'),
+    k.spark(SERIES, { height: 2 }),
+    k.caption('blocks'),
+    k.spark(SERIES, { glyphs: 'blocks' }),
+    k.caption('blocks, 2 rows'),
+    k.spark(SERIES, { glyphs: 'blocks', height: 2 }),
+    k.caption('blue, max 60, 16 wide'),
+    k.spark(SERIES, { color: C.blue, max: 60, width: 16, height: 2 }),
+  ),
+)
+
+/**
+ * Where a fixed colour can't reach the terminal: a multi-part bar in `█`/`▓`
+ * with a `bar: true` legend keyed in the same glyphs; GitHub label hexes as
+ * swatches with the name in the default foreground; a raw hex text colour. At
+ * 24 columns (under MIN_COLUMNS) each section draws its header only.
+ */
+export const TerminalFallbacks = sheet(
+  k =>
+    h(
+      'Box',
+      { flexDirection: 'column' },
+      k.section({
+        id: 'ctx',
+        icon: GLYPH.context,
+        title: 'Context',
+        right: k.summary([['26%', 'of 1M']]),
+        children: [
+          k.bar(
+            [
+              { value: 5_300, color: RAMP.slate[0] },
+              { value: 29_700, color: RAMP.slate[1] },
+              { value: 20_500, color: C.cyan },
+              { value: 207_000, color: C.blue },
+            ],
+            1_000_000,
+          ),
+          k.legend(
+            'ctx',
+            [
+              { label: 'System', color: RAMP.slate[0], figure: tokens(5_300) },
+              { label: 'Tools', color: RAMP.slate[1], figure: tokens(29_700) },
+              { label: 'MCP', color: C.cyan, figure: tokens(20_500) },
+              { label: 'Messages', color: C.blue, figure: tokens(207_000) },
+            ],
+            undefined,
+            { bar: true },
+          ),
+        ],
+      }),
+      k.section({
+        id: 'labels',
+        icon: GLYPH.pr,
+        title: 'Labels',
+        right: k.summary([['4', 'labels']]),
+        children: [
+          h(
+            'Box',
+            { flexDirection: 'row', gap: k.space.pair, flexWrap: 'wrap' },
+            k.pill('bug', 'bug', '#d73a4a'),
+            k.pill('help', 'help wanted', '#fbca04'),
+            k.pill('good', 'good first issue', '#7057ff'),
+            k.pill('docs', 'docs', '#0075ca'),
+          ),
+          k.item('hex', { lead: 'issue-opened', leadColor: '#d73a4a', text: 'text in #d73a4a', textColor: '#d73a4a', right: ['#12'] }),
+          k.item('orchid', { lead: 'file', leadColor: C.orchid, text: 'text in orchid', textColor: C.orchid }),
+        ],
+      }),
+    ),
+  { widths: [24, ...WIDTHS] },
+)
+
 export const PerfFooter: Story = {
   args: { gitMs: 38, gitPerMin: 4, renderMs: 2.1, rendersPerMin: 9, ghMs: 900, ghPerMin: 3 },
   render: (args, ctx) => {
@@ -479,29 +735,23 @@ const LOOK_MODS = [
 /** The mods drawn unless the control picks one. */
 const LOOK_DEFAULT = ['overview', 'issues', 'launcher']
 
-/** A dark and a light terminal: the pane's ground and text. Theme keys (orange, amber…) are the same on both. */
-const TERMINAL_THEMES = {
-  dark: { bg: '#101014', fg: '#d8d8d8' },
-  light: { bg: '#fbfbf9', fg: '#1d1d1f' },
-} as const
-
 /**
  * The terminal's look (TERM_ROLES in kit/ui.tsx): overview, issues and launcher,
- * busy, at 40 and 60 columns on a dark and a light terminal, so the orange titles
- * can be checked against the status colours (amber above all) on both grounds.
- * The controls narrow it to one theme, width or mod (filetree too), as the
- * screenshots take it.
+ * busy, at 40 and 60 columns on the toolbar's terminal theme, so the orange
+ * titles can be checked against the status colours (amber above all) on each
+ * ground. The controls pick another theme or `all` four, one width, or one mod
+ * (filetree too), as the screenshots take it.
  */
 export const TerminalLook: Story = {
   globals: { frame: 'pane', surface: 'terminal', columns: '110' },
-  args: { theme: 'both', width: 'both', mod: 'all' },
+  args: { theme: 'toolbar', width: 'both', mod: 'all' },
   argTypes: {
-    theme: { control: 'select', options: ['both', 'dark', 'light'] },
+    theme: { control: 'select', options: ['toolbar', 'all', ...TERMINAL_THEMES] },
     width: { control: 'select', options: ['both', '40', '60'] },
     mod: { control: 'select', options: ['all', ...LOOK_MODS.map(m => m.plugin)] },
   },
   render: (args, ctx) => {
-    const themes = (args.theme === 'both' ? ['dark', 'light'] : [args.theme]) as (keyof typeof TERMINAL_THEMES)[]
+    const themes = pickThemes(args.theme, ctx)
     const widths = args.width === 'both' ? [40, 60] : [Number(args.width)]
     const mods = LOOK_MODS.filter(m => (args.mod === 'all' ? LOOK_DEFAULT.includes(m.plugin) : m.plugin === args.mod))
     const host = document.createElement('div')
@@ -521,12 +771,7 @@ export const TerminalLook: Story = {
           label.style.cssText = 'margin-bottom:4px'
           label.textContent = `${theme} · ${w} columns`
           const pane = document.createElement('div')
-          pane.className = 'pane terminal'
-          const t = TERMINAL_THEMES[theme]
-          pane.style.background = t.bg
-          pane.style.color = t.fg
-          pane.style.setProperty('--r-bg', t.bg)
-          pane.style.setProperty('--r-fg', t.fg)
+          pane.className = terminalPaneClass(theme)
           const body = document.createElement('div')
           body.className = 'body'
           body.style.cssText = `width:${w}ch;overflow:hidden;display:flex;flex-direction:column;gap:1.25em`
@@ -548,13 +793,7 @@ export const TerminalLook: Story = {
     for (const m of LOOK_MODS) load(m.plugin, m.state as Record<string, unknown>)
     onChange(() => void paint())
     void paint()
-    // The sheet draws its own panes: the toolbar's frame around it steps aside.
-    setTimeout(() => {
-      const frame = host.closest('.pane') as HTMLElement | null
-      const body = host.closest('.body') as HTMLElement | null
-      if (frame) frame.style.cssText = 'background:none;padding:0;display:block'
-      if (body) body.style.width = 'auto'
-    })
+    stepAside(host)
     return host
   },
 }
