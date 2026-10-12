@@ -386,18 +386,62 @@ export const TerminalStates = sheet(k =>
         ]),
       ],
     }),
+    // Proceed destroys something (red); Cancel holds the focus, so Enter refuses.
     k.actions('answer', [
-      { key: 'proceed', label: 'Proceed', hotkey: '1', onPress: () => undefined },
-      { key: 'cancel', label: 'Cancel', hotkey: '2', onPress: () => undefined, quiet: true },
+      { key: 'proceed', label: 'Proceed', hotkey: '1', tone: 'danger', onPress: () => undefined },
+      { key: 'cancel', label: 'Cancel', hotkey: '2', autoFocus: true, onPress: () => undefined },
     ]),
     k.note('loading', 'Reading pull requests…', 'loading'),
     k.note('empty', 'No subagents yet.'),
     k.note('error', 'gh is not signed in: run gh auth login, then /issues again', 'error'),
+    k.note('two', 'Could not measure: bash exited 2 while expanding the paths, so nothing is listed here.', 'empty', { lines: 2 }),
+    k.note('two-err', 'gh is not signed in: run gh auth login, then /issues again to read them', 'error', { lines: 2 }),
     h('Box', { flexDirection: 'row', gap: k.space.pair }, k.pill('p1', 'bug', '#d73a4a'), k.pill('p2', 'refined', C.ok)),
     k.summary([['207k', 'tokens'], ['28%', 'of 1M'], ['3', 'failed', C.bad], ['12', 'agents']]),
     k.perf({ sinceMs: 12 * 60_000, rows: [row('git', 38, 4), row('render', 2.1, 9), row('gh', 900, 3)] }),
   ),
 )
+
+/**
+ * What gives way when a row runs out of room: a header whose controls must all
+ * show (`keepRight`) beside one whose title and figures share the cut; an item's
+ * note plain dim beside a coloured bold text; an item's right cluster cut last.
+ */
+export const TerminalFitting = sheet(k => {
+  const buttons = k.actions('tools', [
+    { key: 'up', label: '↑', quiet: true, onPress: () => undefined },
+    { key: 'home', label: '⌂', onPress: () => undefined },
+    { key: 'sync', label: '↻', quiet: true, onPress: () => undefined },
+    { key: 'hidden', label: '○', quiet: true, onPress: () => undefined },
+    { key: 'size', label: 'Σ', quiet: true, onPress: () => undefined },
+    { key: 'fold', label: '⊟', quiet: true, onPress: () => undefined },
+  ])
+  return h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('keepRight'),
+    k.section({ id: 'keep', title: 'awesome-claude-with-a-long-folder-name/kit', right: buttons, keepRight: true, collapsed: true, onToggle: () => undefined, children: null }),
+    k.caption('title and figures'),
+    k.section({
+      id: 'share',
+      icon: GLYPH.tools,
+      title: 'Activity across the session',
+      right: k.summary([['14', 'peak'], ['4', 'failed', C.bad], ['93%', 'cached']]),
+      collapsed: true,
+      onToggle: () => undefined,
+      children: null,
+    }),
+    k.caption('note after colour'),
+    k.item('branch', { lead: GLYPH.branch, text: 'feat/terminal-kit', textColor: C.blue, bold: true, note: '↑3 ↓1 origin/feat/terminal-kit', right: ['clean'] }),
+    k.caption('right cluster'),
+    k.item('long-right', {
+      lead: 'failed',
+      text: 'storybook',
+      right: [k.status('failed', 'failed'), 'localhost:6006', k.actions('a', [{ key: 'start', label: 'Start', onPress: () => undefined }])],
+    }),
+    k.item('long-figures', { lead: 'file', text: 'kit/ui.tsx', right: ['+310', '−96', 'modified 2 minutes ago by Claude'] }),
+  )
+})
 
 export const PerfFooter: Story = {
   args: { gitMs: 38, gitPerMin: 4, renderMs: 2.1, rendersPerMin: 9, ghMs: 900, ghPerMin: 3 },

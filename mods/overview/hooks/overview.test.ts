@@ -216,6 +216,17 @@ test('the terminal draws only the kit glyphs: no ✗ ⚑ ⑂ ⟳ ● marks', asy
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
     const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('\n')
     for (const glyph of ['✗', '⚑', '⑂', '⟳', '●']) expect(texts.includes(glyph)).toBe(false)
+    // Nothing with an emoji presentation, which some terminals draw two cells wide.
+    expect(texts).not.toMatch(/(?![#*0-9$])\p{Emoji}/u)
+    await ui.unmount()
+  }
+})
+
+test("a header's figures are one line that ends in an ellipsis when cut, not a figure clipped mid-word", async ($, on) => {
+  await session($, on)
+  for (const columns of WIDTHS) {
+    const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
+    expect((await ui.find({ type: 'Text', text: /^\d+ started {2}\d+ running$/ }))?.props, `agents at ${columns}`).toMatchObject({ wrap: 'truncate' })
     await ui.unmount()
   }
 })

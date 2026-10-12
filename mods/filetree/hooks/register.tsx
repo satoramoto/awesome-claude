@@ -1592,6 +1592,8 @@ export const register: Register = (on, options) => {
           id: 'files',
           title: header,
           right: actions,
+          // Every action shows at any width; a long folder name is cut instead.
+          keepRight: true,
           children: [
             branchLine(),
             searchLine,

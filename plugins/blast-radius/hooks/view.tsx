@@ -59,7 +59,7 @@ const HINT = 'Claude is waiting on your answer'
  *   │   + 1274 more                                │
  *   │ Paths: build                                 │   (dim)
  *   │                                              │
- *   │ Claude is waiting on…  1: Proceed  2: Cancel │
+ *   │ Claude is waiting on…  1: Proceed  2: Cancel │   (Proceed red; Cancel focused)
  *   ╰──────────────────────────────────────────────╯
  */
 export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?: boolean } = {}): RenderElement {
@@ -80,9 +80,10 @@ export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?:
   })
   if (report.more) lines.push(k.item('more', { text: `+ ${report.more} more`, dim: true, indent: 2 }))
 
+  // Proceed runs the command: red, as on the desktop. Cancel holds the focus, so Enter refuses, as upstream.
   const buttons = k.actions('actions', [
-    { key: 'proceed', label: 'Proceed', hotkey: '1', onPress: decide('proceed') },
-    { key: 'cancel', label: 'Cancel', hotkey: '2', onPress: decide('cancel') },
+    { key: 'proceed', label: 'Proceed', hotkey: '1', tone: 'danger', onPress: decide('proceed') },
+    { key: 'cancel', label: 'Cancel', hotkey: '2', autoFocus: true, onPress: decide('cancel') },
   ])
   // `1: Proceed  2: Cancel` is 21 cells; the hint shows only when it fits beside them whole.
   const hint = inner >= 21 + k.space.group + HINT.length
@@ -105,7 +106,8 @@ export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?:
           {lines}
         </Box>
       ) : null}
-      {report.note ? k.note('note', report.note) : null}
+      {/* A long note (why it couldn't measure) gets two lines before it's cut. */}
+      {report.note ? k.note('note', report.note, 'empty', { lines: 2 }) : null}
       <Box key="buttons" flexDirection="row" justifyContent={hint ? 'space-between' : 'flex-end'} gap={k.space.group} minWidth={0} marginTop={k.space.block}>
         {hint ? (
           <Box key="hint" flexShrink={1} minWidth={0}>

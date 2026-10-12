@@ -44,7 +44,7 @@ const serverOf = (c: LaunchConfig, servers: Record<string, Server>): Server =>
 /** How many output lines an unfolded row shows. */
 const TAIL = { terminal: 10, app: 14 } as const
 
-/** The terminal section's fold gutter, and the cells its title keeps before giving way (as `k.section` draws it). */
+/** The terminal section's fold gutter, and the cells of title a row keeps before its right side gives up parts. */
 const GUTTER = 2
 const TITLE_KEEPS = 12
 
@@ -103,10 +103,10 @@ export const renderPane = (
   const failed = all.filter(x => x.s.status === 'failed').length
 
   /**
-   * One row: its title, and its right side (its state, where it answers or its
-   * port, then what can be done to it). On the terminal the row has whole cells to
-   * fill, so the right side gives up its least telling parts first, and the title
-   * is cut to what's left: the kit's section would otherwise share the cut between them.
+   * One row's right side (its state, where it answers or its port, then what can
+   * be done to it). On the terminal the row has whole cells to fill, so the right
+   * side gives up its least telling parts first; the section (`keepRight`) then
+   * keeps it whole and cuts the title to what's left.
    */
   const row = (c: LaunchConfig, s: Server) => {
     const look = LOOK[s.status]
@@ -118,7 +118,6 @@ export const renderPane = (
     const restart = mine ? { key: `restart-${c.name}`, label: 'Restart', quiet: true, onPress: () => act.restart(c.name) } : null
 
     let fit: Fit = 0
-    let title = c.name
     if (terminal) {
       const name = [...c.name]
       const width = (f: Fit) => {
@@ -131,8 +130,6 @@ export const renderPane = (
       }
       const room = columns - GUTTER - Math.min(name.length, TITLE_KEEPS) - CELLS.group
       while (fit < 4 && width(fit) > room) fit = (fit + 1) as Fit
-      const titleRoom = Math.max(4, columns - GUTTER - CELLS.group - width(fit))
-      if (name.length > titleRoom) title = `${name.slice(0, titleRoom - 1).join('')}…`
     }
 
     const buttons = [start, stop, fit >= 4 ? null : restart]
@@ -158,7 +155,7 @@ export const renderPane = (
         {buttons.some(Boolean) ? k.actions(`actions-${c.name}`, buttons) : null}
       </Box>
     )
-    return { title, right }
+    return { title: c.name, right }
   }
 
   /** Unfolded: what it runs, where, how it ended, then the tail of its output. */
@@ -204,6 +201,7 @@ export const renderPane = (
     k.section({
       id: c.name,
       ...row(c, s),
+      keepRight: true,
       collapsed: !open.includes(c.name),
       onToggle: () => act.toggle(c.name),
       children: details(c, s),

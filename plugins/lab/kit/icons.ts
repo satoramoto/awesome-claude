@@ -99,7 +99,8 @@ export const TERM_GLYPH: Readonly<Record<string, string>> = {
   'arrow-up': GLYPH.up,
   home: '⌂',
   eye: '◎',
-  fold: '↕',
+  // ⇕, not ↕: ↕ has an emoji presentation.
+  fold: '⇕',
 }
 
 /**

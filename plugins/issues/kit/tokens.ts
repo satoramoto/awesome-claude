@@ -79,13 +79,19 @@ const QUIET = new Set<string>([MUTED, GRAY.light, GRAY.mid, GRAY.dark, TRACK])
 export const termInk = (color?: string): { color?: string; dimColor?: boolean } =>
   !color ? {} : QUIET.has(color) ? { dimColor: true } : { color: THEME_KEY[color] ?? color }
 
-/** One glyph per idea, shared so mods read alike (the SVG icons are keyed by these). */
+/**
+ * One glyph per idea, shared so mods read alike (the SVG icons are keyed by these).
+ * Each is what the terminal draws: one cell, and never a character with an emoji
+ * presentation (Unicode's Emoji property: ⚒ ⚠ ⚡ ⏱ ↕ ◼ draw as emoji in some
+ * terminals and take two cells).
+ */
 export const GLYPH = {
   context: '◕',
   cost: '$',
   time: '◷',
   turns: '↻',
-  tools: '⚒',
+  // The place-of-interest sign, as on a Command key: what the tools are called with.
+  tools: '⌘',
   files: '✎',
   agents: '✦',
   limits: '◔',

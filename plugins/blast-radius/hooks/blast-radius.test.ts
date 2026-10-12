@@ -30,7 +30,7 @@ const BAND = {
 } as const
 
 /** The engine beneath the mod, with a clock that moves only when the test moves it. */
-const engine = (on: On, placed = true): MockClock => {
+const engine = (on: On, placed = true, measured = RM_OUT): MockClock => {
   const clock = mock.clock(on, { now: Date.UTC(2026, 9, 11, 12) })
   on('session.cwd', async () => ({ value: '/repo' }))
   on('ui.open', async () => ({ value: placed ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'the terminal is too narrow' } }))
@@ -42,7 +42,7 @@ const engine = (on: On, placed = true): MockClock => {
       await clock.sleep(Number(e.argv[1]) * 1000)
       return run('')
     }
-    return e.argv[0] === 'bash' ? run(RM_OUT) : run('', 1)
+    return e.argv[0] === 'bash' ? run(measured) : run('', 1)
   })
   // The Bash tool itself, reached only when the mod lets the call through.
   on('tool.call', async () => ({ result: { stdout: '', stderr: '' }, text: 'ran' }) as any)
@@ -94,6 +94,11 @@ test('the terminal draws the report with the kit inside the warning border, and 
     ['proceed', 'Proceed', '1'],
     ['cancel', 'Cancel', '2'],
   ])
+  // Cancel holds the focus, so Enter refuses, as upstream; Proceed doesn't, and it's red (it destroys).
+  expect(buttons.find(b => b.key === 'cancel')?.props).toMatchObject({ autoFocus: true })
+  expect(buttons.find(b => b.key === 'proceed')?.props.autoFocus).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'Proceed' }))?.props).toMatchObject({ color: 'error' })
+  expect((await ui.find({ type: 'Text', text: 'Cancel' }))?.props?.color).toBeUndefined()
   await drive(clock, ui.press({ key: 'cancel' }))
   const result = await drive(clock, call)
   expect(String(result.deny ?? result.text)).toContain(CANCELLED)
@@ -113,6 +118,17 @@ test('in a narrow terminal band, the report still fits: the hint goes, every lon
   const result = await drive(clock, call)
   expect(result.deny).toBeUndefined()
   expect(result.text).toBe('ran')
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, a long note breaks between words onto a second line instead of being cut at the first', async ($, on) => {
+  // Nothing matches, so the note says why rm has nothing to remove: 51 cells, in 26.
+  const clock = engine(on, false, '0 0 0')
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: "The paths don't exist, so" })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: 'rm has nothing to remove.' }))?.props).toMatchObject({ wrap: 'truncate', dimColor: true })
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
   await ui.unmount()
 })
 

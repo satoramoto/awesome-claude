@@ -192,8 +192,11 @@ terminal: use dim.
 
 ### Glyphs
 
-All one cell wide, from blocks monospace fonts carry; none with an emoji
-presentation (no ⚠ ⚡ ◼ ⬛ ✅).
+All one cell wide, from blocks monospace fonts carry; none with Unicode's
+Emoji property (no ⚠ ⚡ ⚒ ⏱ ↕ ◼ ⬛ ✅): some terminals draw those as emoji, two
+cells wide. Check a new one with `bun -e "console.log(/\p{Emoji}/u.test('⌘'))"`
+(false is right). Every glyph in `kit/tokens.ts`, `kit/icons.ts` and the kit's
+terminal drawing passes; tools is `⌘`, fold `⇕`, and the perf footer's uptime `◷`.
 
 | Use | Glyphs |
 | --- | --- |
@@ -206,15 +209,21 @@ presentation (no ⚠ ⚡ ◼ ⬛ ✅).
 | Rail (`k.rail`) | `▎` |
 | Status (`STATUS`, `k.status`) | running `◐` blue, pending `◌` blue, done `✓` green, failed `✕` red, warn `▲` amber, merged `◆` purple, stopped `■` dim, idle `○` dim |
 | Tree (`TREE`, `k.tree`) | `├─` `└─` `│ ` |
-| Icons (`k.icon`, `TERM_GLYPH`) | issue `◉`, comment `≡`, PR open `⇡`, merged `◆`, closed `✕`, draft `◌`, file `□`, folder `▸`/`▾`, commit `○`, push/up `↑`, alert `▲`, trash `⌫`, search `⌕`, sync `↻`, home `⌂`, eye `◎`, fold `↕`, events `↯`; a GLYPH is itself; anything else `•` (never the icon's name) |
+| Icons (`k.icon`, `TERM_GLYPH`) | issue `◉`, comment `≡`, PR open `⇡`, merged `◆`, closed `✕`, draft `◌`, file `□`, folder `▸`/`▾`, commit `○`, push/up `↑`, alert `▲`, trash `⌫`, search `⌕`, sync `↻`, home `⌂`, eye `◎`, fold `⇕`, events `↯`, tools `⌘`; a GLYPH is itself; anything else `•` (never the icon's name) |
 
 ### Each primitive on the terminal
 
 - `section`: `▾ ◔ Title ……… figures`. Dim arrow (a Button when `onToggle`, key
   `toggle-<id>`), dim icon, bold title; the title keeps up to 12 cells, then it
-  and the figures truncate together. No band, rule or box.
-- `summary`: figures plain (or in their status colour), units dim, 2 apart; the
-  last truncates.
+  and the figures truncate together. No band, rule or box. With `keepRight: true`
+  the right side (figures, buttons) keeps its natural width and only the title is
+  cut, with an ellipsis: use it when the right side is controls that must all
+  show (filetree's header buttons, a launcher row), and size that side to fit the
+  row yourself (the launcher drops its least telling parts first). Don't cut a
+  title by hand. The desktop draws the same with or without it.
+- `summary`: figures plain (or in their status colour), units dim, 2 apart, as
+  one line of text: too narrow, it's cut wherever that falls and ends in `…`
+  (`4 fa…`), never a figure clipped without one.
 - `reading`: as the grid above. Under 6 cells of gauge the label narrows to 6,
   then the gauge is left out and the figures stay.
 - `gauge`, `bar`, `scale`, `axis`, `columns`: drawn to the exact width as above.
@@ -224,12 +233,28 @@ presentation (no ⚠ ⚡ ◼ ⬛ ✅).
 - `item` (new): the list row every list uses: `[tree][lead] text  note ……… right`.
   `lead` is a status kind, an icon key or an element; `right` holds dim figures
   and elements (a status, `actions`). Use it for issues, tasks, PRs, files.
+  The `note` is always plain dim, whatever `textColor` or `bold` the text has.
+  When the row runs out of room the text gives way first, down to its first 6
+  cells (with `…`); then the right cluster is cut from its end, the last
+  element first (a string with `…`), so nothing runs past the edge.
 - `status` (new): a status's glyph and word in its colour.
-- `note` (new): `empty` and `loading` lines dim; `error` a red `✕` and the message plain.
+- `note` (new): `empty` and `loading` lines dim; `error` a red `✕` and the message
+  plain. One line, cut at the edge; `k.note(key, text, kind, { lines: 2 })` for a
+  long message (why something failed): it breaks between words onto a second
+  line, which is cut with `…`. It fits `k.width`; pass `width` when it sits deeper.
+  The app surfaces wrap it.
 - `action`/`actions` (new): plain Buttons; `quiet` ones dim at rest; `hotkey`
   draws `1: Proceed`. Actions are a cluster on the right edge, 2 apart.
+  `autoFocus: true` puts the focus on that action when the site takes the
+  keyboard, so Enter presses it: give it to the safe choice (blast-radius's
+  Cancel). `tone: 'danger'` draws an action that destroys something with its
+  label in the failed colour (`error`; red on the desktop), as blast-radius's
+  Proceed.
 - `pill`: the label's name in its colour; `tile`: a blank row above, no fill.
 - `perf`, `share`: a dim glyph and the figure; slow figures amber or red.
+
+Storybook's `Kit/Terminal Fitting` and `Kit/Terminal States` sheets show each of
+these at 30, 40, 60 and 100 columns.
 
 ### Do and don't
 

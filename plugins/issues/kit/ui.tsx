@@ -4,7 +4,7 @@ import { pct, short } from './format'
 import { ICON_PX, glyphOf, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, GRAY, MUTED, STATUS, TRACK, termInk, treePrefix } from './tokens'
+import { C, GLYPH, GRAY, MUTED, STATUS, TRACK, termInk, treePrefix } from './tokens'
 import type { StatusKind } from './tokens'
 
 /**
@@ -81,6 +81,8 @@ export const CELLS = { pair: 1, item: 1, group: 2, block: 1 } as const
 const MIN_GAUGE = 6
 /** The narrowest a terminal reading's label gets before its gauge is dropped. */
 const MIN_LABEL = 6
+/** The cells of its text a terminal list item keeps (with its ellipsis) before its right cluster is cut. */
+const ITEM_KEEPS = 6
 
 /**
  * The terminal's meter glyphs. A gauge is a heavy line on a light one, to half a
@@ -133,6 +135,26 @@ const mix = (a: string, b: string, share: number) => {
   const y = rgb(b)
   if (!x || !y) return a
   return `#${x.map((v, i) => Math.round(v * share + y[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
+}
+
+/**
+ * `text` split for two terminal lines `width` cells wide: the first holds as many
+ * whole words as fit (a word longer than the line is cut to it), the second the
+ * rest, which the caller truncates. The second is empty when it all fits on one.
+ */
+const breakLine = (text: string, width: number): [string, string] => {
+  const chars = [...text]
+  if (chars.length <= width) return [text, '']
+  // The last space at or before the line's end; none, a hard cut.
+  let cut = -1
+  for (let i = Math.min(width, chars.length - 1); i > 0; i--) {
+    if (chars[i] === ' ') {
+      cut = i
+      break
+    }
+  }
+  if (cut <= 0) return [chars.slice(0, width).join(''), chars.slice(width).join('').trimStart()]
+  return [chars.slice(0, cut).join('').trimEnd(), chars.slice(cut + 1).join('').trimStart()]
 }
 
 /** A selected tile's fill: the tile's step, tinted towards the blue that marks what's live. Solid, as TILE. */
@@ -419,6 +441,23 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    */
   const summary = (items: ([string, string?, string?] | null | false)[]) => {
     const shown = items.filter((x): x is [string, string?, string?] => Boolean(x))
+    if (terminal) {
+      // One line of text, the figures CELLS.group apart: too wide for its room, it's
+      // cut wherever that falls and ends in an ellipsis, never mid-figure without one.
+      return (
+        <Box flexDirection="row" minWidth={0} flexShrink={1}>
+          <Text wrap="truncate">
+            {shown.map(([figure, unit, color], i) => (
+              <Text key={`${figure}-${unit ?? ''}`}>
+                {i ? ' '.repeat(CELLS.group) : null}
+                <Text {...ink(color)}>{figure}</Text>
+                {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
+              </Text>
+            ))}
+          </Text>
+        </Box>
+      )
+    }
     // Too wide for the band, the last item ends in an ellipsis and what's past it is cut.
     return (
       <Box flexDirection="row" gap={space.group} minWidth={0} flexShrink={1} overflow="hidden">
@@ -528,6 +567,14 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     right?: RenderElement | null
     collapsed?: boolean
     onToggle?: () => void
+    /**
+     * On the terminal, the right side (figures, buttons) keeps its natural width
+     * and only the title is cut, with an ellipsis: for a header whose right side
+     * is controls that must all show. Size the right side to fit the row yourself.
+     * Without it, the title keeps up to 12 cells and then it and the figures give
+     * way together. The desktop draws the same either way.
+     */
+    keepRight?: boolean
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
     if (terminal) {
@@ -546,8 +593,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       return (
         <Box key={`section-${s.id}`} flexDirection="column" marginBottom={s.collapsed ? 0 : 1}>
           <Box flexDirection="row" justifyContent="space-between" gap={CELLS.group}>
-            {/* The title keeps up to 12 cells of itself; past that, it and the figures give way together. */}
-            <Box key="title" flexDirection="row" flexShrink={1} minWidth={Math.min(lead + [...s.title].length, lead + 12)}>
+            {/* The title keeps up to 12 cells of itself; past that, it and the figures give way
+                together. With `keepRight` only the title gives way: the arrow and icon stay. */}
+            <Box key="title" flexDirection="row" flexShrink={1} minWidth={s.keepRight ? lead : Math.min(lead + [...s.title].length, lead + 12)}>
               <Box width={GUTTER} flexShrink={0}>
                 {toggle}
               </Box>
@@ -563,7 +611,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
               </Box>
             </Box>
             {s.right ? (
-              <Box key="right" flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
+              <Box key="right" flexDirection="row" minWidth={0} flexShrink={s.keepRight ? 0 : 1} overflow="hidden">
                 {s.right}
               </Box>
             ) : null}
@@ -835,7 +883,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       r.busyMs > 5_000 ? C.bad : r.busyMs > 1_000 || (r.name === 'render' && r.avgMs > 16) ? C.warn : undefined
     // Muted glyphs; only a slow job's figure takes colour (amber, red).
     const items = [
-      share('perf-since', '⏱', short(snap.sinceMs), ''),
+      // ⏱ has an emoji presentation, so the terminal draws the clock face it has in GLYPH.
+      share('perf-since', terminal ? GLYPH.time : '⏱', short(snap.sinceMs), ''),
       ...rows.map(r => share(`perf-${r.name}`, PERF_GLYPH[r.name] ?? '•', r.avgMs > 0 ? ms(r.avgMs) : `${r.perMin}/m`, '', tone(r))),
     ]
     const band = (row: RenderElement[]) =>
@@ -905,8 +954,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * - `tree`: a connector from `treePrefix` (dim), for nested rows;
    * - `lead`: a status kind, an icon key (drawn in `leadColor`, muted by default)
    *   or an element, in a two-cell column so the text starts on the grid;
-   * - `text` truncates first, `note` (dim) runs on after it;
+   * - `text` truncates first, `note` (dim) runs on after it, plain dim whatever
+   *   `textColor` or `bold` the text has;
    * - `right`: figures (strings, dim) and elements, one cluster on the right edge.
+   *   On the terminal, once the text is down to its first 6 cells, the cluster's
+   *   last element is cut (a string with an ellipsis), then the ones before it,
+   *   rather than running past the edge.
    */
   const item = (
     key: string,
@@ -932,6 +985,60 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             : icon(r.lead, r.leadColor ?? MUTED)
           : r.lead
     const right = (r.right ?? []).filter((x): x is RenderElement | string => Boolean(x))
+    if (terminal) {
+      // The text gives way first (it shrinks a thousand times as fast) down to its first
+      // ITEM_KEEPS cells; then the right cluster is cut from its end, so nothing runs
+      // past the edge. The note is its own run, plain dim whatever the text's colour or weight.
+      const last = right.length - 1
+      const look = r.dim ? { dimColor: true } : ink(r.textColor)
+      const keeps = (r.tree ? [...r.tree].length : 0) + (lead ? 2 : 0) + Math.min([...r.text].length, ITEM_KEEPS)
+      return (
+        <Box key={key} flexDirection="row" justifyContent="space-between" gap={CELLS.item} paddingLeft={r.indent ?? 0}>
+          <Box flexDirection="row" flexShrink={1000} minWidth={right.length ? keeps : 0}>
+            {r.tree ? (
+              <Box flexShrink={0}>
+                <Text dimColor>{r.tree}</Text>
+              </Box>
+            ) : null}
+            {lead ? (
+              <Box width={2} flexShrink={0} flexDirection="row">
+                {lead}
+              </Box>
+            ) : null}
+            <Box flexShrink={1} minWidth={0}>
+              {r.note ? (
+                <Text wrap="truncate">
+                  <Text bold={r.bold} {...look}>
+                    {r.text}
+                  </Text>
+                  <Text dimColor>{`  ${r.note}`}</Text>
+                </Text>
+              ) : (
+                <Text wrap="truncate" bold={r.bold} {...look}>
+                  {r.text}
+                </Text>
+              )}
+            </Box>
+          </Box>
+          {right.length ? (
+            <Box flexDirection="row" gap={CELLS.item} flexShrink={1} minWidth={0} overflow="hidden">
+              {/* The last element gives way first (a thousand times as fast), then the rest. */}
+              {right.map((x, i) => (
+                <Box key={`r${i}`} flexShrink={i === last ? 1000 : 1} minWidth={0} overflow="hidden">
+                  {typeof x === 'string' ? (
+                    <Text dimColor wrap="truncate">
+                      {x}
+                    </Text>
+                  ) : (
+                    x
+                  )}
+                </Box>
+              ))}
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     return (
       <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0}>
         <Box flexDirection="row" flexShrink={1} minWidth={0} alignItems="center">
@@ -967,33 +1074,74 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   /**
    * A line that stands in for content: `empty` (nothing to list) and `loading`
    * (reading…) dim, `error` a red ✕ (the alert icon on the app surfaces) and the
-   * message plain. Always one line, cut at the edge.
+   * message plain. One line cut at the edge, or with `lines: 2` up to two: on the
+   * terminal it breaks between words to fit `width` cells (a section body's by
+   * default; pass it when the note sits deeper), and the second line is cut with
+   * an ellipsis; on the app surfaces, whose text isn't in cells, it wraps.
    */
-  const note = (key: string, text: string, kind: 'empty' | 'loading' | 'error' = 'empty') => {
+  const note = (key: string, text: string, kind: 'empty' | 'loading' | 'error' = 'empty', opts: { lines?: 1 | 2; width?: number } = {}) => {
+    const two = opts.lines === 2
+    const props = kind === 'error' ? {} : tone('mid')
+    const message = (w: number) => {
+      if (!two) return <Text {...props} wrap="truncate">{text}</Text>
+      if (!terminal) {
+        return (
+          <Text {...props} wrap="wrap">
+            {text}
+          </Text>
+        )
+      }
+      const [first, rest] = breakLine(text, w)
+      return (
+        <Box flexDirection="column" minWidth={0}>
+          <Text {...props} wrap="truncate">
+            {first}
+          </Text>
+          {rest ? (
+            <Text {...props} wrap="truncate">
+              {rest}
+            </Text>
+          ) : null}
+        </Box>
+      )
+    }
+    const w = Math.max(1, Math.floor(opts.width ?? body))
     if (kind !== 'error') {
       return (
         <Box key={key} flexDirection="row" minWidth={0}>
-          <Text {...tone('mid')} wrap="truncate">
-            {text}
-          </Text>
+          {message(w)}
         </Box>
       )
     }
     return (
-      <Box key={key} flexDirection="row" gap={space.pair} minWidth={0} alignItems="center">
+      <Box key={key} flexDirection="row" gap={space.pair} minWidth={0} alignItems={two ? 'flex-start' : 'center'}>
         <Box flexShrink={0}>{terminal ? <Text {...ink(C.bad)}>{STATUS.failed.glyph}</Text> : icon('alert', C.bad)}</Box>
         <Box flexShrink={1} minWidth={0}>
-          <Text wrap="truncate">{text}</Text>
+          {message(w - 1 - CELLS.pair)}
         </Box>
       </Box>
     )
   }
 
-  /** One action: a plain button; `quiet` (secondary) dim at rest; `hotkey` a digit or letter that presses it. */
-  type Action = { key: string; label: string; onPress: () => void; quiet?: boolean; hotkey?: string }
+  /**
+   * One action: a plain button; `quiet` (secondary) dim at rest; `hotkey` a digit
+   * or letter that presses it; `autoFocus` holds the focus when the site takes the
+   * keyboard, so Enter presses it (give it to the safe choice); `tone: 'danger'`
+   * for one that destroys something, its label in the failed colour.
+   */
+  type Action = { key: string; label: string; onPress: () => void; quiet?: boolean; hotkey?: string; autoFocus?: boolean; tone?: 'danger' }
   const action = (a: Action): RenderElement => {
-    if (!Button) return <Text key={a.key} {...(a.quiet ? tone('mid') : {})}>{a.label}</Text>
-    const hot = a.hotkey ? { hotkey: a.hotkey } : {}
+    const danger = a.tone === 'danger'
+    if (!Button) return <Text key={a.key} {...(danger ? ink(C.bad) : a.quiet ? tone('mid') : {})}>{a.label}</Text>
+    const hot = { ...(a.hotkey ? { hotkey: a.hotkey } : {}), ...(a.autoFocus ? { autoFocus: true } : {}) }
+    // A danger action draws a red Text in its label's place, on every surface; the label stays its name.
+    if (danger) {
+      return (
+        <Button key={a.key} plain label={a.label} {...(terminal && a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress}>
+          <Text {...ink(C.bad)}>{a.label}</Text>
+        </Button>
+      )
+    }
     if (terminal) return <Button key={a.key} plain label={a.label} {...(a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress} />
     return a.quiet ? (
       <Button key={a.key} plain {...hot} onPress={a.onPress}>
