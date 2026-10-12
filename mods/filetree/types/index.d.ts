@@ -12,6 +12,8 @@ export type FileNode = {
 export type Branch = {
   head: string
   upstream: string
+  /** The upstream remote's host (`github.com`), for its icon; empty when untracked or unknown. */
+  host: string
   ahead: number
   behind: number
 }

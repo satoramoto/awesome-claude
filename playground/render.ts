@@ -363,6 +363,7 @@ const STYLES = `
   .r-field.terminal select { appearance: none; border: none; background: transparent; padding: 0; outline: none; color: var(--r-accent); }
   .r-field .r-submit { opacity: 0.6; display: none; }
   .r-field:focus-within .r-submit { display: inline; }
+  .r-field .button.r-go { align-self: center; }
 
   .r-code { margin: 0; font: 12px/1.45 'SF Mono', Menlo, monospace; background: var(--r-code); border-radius: 6px; padding: 4px 0; overflow: hidden; }
   .terminal .r-code { font: inherit; padding: 0; border-radius: 0; }
@@ -775,11 +776,16 @@ const button = (node: Node, ctx: Ctx, children: globalThis.Node[]) => {
   } else if (p.plain) {
     // Chromeless on purpose: the docs say a desktop draws its native button either way,
     // but the app as we see it draws a plain Button as its label alone.
+    // The desktop is "a surface that draws no children" (the engine's Button docs): it
+    // draws the label as plain text, or the children's text where there's no label,
+    // and drops the children's styling (colour, bold). Drawing the children here hid
+    // that: filetree's icon buttons showed their icons here and their labels, piled
+    // up, in the app.
     b.className = 'button plain'
-    body(b)
+    b.append(label)
   } else {
     b.className = `button native${p.variant === 'primary' ? ' primary' : ''}`
-    body(b)
+    b.append(label)
   }
   if (p.dimColor) {
     b.classList.add('dim')
@@ -827,7 +833,19 @@ const input = (p: Record<string, any>, ctx: Ctx) => {
     if (field.isConnected && focused?.el === field) focused = null
   }
   wrap.append(field)
-  wrap.append(Object.assign(document.createElement('span'), { className: 'r-submit', textContent: `↵ ${p.submitLabel ?? 'submit'}` }))
+  if (surface === 'terminal') {
+    wrap.append(Object.assign(document.createElement('span'), { className: 'r-submit', textContent: `↵ ${p.submitLabel ?? 'submit'}` }))
+  } else {
+    // The desktop draws the submit as its own button beside the field, always: the
+    // element reaches it as props alone (no sign of whether an onSubmit exists), so
+    // every Input has one, labelled `submitLabel` or "submit".
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'button native r-go', textContent: p.submitLabel ?? 'submit' })
+    go.onclick = ev => {
+      ev.preventDefault()
+      ctx.press(() => p.onSubmit?.(field.value, arg('submit')))
+    }
+    wrap.append(go)
+  }
   // A redraw while typing keeps the focus and the caret.
   if (focused?.id === id) {
     const { start, end, el: was } = focused

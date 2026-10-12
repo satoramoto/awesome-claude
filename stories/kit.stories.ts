@@ -3,8 +3,8 @@ import type { Meta, StoryObj } from '@storybook/html'
 import { tokens } from '@kit/format'
 import { TERM_GLYPH } from '@kit/icons'
 import type { PerfRow } from '@kit/perf'
-import { C, GLYPH, INK, RAMP, STATUS, TRACK, levelColor } from '@kit/tokens'
-import type { StatusKind } from '@kit/tokens'
+import { C, FILE_TYPE, GLYPH, INK, RAMP, STATUS, TRACK, levelColor } from '@kit/tokens'
+import type { FileType, StatusKind } from '@kit/tokens'
 import { kit } from '@kit/ui'
 import type { KitOptions } from '@kit/ui'
 
@@ -805,6 +805,56 @@ export const TerminalLook: Story = {
     onChange(() => void paint())
     void paint()
     stepAside(host)
+    return host
+  },
+}
+
+// ---- File types (FILE_TYPE), on the light and the dark desktop ----
+
+/** Each file type's icon in the trees that use it: a folder for the folder kinds, a page of code or a page otherwise. */
+const TYPE_ICON = (type: FileType) => (type === 'folder' || type === 'excluded' ? 'folder' : type === 'typescript' || type === 'javascript' ? 'file-code' : 'file')
+
+/**
+ * The file-type icon colours (`FILE_TYPE` in kit/tokens.ts, IntelliJ's New UI
+ * icon palette): each type's icon drawn through `k.icon` with its light and dark
+ * pair on a light pane and a dark one, so the SVG picks its value by the pane's
+ * colour scheme, then both hexes. The terminal draws these icons dim.
+ */
+export const FileTypes: Story = {
+  globals: { frame: 'pane', surface: 'desktop', columns: '110' },
+  render: () => {
+    const host = document.createElement('div')
+    host.style.cssText = 'display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start;font:12px/1.4 -apple-system,system-ui,sans-serif;color:#8e8e93'
+    for (const theme of ['light', 'dark'] as const) {
+      const k = kitAt('desktop', 40)
+      const cell = document.createElement('div')
+      cell.append(Object.assign(document.createElement('div'), { textContent: `desktop · ${theme}`, style: 'margin-bottom:4px' }))
+      const pane = document.createElement('div')
+      pane.className = `pane ${theme}`
+      const body = document.createElement('div')
+      body.className = 'body'
+      body.style.width = `${40 * CELL.col}px`
+      const types = Object.entries(FILE_TYPE) as [FileType, (typeof FILE_TYPE)[FileType]][]
+      const tree = h(
+        'Box',
+        { flexDirection: 'column', paddingLeft: 1, paddingRight: 1 },
+        ...types.map(([type, duo]) =>
+          h(
+            'Box',
+            { key: type, flexDirection: 'row', alignItems: 'center', gap: 1 },
+            h('Box', { width: 2, flexShrink: 0 }, k.icon(TYPE_ICON(type), duo) as unknown as Node),
+            h('Box', { width: 12, flexShrink: 0 }, h('Text', {}, type)),
+            h('Text', { color: duo[theme] }, duo[theme]),
+            h('Text', { dimColor: true }, theme === 'light' ? `dark ${duo.dark}` : `light ${duo.light}`),
+          ),
+        ),
+      )
+      const drawn = draw(tree as Node, 'desktop', fn => fn(), { client: { site: `file-types-${theme}` } })
+      if (drawn) body.append(drawn)
+      pane.append(body)
+      cell.append(pane)
+      host.append(cell)
+    }
     return host
   },
 }

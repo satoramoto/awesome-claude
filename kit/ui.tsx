@@ -5,7 +5,7 @@ import { ICON_PX, glyphOf, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
 import { C, FILL, GLYPH, GRAY, INK, MUTED, STATUS, TRACK, isKitColor, termInk, tint, treePrefix } from './tokens'
-import type { StatusKind } from './tokens'
+import type { Duo, StatusKind } from './tokens'
 
 /**
  * The shared components. Each draws for the surface it is given: on the app
@@ -393,11 +393,19 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
    * An icon at the kit's one size (ICON_PX square): the SVG drawing where the
    * surface has SVG and the kit has one for `key`, else its glyph as text
    * (`glyphOf`: the terminal glyph for a named icon, never the name itself).
+   *
+   * `color` may be a file type's `Duo` (`FILE_TYPE`): light and dark values on the
+   * app surfaces, dim on the terminal, which draws file types monochrome.
+   * `alt` names the drawing for a reader that can't see it (the desktop's
+   * accessible name); `tooltip` also shows it under the pointer, drawing the SVG
+   * interactive (a sandboxed frame), so keep it to an icon that says something
+   * on its own (a branch's upstream), never one under a Button.
    */
-  const icon = (key: string, color: string, px = ICON_PX): RenderElement => {
-    const source = Svg && !terminal ? iconSvg(key, color, px) : null
-    if (!Svg || !source) return <Text {...ink(color)}>{glyphOf(key)}</Text>
-    return <Svg source={source} alt="icon" width={px} height={px} />
+  const icon = (key: string, color: string | Duo, px = ICON_PX, opts: { alt?: string; tooltip?: string } = {}): RenderElement => {
+    const source = Svg && !terminal ? iconSvg(key, color, px, opts.tooltip) : null
+    if (!Svg || !source) return <Text {...ink(typeof color === 'string' ? color : MUTED)}>{glyphOf(key)}</Text>
+    const alt = opts.alt ?? opts.tooltip ?? 'icon'
+    return opts.tooltip ? <Svg source={source} alt={alt} width={px} height={px} isInteractive /> : <Svg source={source} alt={alt} width={px} height={px} />
   }
 
   /**
@@ -1506,14 +1514,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         </Button>
       )
     }
-    if (terminal) return <Button key={a.key} plain label={a.label} {...(a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress} />
-    return a.quiet ? (
-      <Button key={a.key} plain {...hot} onPress={a.onPress}>
-        <Text color={GRAY.mid}>{a.label}</Text>
-      </Button>
-    ) : (
-      <Button key={a.key} plain label={a.label} {...hot} onPress={a.onPress} />
-    )
+    // A quiet one dim at rest: `dimColor`, as the desktop draws a Button's label and
+    // never its children, so a grey Text inside one never showed in the app.
+    return <Button key={a.key} plain label={a.label} {...(a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress} />
   }
 
   /** A row's actions, one cluster: main ones first, quiet ones after, `space.group` apart on the terminal. */

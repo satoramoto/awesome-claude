@@ -2,11 +2,12 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { ago } from '@kit/format'
-import { C, GLYPH, GRAY, TRACK } from '@kit/tokens'
+import { C, FILE_TYPE, GLYPH, GRAY, TRACK } from '@kit/tokens'
+import type { FileType } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
 
 import type { Activity, FileTree } from '../types'
-import { dirname, formatSize, type Row, underAny } from './tree'
+import { dirname, formatSize, HOST_ICON, hostKind, type Row, underAny } from './tree'
 
 /*
  * The desktop's file tree, as the other mods' desktop panes draw: a header line
@@ -59,6 +60,9 @@ export type DesktopActions = {
 /** The branch name's least width in cells, however many figures share its line. */
 const HEAD_MIN = 6
 
+/** An icon button's label: two Braille blanks, about the icon's two cells, drawn as nothing. */
+export const BLANK = '⠀⠀'
+
 /** The most rows drawn: a tree past it would outgrow what the desktop takes in one drawing. */
 export const MAX_ROWS = 1500
 
@@ -71,6 +75,41 @@ export const fileIcon = (name: string, kind: string, open: boolean) => {
   if (kind === 'dir') return open ? 'folder-open' : 'folder'
   const ext = name.includes('.') ? (name.split('.').pop() ?? '').toLowerCase() : ''
   return CODE.has(ext) ? 'file-code' : 'file'
+}
+
+/** Extensions by the file type IntelliJ's New UI draws them as (its `fileTypes` icons). */
+const TYPE_BY_EXT: Record<string, FileType> = {}
+for (const [type, exts] of Object.entries({
+  typescript: 'ts tsx mts cts',
+  javascript: 'js jsx mjs cjs',
+  json: 'json jsonc json5',
+  markdown: 'md mdx markdown',
+  yaml: 'yml yaml',
+  config: 'toml ini cfg conf properties env editorconfig',
+  style: 'css scss sass less',
+  html: 'html htm xhtml',
+  xml: 'xml xsd xsl plist',
+  data: 'csv tsv',
+  sql: 'sql',
+  image: 'png jpg jpeg gif webp ico bmp svg avif',
+  archive: 'zip tar gz tgz bz2 xz 7z rar jar',
+} satisfies Partial<Record<FileType, string>>))
+  for (const ext of exts.split(' ')) TYPE_BY_EXT[ext] = type as FileType
+
+/** Names IntelliJ draws as config whatever their extension. */
+const CONFIG_NAMES = new Set(['dockerfile', '.editorconfig', '.env', '.npmrc', '.nvmrc'])
+
+/**
+ * A row's file type, for its icon's colour (`FILE_TYPE`): a folder git ignores is
+ * excluded (node_modules, build output), any other folder grey, a file by its
+ * extension; lockfiles (`bun.lock`, `yarn.lock`) and anything unknown are text.
+ */
+export const fileType = (name: string, kind: string, excluded = false): FileType => {
+  if (kind === 'dir') return excluded ? 'excluded' : 'folder'
+  const lower = name.toLowerCase()
+  if (CONFIG_NAMES.has(lower) || lower.startsWith('.env.')) return 'config'
+  const ext = lower.includes('.') ? (lower.split('.').pop() ?? '') : ''
+  return TYPE_BY_EXT[ext] ?? 'text'
 }
 
 /**
@@ -131,18 +170,18 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
   )
 
   /**
-   * An action drawn as its icon. A Button holds only text, so the icon sits in
-   * a box and a blank Button the same size lies over it: a press anywhere on
-   * the icon is a press of the Button, which the label names.
+   * An action drawn as its icon. The desktop draws a Button as its label text and
+   * no children, so the icon (an SVG, named by `label` as its alt) sits in a box
+   * and a Button with a blank label the icon's size lies over it: a press anywhere
+   * on the icon is a press of the Button, its key the action's address. The label
+   * is two Braille blanks (U+2800): they draw nothing, as spaces do, but no
+   * renderer trims or collapses them.
    */
   const iconButton = (key: string, label: string, icon: string, color: string, onPress: () => void) => (
     <Box key={`ib-${key}`} position="relative" width={2} height={1} flexShrink={0} flexDirection="row" alignItems="center" justifyContent="center">
-      {k.icon(icon, color)}
+      {k.icon(icon, color, undefined, { alt: label })}
       <Box position="absolute" top={0} left={0}>
-        <Button key={key} plain label={label} onPress={onPress}>
-          {/* An em space and a no-break space, about the icon's two cells: plain spaces collapse to a sliver. */}
-          <Text>{'  '}</Text>
-        </Button>
+        <Button key={key} plain label={BLANK} onPress={onPress} />
       </Box>
     </Box>
   )
@@ -207,7 +246,7 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
   // The branch: its name, ahead and behind, then the lines and files changed.
   const branch = () => {
     if (!t.top) {
-      return line('branch', [lead('icon', k.icon(GLYPH.branch, GRAY.dark)), <Text key="none" color={GRAY.mid} wrap="truncate">no git repo · git status starts after git init</Text>], [])
+      return line('branch', [lead('icon', k.icon(GLYPH.branch, GRAY.dark)), <Text key="none" color={GRAY.mid} wrap="truncate">no git repo · git status starts after git init</Text>], [], { marginBottom: SPACE.block })
     }
     if (!t.branch) return null
     const b = t.branch
@@ -220,31 +259,33 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
       'branch',
       [
         lead('icon', k.icon(GLYPH.branch, tone ?? GRAY.mid)),
-        // Never squeezed out: the figures on the right leave it a few letters.
-        <Box key="head" flexShrink={1} minWidth={HEAD_MIN}>
+        // Never squeezed out: the figures on the right leave it a few letters (fewer when
+        // the name is shorter, so a short name doesn't leave a gap after it).
+        <Box key="head" flexShrink={1} minWidth={Math.min(HEAD_MIN, [...b.head].length)}>
           <Text color={tone} wrap="truncate">
             {b.head}
           </Text>
         </Box>,
         b.ahead > 0 ? <Text key="ahead" color={GRAY.mid}>{` ↑${b.ahead}`}</Text> : null,
         b.behind > 0 ? <Text key="behind" color={GRAY.mid}>{` ↓${b.behind}`}</Text> : null,
-        // The upstream, dim, and first to give way when the line is short.
+        // The upstream as its host's icon (GitHub, GitLab, Forgejo, else a remote), its
+        // name the icon's tooltip; none when the branch tracks nothing.
         b.upstream ? (
-          <Box key="up" flexShrink={1000} minWidth={0} marginLeft={SPACE.pair}>
-            <Text color={GRAY.dark} wrap="truncate">
-              {b.upstream}
-            </Text>
+          <Box key="upstream" flexShrink={0} marginLeft={SPACE.pair} flexDirection="row" alignItems="center">
+            {k.icon(HOST_ICON[hostKind(b.host)], GRAY.dark, undefined, { tooltip: b.upstream })}
           </Box>
         ) : null,
       ],
       changed.length ? changed : [<Text key="clean" color={GRAY.mid}>clean</Text>],
+      { marginBottom: SPACE.block },
     )
   }
 
-  // The search field, as wide as the pane.
+  // The search field, the pane's first row, as wide as the pane. Its submit ("jump":
+  // Enter opens the first match and clears the field) is drawn by the desktop as a
+  // button beside it: every Input has one there, labelled "submit" if not named.
   const search = (
-    <Box key="search" flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%" marginTop={SPACE.block} marginBottom={SPACE.block}>
-      {lead('icon', k.icon('search', GRAY.dark))}
+    <Box key="search" flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%" marginBottom={SPACE.block}>
       {Input ? (
         // A column, so the field stretches across the box.
         <Box key="field" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
@@ -265,8 +306,9 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
     const isDim = !isBright && dimmed.has(n.id)
     const tone = isBright || isDim ? toneColor(t.flashTones[n.id] ?? 'orange') : undefined
     const muted = isIgnored || n.hidden
-    const nameColor = isBright ? tone : isIgnored ? GRAY.dark : (statusColor(status) ?? (n.hidden ? GRAY.mid : undefined))
-    const iconColor = tone ?? (muted ? GRAY.dark : GRAY.mid)
+    // The icon in its file type's colour (IntelliJ's), a folder git ignores in the excluded tone;
+    // Claude's activity lights it in the activity's colour instead.
+    const iconColor = tone ?? FILE_TYPE[fileType(n.name, n.kind, isIgnored)]
     const loc = t.diff[n.id]
     const meta = t.showSize
       ? n.kind === 'dir'
@@ -297,11 +339,10 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
         </Box>
         {lead('icon', k.icon(fileIcon(n.name, n.kind, r.open), iconColor))}
         <Box flexGrow={1} flexShrink={1} minWidth={0} overflow="hidden">
-          <Button key={n.id} plain label={n.name} onPress={() => act.press(n.id)}>
-            <Text color={nameColor} bold={n.id === t.selected || isBright} strikethrough={status === 'D' && n.kind !== 'dir'} wrap="truncate">
-              {label}
-            </Text>
-          </Button>
+          {/* The desktop draws a Button as its label, plain, never its children, so a name can't
+              take its git colour or a weight here: it's dim when ignored or hidden, the git letter
+              on the right says its state, the cursor's tint and the footer say what's selected. */}
+          <Button key={n.id} plain label={label} {...(muted ? { dimColor: true } : {})} onPress={() => act.press(n.id)} />
         </Box>
         <Box flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={0} marginLeft={SPACE.pair}>
           {meta ? <Text color={meta === '…' ? GRAY.dark : GRAY.mid}>{meta}</Text> : null}
@@ -354,9 +395,7 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
                   </Text>
                 </Box>,
                 <Box key="open" flexShrink={0} marginLeft={SPACE.pair}>
-                  <Button key="open" plain label="Open" onPress={() => act.open(selected)}>
-                    <Text color={GRAY.mid}>open</Text>
-                  </Button>
+                  <Button key="open" plain dimColor label="open" onPress={() => act.open(selected)} />
                 </Box>,
               ]
             : [],
@@ -368,9 +407,9 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
   return (
     <Box flexDirection="column" minHeight={Math.max(1, v.bodyRows)} paddingTop={SPACE.block}>
       <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right}>
+        {search}
         {header}
         {branch()}
-        {search}
       </Box>
       {tree}
       <Box flexGrow={1} />

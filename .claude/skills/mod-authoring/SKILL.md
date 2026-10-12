@@ -218,6 +218,14 @@ Text props; the kit's components apply it themselves.
 | cyan, orchid | other parts within one chart | cyan the default foreground, orchid dim (`TERM_TINT`) |
 | any other hex, `rgb()`, `hsl()` | (not a kit colour) | the default foreground |
 | a theme key's name (`success`, `claude`) | as the theme says | itself |
+| `FILE_TYPE.*` (a `Duo`: light and dark) | this file's type (IntelliJ's New UI icon palette), on a file tree's icons only | none: `k.icon` draws file icons dim, as a type is no state a theme key means |
+
+`FILE_TYPE` is the one group that isn't a status: a file tree's icons take it
+(`k.icon(key, FILE_TYPE.typescript)`), never text, a header, a control or the
+upstream's host icon, which stay grey. Each entry is a light and a dark value
+from intellij-community's expui icons (Apache 2.0); the SVG picks one by the
+page's colour scheme, the dark where it can't tell. `Kit/File Types` in
+Storybook shows them on both.
 
 A bar's parts are solid theme colours, one glyph (`━`): neighbours differ by
 tone (default foreground, dim, a theme key), as `TERM_TINT` alternates them.

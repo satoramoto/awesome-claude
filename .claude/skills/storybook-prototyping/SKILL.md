@@ -66,6 +66,11 @@ It lays out like the desktop app, so problems show here first:
   that overflows the frame means a Box between the text and the row is missing it.
 - Columns fit the canvas: if the chosen width doesn't fit the window, the pane
   narrows and the story is told the columns that fit, as in the app.
+- A desktop Button is its label, plain text (dim with `dimColor`), never its
+  children: the app draws no children, so a coloured or bold Text, or an icon,
+  inside a Button doesn't show there. Draw an icon beside or under the Button.
+- A desktop Input has its submit as a button beside the field, always, labelled
+  `submitLabel` or "submit"; the terminal shows `↵ label` only while focused.
 
 It doesn't emulate the engine's validator (a prop the desktop refuses still
 draws here), real data, timers or `gh`. Run the build and validate too.
