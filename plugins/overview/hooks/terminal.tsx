@@ -1,6 +1,6 @@
 import type { Elements, RenderElement } from 'claude-code'
 
-import { basename, money, short, tokens } from '../kit/format'
+import { ago, basename, money, short, tokens } from '../kit/format'
 import { C, GLYPH, MUTED, TRACK, levelColor } from '../kit/tokens'
 import type { StatusKind } from '../kit/tokens'
 import { kit } from '../kit/ui'
@@ -70,9 +70,19 @@ const fileColor = (f: GitFile) =>
 /** The folder a path sits in, or '' at the top. */
 const dirOf = (path: string) => path.split(/[\\/]/).slice(0, -1).join('/')
 
+/** How old last-good figures are, for a header's stale state: 40s, 5m, 3h; nothing when unknown. */
+const since = (at: number | undefined, now: number) => {
+  if (!at) return undefined
+  const ms = Math.max(0, now - at)
+  return ms < 60_000 ? `${Math.floor(ms / 1_000)}s` : ago(ms)
+}
+
+/** Tokens a turn added: its input, output and cache writes (cache reads restate the context, which Context shows). */
+const turnTokens = (p: { input: number; output: number; cacheWrite: number }) => p.input + p.output + p.cacheWrite
+
 export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelpers): RenderElement => {
   const { Box } = els
-  const k = kit(els, 'terminal', d.columns)
+  const k = kit(els, 'terminal', d.columns, { focused: d.focused })
   const a = d.activity
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
@@ -84,7 +94,8 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
     id: 'context',
     icon: GLYPH.context,
     title: 'Context',
-    right: snap ? k.summary([[`${snap.percent}%`, `of ${tokens(snap.max)}`, levelColor(snap.percent)]]) : k.summary([['measuring…']]),
+    right: snap ? k.summary([[`${snap.percent}%`, `of ${tokens(snap.max)}`, levelColor(snap.percent)]]) : undefined,
+    loading: !snap,
     ...fold('context'),
     children: snap
       ? [
@@ -96,25 +107,41 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
               [0, 0.5, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
             )}
           </Box>,
-          <Box key="legend" marginTop={k.space.block}>
-            {k.legend('ctx', [
-              ...parts.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
-              // The bar's track is the free room; the buffer starts at the scale's mark, in its amber.
-              ...(free > 0 ? [{ label: 'Free', color: TRACK, figure: tokens(free) }] : []),
-              ...(buffer > 0 ? [{ label: 'Buffer', color: C.warn, figure: tokens(buffer) }] : []),
-            ])}
+          <Box key="legend" flexDirection="column" marginTop={k.space.block}>
+            {/* The bar's parts, keyed with the bar's own █ and ▓ in turn, so they read apart without colour. */}
+            {k.legend(
+              'ctx',
+              parts.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
+              // Two columns at most, as the room legend under it, so their columns line up.
+              2,
+              { bar: true },
+            )}
+            {/* What isn't a part: the free room is the bar's track; the buffer starts at the scale's mark, in its amber. */}
+            {free > 0 || buffer > 0
+              ? k.legend(
+                  'ctx-room',
+                  [
+                    ...(free > 0 ? [{ label: 'Free', color: TRACK, figure: tokens(free) }] : []),
+                    ...(buffer > 0 ? [{ label: 'Buffer', color: C.warn, figure: tokens(buffer) }] : []),
+                  ],
+                  2,
+                )
+              : null}
           </Box>,
         ]
-      : null,
+      : [k.note('ctx-reading', 'Reading context…', 'loading')],
   })
 
   // ---- limits ----
   const windows = d.limits ?? []
+  // The header names the fullest window, so a folded section (or the narrow floor, which draws headers only) still says it.
+  const fullest = windows.reduce<(typeof windows)[number] | null>((m, w) => (!m || w.percent > m.percent ? w : m), null)
   const limits = windows.length
     ? k.section({
         id: 'limits',
         icon: GLYPH.limits,
         title: 'Limits',
+        right: fullest ? k.summary([[`${Math.round(fullest.percent)}%`, fx.limitLabel(fullest.kind).toLowerCase(), levelColor(fullest.percent)]]) : undefined,
         ...fold('limits'),
         children: windows.map(w =>
           k.reading(`limit-${w.kind}`, {
@@ -185,7 +212,11 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
               lead: agentStatus(agent.status),
               text: agent.description || agent.type,
               note: [agent.description ? agent.type : '', sub].filter(Boolean).join(' · '),
-              right: [x?.tokens !== undefined ? tokens(x.tokens) : null, ms !== undefined ? short(ms) : null],
+              // Narrow, the tokens go before the time.
+              right: [
+                x?.tokens !== undefined ? { part: tokens(x.tokens), drop: 2 } : null,
+                ms !== undefined ? { part: short(ms), drop: 1 } : null,
+              ],
             })
           }),
           hidden > 0 ? k.note('agents-more', `… ${hidden} more`) : null,
@@ -193,14 +224,26 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
       })
     : null
 
-  // ---- accounting ----
+  // ---- accounting: the cost, the model, and the tokens each turn added as a sparkline ----
+  // A spark rather than columns: one series over time with no parts to stack, and Braille's two
+  // points a cell fit the whole turn log (40) in 20 cells, where columns show one turn a cell.
+  const perTurn = a.turnLog.map(turnTokens)
   const accounting = k.section({
     id: 'accounting',
     icon: GLYPH.cost,
     title: 'Accounting',
     right: k.summary([[a.cost !== undefined ? money(a.cost) : '–']]),
     ...fold('accounting'),
-    children: [k.prop('model', 'Model', snap ? snap.model : '–')],
+    children: [
+      k.prop('model', 'Model', snap ? snap.model : '–'),
+      // The last turn's figure; the spark under it, scaled to the log's peak, gives the rest.
+      perTurn.length ? k.prop('turn-tokens', 'Tokens', `${tokens(perTurn.at(-1)!)} last turn`) : null,
+      perTurn.length ? (
+        <Box key="turn-spark">
+          {k.spark(perTurn, { height: 2 })}
+        </Box>
+      ) : null,
+    ],
   })
 
   return k.pinned(
@@ -244,8 +287,9 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
           note: pr ? `#${pr.number}` : undefined,
           dim: !b.exists,
           bold: b.checkedOut,
+          // Narrow, the "creating" word goes; the actions stay.
           right: [
-            d.creating === b.branch ? 'creating PR…' : null,
+            d.creating === b.branch ? { part: 'creating PR…', drop: 1 } : null,
             k.actions(`branch-${b.branch}-actions`, [main, { key: `hide-${b.branch}`, label: 'hide', quiet: true, onPress: () => d.hideBranch(b.branch) }]),
           ],
         })}
@@ -253,13 +297,19 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
           indent: k.edge.left,
           text: pr ? pr.title : where,
           dim: !pr,
+          // Narrow, the lines changed go before CI.
           right: [
-            b.insertions || b.deletions ? (
-              <Text key="diff">
-                <Text {...k.ink(C.ok)}>{`+${b.insertions}`}</Text>
-                <Text {...k.ink(C.bad)}>{` −${b.deletions}`}</Text>
-              </Text>
-            ) : null,
+            b.insertions || b.deletions
+              ? {
+                  part: (
+                    <Text key="diff">
+                      <Text {...k.ink(C.ok)}>{`+${b.insertions}`}</Text>
+                      <Text {...k.ink(C.bad)}>{` −${b.deletions}`}</Text>
+                    </Text>
+                  ),
+                  drop: 1,
+                }
+              : null,
             ci ? k.status(ci[0], ci[1], 'ci') : null,
           ],
         })}
@@ -273,7 +323,11 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
       id: 'workspaces',
       icon: GLYPH.branch,
       title: 'Workspaces',
-      right: k.summary([openPrs ? [String(openPrs), 'open', C.blue] : null, merged ? [String(merged), 'merged', C.purple] : null]),
+      // A failed gh read keeps the last PRs: the header says so, and how old they are.
+      right: k.summary([openPrs ? [String(openPrs), 'open', C.blue] : null, merged ? [String(merged), 'merged', C.purple] : null], {
+        failed: Boolean(d.workspacesGh?.failed),
+        age: d.workspacesGh?.failed ? since(d.workspacesGh.at, d.at) : undefined,
+      }),
       ...fold('workspaces'),
       children: entries,
     }),
@@ -288,11 +342,16 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
   const { Box, Text } = els
   const repo = d.git
   const hub = d.gh
-  const head = (right: RenderElement | null, children: (RenderElement | null)[]) =>
-    k.section({ id: 'git', icon: GLYPH.branch, title: 'Git', right, ...fold('git'), children })
-  if (repo === null) return head(null, [k.note('git-reading', 'Reading git…', 'loading')])
+  const head = (right: RenderElement | null, children: (RenderElement | null)[], loading = false) =>
+    k.section({ id: 'git', icon: GLYPH.branch, title: 'Git', right: right ?? undefined, loading, ...fold('git'), children })
+  if (repo === null) return head(null, [k.note('git-reading', 'Reading git…', 'loading')], true)
   if (!repo.ok) return head(null, [k.note('git-note', repo.note)])
   const g: GitInfo = repo
+  // A failed git or gh read keeps the last-good figures: the header says so, with the older one's age.
+  const ghHere = hub && hub.root === g.root ? hub : null
+  const failed = Boolean(g.failed || ghHere?.failed)
+  const failedAt = [g.failed ? g.at : undefined, ghHere?.failed ? ghHere.at : undefined].filter((x): x is number => Boolean(x))
+  const state = failed ? { failed, age: failedAt.length ? since(Math.min(...failedAt), d.at) : undefined } : {}
 
   // The branch row: where the checkout is against its upstream.
   const sync: (RenderElement | string | null)[] = g.detached
@@ -340,9 +399,10 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
         k.item(`pr-${pr.number}`, {
           lead: prIcon(pr),
           leadColor: prColor(pr, false),
-          text: `#${pr.number} ${pr.title}`,
+          text: pr.title,
           bold: pr.current,
-          right: [ci ? k.status(ci[0], ci[1], 'ci') : null],
+          // Narrow, the number goes before CI: the title already says which PR it is.
+          right: [{ part: `#${pr.number}`, drop: 1 }, ci ? k.status(ci[0], ci[1], 'ci') : null],
         }),
       )
       // What else the PR is waiting on, dim, under its title: the failing checks, the review, whether it's this branch's.
@@ -367,7 +427,7 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
     if (hub.prs.length > GIT_PRS) prs.push(k.note('prs-more', `… ${hub.prs.length - GIT_PRS} more`))
   }
 
-  return head(k.summary([[g.repo]]), [
+  return head(k.summary([[g.repo]], state), [
     k.item('git-branch', { lead: GLYPH.branch, text: g.branch, bold: true, right: sync }),
     k.prop(
       'git-worktree',

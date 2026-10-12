@@ -54,6 +54,27 @@ const AGENTS = [
   { id: 'd', description: 'Review the branch', type: 'reviewer', status: 'failed' },
 ]
 
+/**
+ * What the repo beneath is like, set per test: the checked-out branch (one
+ * other than main is a workspace), and which reads fail (git's status, gh).
+ */
+const world = { head: 'main', down: new Set<'git' | 'gh'>() }
+
+const gitStatus = () => GIT_STATUS.replace('# branch.head main', `# branch.head ${world.head}`)
+
+/** The workspace's PR, on the `lane` branch. */
+const LANE_PR = {
+  number: 9,
+  title: 'Overview adopts the kit',
+  url: 'https://github.com/satoramoto/awesome-claude/pull/9',
+  state: 'OPEN',
+  isDraft: false,
+  reviewDecision: '',
+  statusCheckRollup: [{ name: 'tests', status: 'COMPLETED', conclusion: 'FAILURE' }],
+  headRefName: 'lane',
+  mergeable: 'MERGEABLE',
+}
+
 const GIT_STATUS = [
   '# branch.oid 0123456789abcdef',
   '# branch.head main',
@@ -95,11 +116,18 @@ const fail = { exitCode: 1, stdout: '', stderr: 'not answered in this test', isS
 const answer = (argv: readonly string[]) => {
   const cmd = argv.join(' ')
   if (cmd === 'git --no-optional-locks rev-parse --show-toplevel') return ok('/repo\n')
-  if (cmd === 'git --no-optional-locks status --porcelain=v2 --branch') return ok(GIT_STATUS)
+  if (cmd === 'git --no-optional-locks status --porcelain=v2 --branch') return world.down.has('git') ? fail : ok(gitStatus())
   if (cmd === 'git --no-optional-locks worktree list --porcelain') return ok('worktree /repo\nHEAD 0123\nbranch refs/heads/main\n')
   if (cmd === 'git --no-optional-locks diff --shortstat HEAD') return ok(' 1 file changed, 12 insertions(+), 3 deletions(-)\n')
   if (cmd === 'git rev-parse --abbrev-ref origin/HEAD') return ok('origin/main\n')
+  if (cmd.startsWith('gh ') && world.down.has('gh')) return { ...fail, stderr: 'error connecting to api.github.com' }
   if (cmd.startsWith('gh pr list --author @me')) return ok(JSON.stringify(GH_PRS))
+  if (cmd.startsWith('gh pr list --state all')) return ok(JSON.stringify([LANE_PR]))
+  // The workspace on `lane`: it exists, and its lines changed against main.
+  if (cmd === 'git rev-parse --git-dir') return ok('.git\n')
+  if (cmd === `git --no-optional-locks rev-parse --verify --quiet refs/heads/${world.head}`) return ok('0123\n')
+  if (cmd === `git --no-optional-locks rev-parse --abbrev-ref HEAD`) return ok(`${world.head}\n`)
+  if (cmd === `git --no-optional-locks diff --shortstat origin/main...${world.head}`) return ok(' 9 files changed, 1204 insertions(+), 385 deletions(-)\n')
   return fail
 }
 
@@ -115,16 +143,26 @@ const engine = (on: On) => {
   on('session.usage', async () => ({ value: USAGE }) as never)
   on('agent.list', async () => ({ value: AGENTS }) as never)
   on('process.run', async (_$, e) => ({ value: answer(e.argv) }))
+  // The end of a turn, beneath the mod's hook that counts it.
+  on('turn.complete', async () => ({ text: '' }))
   return clock
 }
 
-/** A session that started, opened the pane with /overview, and read git and gh once. */
-const session = async ($: Engine, on: On) => {
-  const clock = engine(on)
-  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+/** Opens the pane with /overview, which reads everything again on the next tick, and lets that tick run. */
+const reopen = async ($: Engine, clock: { advance: (ms: number) => Promise<void> }) => {
   await $.command.run({ command: 'overview', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
   // One tick of the mod's timer: git, then gh.
   await clock.advance(3_000)
+}
+
+/** A session that started, opened the pane with /overview, and read git and gh once. */
+const session = async ($: Engine, on: On, head = 'main') => {
+  world.head = head
+  world.down.clear()
+  const clock = engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await reopen($, clock)
+  return clock
 }
 
 const pane = (columns: number) =>
@@ -242,7 +280,9 @@ test('git lists the checkout and its pull requests as rows with a status', async
   expect(await ui.find({ type: 'Text', text: 'main' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '↑2' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /terminal\.tsx/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /#7 Terminal inspector/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Terminal inspector' })).toBeDefined()
+  // The number sits on the right as meta, the part that goes first when the row is narrow.
+  expect((await ui.find({ type: 'Text', text: '#7' }))?.props).toMatchObject({ dimColor: true, italic: true })
   expect((await ui.find({ type: 'Text', text: '✕ 1 failing' }))?.props.color).toBe('error')
   // A pending check is blue, as running is.
   expect((await ui.find({ type: 'Text', text: '◌ 1 pending' }))?.props.color).toBe('suggestion')
@@ -269,4 +309,122 @@ test("a header's figures are one line that ends in an ellipsis when cut, not a f
     expect((await ui.find({ type: 'Text', text: /^\d+ started {2}\d+ running$/ }))?.props, `agents at ${columns}`).toMatchObject({ wrap: 'truncate' })
     await ui.unmount()
   }
+})
+
+/** The Texts a section draws, header and body. */
+const sectionTexts = async (ui: { find: (q: { key: string }) => Promise<unknown> }, id: string) => texts(((await ui.find({ key: `section-${id}` })) ?? {}) as Drawn)
+/** One section's drawn text, run together. */
+const sectionText = async (ui: { find: (q: { key: string }) => Promise<unknown> }, id: string) => shown(((await ui.find({ key: `section-${id}` })) ?? {}) as Drawn)
+
+test("before the first reads, Context and Git hold their figures' place with the pending ◌", async ($, on) => {
+  world.head = 'main'
+  world.down.clear()
+  engine(on)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(40) })
+  for (const id of ['context', 'git']) {
+    const pending = (await sectionTexts(ui, id)).filter(t => shown(t) === '◌').map(t => t.props?.color)
+    expect(pending, id).toContain('suggestion')
+  }
+  // No hand-written word stands in for the figures.
+  expect(await ui.find({ type: 'Text', text: /measuring/ })).toBeUndefined()
+  expect(await sectionText(ui, 'git')).toMatch(/Reading git…/)
+  expect(await sectionText(ui, 'context')).toMatch(/Reading context…/)
+  await ui.unmount()
+})
+
+test("the context legend keys the bar's parts with its own █ and ▓ in turn; the free room and buffer with ■", async ($, on) => {
+  await session($, on)
+  for (const columns of [40, 60]) {
+    const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
+    const legend = async (key: string) => texts(((await ui.find({ key })) ?? {}) as Drawn).map(shown)
+    const keys = [...(await legend('ctx')), ...(await legend('ctx-room'))].filter(t => /^[█▓■]$/.test(t))
+    // The bar's parts (System, MCP, Messages): █ ▓ █, as the bar draws them; then Free and Buffer.
+    expect(keys, `at ${columns}`).toEqual(['█', '▓', '█', '■', '■'])
+    await ui.unmount()
+  }
+})
+
+test('the tokens each turn added are a Braille sparkline across Accounting', async ($, on) => {
+  const clock = await session($, on)
+  const usage = (output: number) => ({ input_tokens: 2_000, output_tokens: output, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 1_000, model: 'claude-opus-5-5' })
+  for (const [i, output] of [800, 4_000, 1_500, 12_000].entries()) {
+    await $.turn.complete({ answer: '', durationMs: 20_000, isAborted: false, turnId: `t${i}`, reason: 'answer', usage: usage(output) } as never)
+  }
+  await clock.settle()
+  for (const columns of [40, 60]) {
+    const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
+    // The last turn's tokens: input, output and cache writes; cache reads restate the context.
+    expect(await sectionText(ui, 'accounting')).toMatch(/15k last turn/)
+    const rows = (await sectionTexts(ui, 'accounting')).map(shown).filter(t => /^[⠀-⣿ ]+$/.test(t) && /[^ ]/.test(t))
+    expect(rows.length, `at ${columns}`).toBe(2)
+    for (const row of rows) expect([...row].length, `at ${columns}`).toBe(columns - 2)
+    // Newest on the right edge: the last cell has dots.
+    expect(rows.at(-1)!.at(-1), `at ${columns}`).not.toBe(' ')
+    await ui.unmount()
+  }
+})
+
+test('a git refresh that fails keeps the last-good figures, with an amber ▲ and their age in the header', async ($, on) => {
+  const clock = await session($, on)
+  world.down.add('git')
+  await reopen($, clock)
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  const head = (await sectionTexts(ui, 'git')).map(t => [shown(t), t.props?.color] as const)
+  expect(head.find(([t]) => t === '▲')?.[1]).toBe('warning')
+  expect(head.some(([t]) => /^ \d+[smhd]$/.test(t))).toBe(true)
+  // The body is the last-good checkout, not an error.
+  expect(await ui.find({ type: 'Text', text: 'main' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '↑2' })).toBeDefined()
+  expect(await sectionText(ui, 'git')).not.toMatch(/git status failed|not answered/)
+  await ui.unmount()
+
+  // The next good read clears the mark.
+  world.down.delete('git')
+  await reopen($, clock)
+  const again = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  expect((await sectionTexts(again, 'git')).some(t => shown(t) === '▲')).toBe(false)
+  await again.unmount()
+})
+
+test('a gh refresh that fails keeps the last pull requests, in Git and in Workspaces, marked ▲', async ($, on) => {
+  const clock = await session($, on, 'lane')
+  world.down.add('gh')
+  await reopen($, clock)
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  for (const id of ['git', 'workspaces']) {
+    expect((await sectionTexts(ui, id)).find(t => shown(t) === '▲')?.props?.color, id).toBe('warning')
+  }
+  expect(await ui.find({ type: 'Text', text: 'Terminal inspector' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Overview adopts the kit' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /error connecting/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test("a workspace's PR row drops its lines changed before CI when the row runs out of room", async ($, on) => {
+  await session($, on, 'lane')
+  const wide = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  const row = async (ui: typeof wide) => shown(((await ui.find({ key: 'branch-lane-pr' })) ?? {}) as Drawn)
+  // Its lines against main, the checkout's uncommitted ones included.
+  expect(await row(wide)).toMatch(/\+1216 −388/)
+  expect(await row(wide)).toMatch(/✕ 1 failing/)
+  await wide.unmount()
+  const narrow = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(30) })
+  expect(await row(narrow)).not.toMatch(/\+1216/)
+  expect(await row(narrow)).toMatch(/✕ 1 failing/)
+  await narrow.unmount()
+})
+
+test('below 30 columns each section draws its header and figures only', async ($, on) => {
+  await session($, on)
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(28) })
+  for (const title of ['Context', 'Limits', 'Agents', 'Git', 'Accounting']) expect(await ui.find({ type: 'Text', text: title }), title).toBeDefined()
+  // The figures say what matters on their own: the fullest limit window is in its header.
+  expect(await sectionText(ui, 'limits')).toMatch(/96% weekly/)
+  expect(await sectionText(ui, 'context')).toMatch(/31% of 200k/)
+  // No bodies: no bar, no readings, no rows.
+  expect(await ui.find({ type: 'Text', text: /^[█▓▏▎▍▌▋▊▉░]+$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'Model' })).toBeUndefined()
+  await ui.unmount()
 })

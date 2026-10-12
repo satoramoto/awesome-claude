@@ -5,7 +5,7 @@ import type { PerfSnapshot } from '../kit/perf'
 import { C, GLYPH, GRAY, INK, MUTED, RAMP, TRACK, levelColor } from '../kit/tokens'
 import { EDGE, SPACE, kit } from '../kit/ui'
 
-import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot } from '../types'
+import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot, WorkspacesGh } from '../types'
 
 /*
  * The app mode: a properties inspector for the session, drawn as an instrument.
@@ -54,6 +54,10 @@ export type DesktopData = {
   perf: PerfSnapshot
   /** The clock elapsed times and resets are drawn against. */
   at: number
+  /** The workspaces' last `gh pr list`: whether it failed, and when it last read good (the terminal shows it). */
+  workspacesGh?: WorkspacesGh | null
+  /** Whether the pane has the keyboard (`e.props.isFocused`); the terminal's kit takes it. */
+  focused?: boolean
 }
 
 /** What the app mode borrows from register.tsx, passed in so this file has no cycle back. */

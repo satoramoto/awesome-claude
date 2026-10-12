@@ -27,6 +27,7 @@ import type {
   Tracked,
   TreeRow,
   TurnPoint,
+  WorkspacesGh,
 } from '../types'
 import { parseLeftRight, startedBy } from './branches'
 import { createPerf } from '@kit/perf'
@@ -322,7 +323,44 @@ export const ghNote = (stderr: string): string => {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
-const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
+/**
+ * A git read: the repo, or why there's none. `lasting`: the answer itself (not a
+ * repo), not a read that failed. `root`: the repo a failed read was for.
+ */
+type GitRead = GitInfo | (GitNote & { lasting?: boolean; root?: string })
+
+/** When git and gh were last read good: the age a failed refresh shows. */
+const goodAt = { git: 0, gh: 0, workspaces: 0 }
+
+/**
+ * What the git state becomes after a read: a good read as it is; a failed one
+ * keeps the last-good figures of the same repo, marked with why and since when;
+ * anything else is its note.
+ */
+const keepGit =(before: GitInfo | GitNote | null, fresh: GitRead, t: number): GitInfo | GitNote => {
+  if (fresh.ok) {
+    goodAt.git = t
+    return fresh
+  }
+  if (!fresh.lasting && before?.ok && (fresh.root === undefined || fresh.root === before.root)) {
+    return { ...before, failed: fresh.note, at: before.failed ? before.at : goodAt.git || undefined }
+  }
+  return { ok: false, note: fresh.note }
+}
+
+/** The same for gh: a failed read for the same repo keeps the last-good PRs. */
+const keepGh =(before: GhInfo | null, fresh: GhInfo): GhInfo => {
+  if (!fresh.note) {
+    goodAt.gh = fresh.at
+    return fresh
+  }
+  if (before && !before.note && before.root === fresh.root) {
+    return { ...before, failed: fresh.note, at: before.failed ? before.at : goodAt.gh || before.at }
+  }
+  return fresh
+}
+
+const loadGit = async ($: EngineInterface): Promise<GitRead> => {
   const cwd = await $.session.cwd()
   // --no-optional-locks: a read never rewrites the index.
   const run = (args: string[]) => $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: 10_000 })
@@ -332,7 +370,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
   } catch {
     return { ok: false, note: 'git not found' }
   }
-  if (top.exitCode !== 0) return { ok: false, note: 'Not a git repository' }
+  if (top.exitCode !== 0) return { ok: false, note: 'Not a git repository', lasting: true }
   const root = top.stdout.trim()
   const [status, wt, diff] = await Promise.all([
     run(['status', '--porcelain=v2', '--branch']).catch(() => null),
@@ -340,7 +378,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
     run(['diff', '--shortstat', 'HEAD']).catch(() => null),
   ])
   if (!status || status.exitCode !== 0) {
-    return { ok: false, note: (status?.stderr || 'git status failed').trim().split('\n')[0] ?? 'git status failed' }
+    return { ok: false, note: (status?.stderr || 'git status failed').trim().split('\n')[0] || 'git status failed', root }
   }
   const trees = wt && wt.exitCode === 0 ? parseWorktrees(wt.stdout) : []
   const main = trees[0] ?? root
@@ -398,8 +436,9 @@ const refreshGit = async ($: EngineInterface): Promise<void> => {
   try {
     do {
       gitAgain = false
-      const fresh = await loadGit($)
-      if (!same(await read($, git), fresh)) await update($, git, () => fresh)
+      const before = await read($, git)
+      const fresh = keepGit(before, await loadGit($), Date.now())
+      if (!same(before, fresh)) await update($, git, () => fresh)
       const cached = await read($, gh)
       // A new repo (the session cd'd) shouldn't show the old repo's PRs.
       if (fresh.ok && cached?.root !== fresh.root) stale.gh = true
@@ -415,6 +454,7 @@ const tracked = atom({ plugin: 'overview', key: 'tracked' } as const, [])
 const hidden = atom({ plugin: 'overview', key: 'hidden' } as const, [])
 const branches = atom({ plugin: 'overview', key: 'branches' } as const, [])
 const creating = atom({ plugin: 'overview', key: 'creating' } as const, null)
+const workspacesGh = atom({ plugin: 'overview', key: 'workspacesGh' } as const, null)
 const MAX_BRANCHES = 6
 
 /** Adds a branch to the tracked list once; a path relative to `cwd` is resolved. */
@@ -502,6 +542,7 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
       .reverse()
     if (withGh) {
       const prList = await run(['gh', 'pr', 'list', '--state', 'all', '--limit', '40', '--json', GH_FIELDS])
+      let failed: string | undefined = !prList ? 'gh not installed' : prList.exitCode !== 0 ? ghNote(prList.stderr) : undefined
       if (prList?.exitCode === 0) {
         try {
           // Newest first from gh, so the first PR per branch is its latest.
@@ -509,9 +550,15 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
           for (const json of JSON.parse(prList.stdout) as any[]) if (!prs.has(json.headRefName)) prs.set(json.headRefName, toGitPr(json, json.headRefName))
           prCache = prs
         } catch {
-          // Unreadable gh output: keep the last PRs.
+          failed = 'Could not read gh output'
         }
       }
+      // A failed read keeps the last PRs (prCache), marked with why and since when.
+      const before = await read($, workspacesGh)
+      if (!failed) goodAt.workspaces = Date.now()
+      const next: WorkspacesGh = failed ? { failed, at: before?.failed ? before.at : goodAt.workspaces } : { at: goodAt.workspaces }
+      // A good read after a good read changes nothing drawn: no write, no redraw.
+      if (failed ? !same(before, next) : !before || before.failed) await update($, workspacesGh, () => next)
     }
     const loaded = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache, info.root)))
     // git and gh took a while: a branch hidden since `off` was read must not come
@@ -569,8 +616,8 @@ const refreshGh = async ($: EngineInterface): Promise<void> => {
   if (!info?.ok) return
   ghBusy = true
   try {
-    const fresh = await loadGh($, info)
     const before = await read($, gh)
+    const fresh = keepGh(before, await loadGh($, info))
     // Keep the old timestamp when nothing changed, so the pane doesn't redraw for nothing.
     if (!before || !same({ ...before, at: 0 }, { ...fresh, at: 0 })) await update($, gh, () => fresh)
   } finally {
@@ -912,6 +959,8 @@ export const register: Register = on => {
       resources: await read($, resources),
       branches: await read($, branches),
       creating: await read($, creating),
+      workspacesGh: await read($, workspacesGh),
+      focused: e.props.isFocused,
       hideBranch: (branch: string) => void hideBranch($, branch).catch(err => $.ui.toast(`Hide ${branch}: ${err?.message ?? err}`)),
       // Merge, like Create PR: the session does it, and reports back.
       mergePr: (pr: GitPr) =>
