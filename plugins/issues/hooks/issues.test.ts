@@ -16,10 +16,14 @@ const GH_ISSUES = [
     title: 'Snapshot tests of what mods draw',
     url: `${URL}/24`,
     author: { login: 'satoramoto' },
-    labels: [{ name: 'tests', color: '0e8a16' }],
+    labels: [
+      { name: 'tests', color: '0e8a16' },
+      { name: 'terminal', color: '1d76db' },
+    ],
     assignees: [],
     comments: [{}, {}, {}],
     updatedAt: new Date(NOW - 2 * HOUR).toISOString(),
+    closedByPullRequestsReferences: [{ number: 31, url: 'https://github.com/satoramoto/awesome-claude/pull/31' }],
   },
   {
     number: 23,
@@ -30,6 +34,19 @@ const GH_ISSUES = [
     assignees: [{ login: 'satoramoto' }],
     comments: [],
     updatedAt: new Date(NOW - 5 * HOUR).toISOString(),
+  },
+]
+
+/** What `gh pr list` answers: the PR linked to close #24, its one check failing. */
+const GH_PRS = [
+  {
+    number: 31,
+    title: 'Snapshot tests for the overview pane',
+    url: 'https://github.com/satoramoto/awesome-claude/pull/31',
+    state: 'OPEN',
+    isDraft: false,
+    mergeable: 'MERGEABLE',
+    statusCheckRollup: [{ conclusion: 'FAILURE' }],
   },
 ]
 
@@ -73,7 +90,9 @@ const engine = (on: On, issues: Gh | (() => Gh | Promise<Gh>) = { exitCode: 0, s
         ? await (typeof issues === 'function' ? issues() : issues)
         : e.argv[0] === 'gh' && e.argv[1] === 'repo' && e.argv[2] === 'view'
           ? { exitCode: 0, stdout: 'satoramoto/awesome-claude\n', stderr: '' }
-          : { exitCode: 1, stdout: '', stderr: 'not answered in this test' }),
+          : e.argv[0] === 'gh' && e.argv[1] === 'pr' && e.argv[2] === 'list'
+            ? { exitCode: 0, stdout: JSON.stringify(GH_PRS), stderr: '' }
+            : { exitCode: 1, stdout: '', stderr: 'not answered in this test' }),
       isStdoutTruncated: false,
       isStderrTruncated: false,
     },
@@ -97,9 +116,13 @@ test('/issues opens a pane listing the open issues, on the terminal and the desk
   engine(on)
   await open($)
 
-  for (const surface of ['terminal', 'desktop'] as const) {
+  // The terminal titles its section with the repository's name alone; the desktop's head line has it whole.
+  for (const [surface, repo] of [
+    ['terminal', 'awesome-claude'],
+    ['desktop', 'satoramoto/awesome-claude'],
+  ] as const) {
     const ui = await $.ui.mount({ plugin: 'issues', surface, ...PANE })
-    expect(await ui.find({ type: 'Text', text: 'satoramoto/awesome-claude' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: repo })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'Fold arrow is clipped in the desktop pane' })).toBeDefined()
     await ui.unmount()
   }
@@ -109,17 +132,24 @@ test('/issues opens a pane listing the open issues, on the terminal and the desk
 const terminal = ($: Engine, columns = 60, isFocused = false) =>
   $.ui.mount({ plugin: 'issues', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: columns, isFocused } })
 
-test('on the terminal, a section titled with the repository, its counts on the right, an item per issue', async ($, on) => {
+test('on the terminal, a section titled with the repository, the open count after it, an item per issue', async ($, on) => {
   engine(on)
   await open($)
 
   const ui = await terminal($)
   expect(await ui.find({ key: 'section-issues' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: /^satoramoto\/awesome-claude$/ }))?.props.bold).toBe(true)
+  expect((await ui.find({ type: 'Text', text: /^awesome-claude$/ }))?.props.bold).toBe(true)
+  // The open count is the one figure: bold, in the default foreground. The rows' ages say what
+  // changed today, so the header doesn't count it again.
+  const open2 = await ui.find({ type: 'Text', text: /^2$/ })
+  expect(open2?.props.bold).toBe(true)
+  expect(open2?.props.color).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^2 open$/ })).toBeDefined()
-  // Each issue: the open-issue mark in green, its title, its number and its age on the right.
+  expect(await ui.find({ type: 'Text', text: /today/ })).toBeUndefined()
+  // Each issue: the open-issue mark dim (every issue here is open), its title, its number and its age on the right.
   expect(await ui.findAll({ type: 'Text', text: /^◉$/ })).toHaveLength(2)
-  expect((await ui.find({ type: 'Text', text: /^◉$/ }))?.props.color).toBe('success')
+  expect((await ui.find({ type: 'Text', text: /^◉$/ }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: /^◉$/ }))?.props.color).toBeUndefined()
   expect(await ui.find({ key: 'row-24' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^Snapshot tests of what mods draw$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
@@ -128,7 +158,7 @@ test('on the terminal, a section titled with the repository, its counts on the r
   await ui.unmount()
 })
 
-test('on the terminal, labels show as pills while they fit beside the title', async ($, on) => {
+test('on the terminal, an issue shows its first label as a pill while it fits, the rest as a count', async ($, on) => {
   engine(on)
   await open($)
 
@@ -138,13 +168,39 @@ test('on the terminal, labels show as pills while they fit beside the title', as
   expect(pill).toBeDefined()
   expect(pill?.props.color).toBeUndefined()
   expect((await wide.find({ type: 'Text', text: /^■$/ }))?.props.color).toBe('#0e8a16')
+  // The second label isn't a pill of its own: a dim `+1` says it's there.
+  expect(await wide.find({ type: 'Text', text: /terminal/ })).toBeUndefined()
+  expect((await wide.find({ type: 'Text', text: /^\+1$/ }))?.props.dimColor).toBe(true)
   await wide.unmount()
+
+  // At 38 columns the pill's whole width (its swatch too) would take the title's room: it's left out.
+  const tight = await terminal($, 38)
+  expect(await tight.find({ type: 'Text', text: /^■$/ })).toBeUndefined()
+  expect(await tight.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
+  expect(await tight.find({ type: 'Text', text: /^2h$/ })).toBeDefined()
+  await tight.unmount()
 
   // At 30 columns the title keeps its room and the label is left out; the number and age stay.
   const narrow = await terminal($, 30)
   expect(await narrow.find({ type: 'Text', text: /tests$/ })).toBeUndefined()
   expect(await narrow.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
   await narrow.unmount()
+})
+
+test('on the terminal, a linked PR is a dim tree row with its checks in their colour, and its issue a block', async ($, on) => {
+  engine(on)
+  await open($)
+
+  const ui = await terminal($, 60)
+  expect(await ui.find({ key: 'pr-24-31' })).toBeDefined()
+  // Its number dim (the issue above is what's read), its title dim after it, its failing check amber.
+  expect((await ui.find({ type: 'Text', text: /^#31$/ }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: /^ {2}Snapshot tests for the overview pane$/ }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: /^1 failing$/ }))?.props.color).toBe('warning')
+  // #24 has a PR under it: a blank row parts it from #23, the issue after; the first issue has none above.
+  expect((await ui.find({ key: 'issue-24' }))?.props.marginTop).toBe(0)
+  expect((await ui.find({ key: 'issue-23' }))?.props.marginTop).toBe(1)
+  await ui.unmount()
 })
 
 test('on the terminal, reading is a dim note under the section', async ($, on) => {
@@ -158,7 +214,7 @@ test('on the terminal, no open issues is a dim note under the repository', async
   engine(on, { exitCode: 0, stdout: '[]', stderr: '' })
   await open($)
   const ui = await terminal($)
-  expect(await ui.find({ type: 'Text', text: /^satoramoto\/awesome-claude$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^awesome-claude$/ })).toBeDefined()
   expect((await ui.find({ type: 'Text', text: /^No open issues\.$/ }))?.props.dimColor).toBe(true)
   await ui.unmount()
 })
@@ -193,6 +249,10 @@ test('on the terminal, the key hints show under the list only while the pane has
 
   const focused = await terminal($, 60, true)
   expect(await focused.find({ key: 'hints' })).toBeDefined()
+  // A blank row above them, and they start in the rows' mark column, past the cursor's one-cell gutter.
+  const keys = await focused.find({ key: 'keys' })
+  expect(keys?.props.paddingLeft).toBe(1)
+  expect(keys?.props.marginTop).toBe(1)
   expect(await focused.find({ type: 'Text', text: /^↑↓$/ })).toBeDefined()
   expect((await focused.find({ type: 'Text', text: /^ move$/ }))?.props.dimColor).toBe(true)
   expect(await focused.find({ type: 'Text', text: /^enter$/ })).toBeDefined()

@@ -254,17 +254,25 @@ const HINTS = [
 ]
 
 /**
- * The terminal: one section, the repository as its title and the counts on the
- * right; an item per issue, its labels as pills where they fit, its number and
- * age on the right; each linked PR on a tree row under it. With `start`, each
- * row leads with a focusable mark: the row under the focus is the cursor's
- * (`▌` in the gutter), Enter starts it, and the keys show under the list.
+ * The terminal: one section, the repository's name as its title and the open
+ * count after it; an item per issue, its first label as a pill where it fits
+ * (`+1` for the rest), its number and age on the right; each linked PR on a dim
+ * tree row under it, its checks in their status colour. An issue with PRs is a
+ * block: a blank row parts it from its neighbours. With `start`, each row leads
+ * with a focusable mark: the row under the focus is the cursor's (`▌` in the
+ * gutter), Enter starts it, and the keys show under the list, lined up with
+ * the rows' marks.
  *
- *   ▾ satoramoto/awesome-claude ──── ↻ 2m  5 open  2 today
- *    ▌◉ Snapshot tests of what…      tests  #24   2h
- *      └─⇡ #31  Snapshot tests for…     1 failing
+ *   ▾ awesome-claude  5 open ─────────────────────
+ *     ◉ Workspaces: show which checks…  ■ overview  #21  3d
+ *
+ *    ▌◉ Snapshot tests of what…            ■ tests  #24  2h
+ *     └─⇡ #31  Snapshot tests for…           1 failing
+ *
  *     ↑↓ move · enter start
  *
+ * Each fact once: the ages are on the rows, so the header doesn't count the
+ * day's changes; every issue here is open, so its mark is dim rather than green.
  * A read under way shows the figures' age (`↻ 2m`); a failed one an amber `▲`
  * and the age, the last-good issues kept. Only a first read that fails, with
  * nothing to keep, is an error note.
@@ -275,10 +283,13 @@ export const renderTerminal = (els: TermElements, list: IssueList | null, column
   const pane = (title: string, right: RenderElement | null, body: (RenderElement | null)[], loading = false) =>
     k.section({ id: 'issues', title, right: right ?? undefined, loading, children: body })
 
+  // The repository's name without its owner: the owner rarely tells, and the full
+  // `owner/name` ran into the figures in a 40-column pane.
+  const title = list?.repo ? list.repo.split('/').pop() || list.repo : 'Issues'
   if (!list) return pane('Issues', null, [k.note('loading', 'Reading issues…', 'loading')], true)
-  if (list.note) return pane(list.repo || 'Issues', null, [k.note('error', list.note, 'error')], Boolean(st.reading))
+  if (list.note) return pane(title, null, [k.note('error', list.note, 'error')], Boolean(st.reading))
 
-  const { open, fresh } = counts(list, at)
+  const { open } = counts(list, at)
   // Rows take the keyboard when Enter has something to do: every row then says whether it's the cursor's.
   const keys = Boolean(st.start && Button)
   const chosen = (n: number) => (keys ? st.cursor === n : undefined)
@@ -293,48 +304,65 @@ export const renderTerminal = (els: TermElements, list: IssueList | null, column
     </Box>
   )
 
-  const issueRow = (issue: Issue, age: string) => {
+  // The number's column has a cell more on its left, so a label's name and the number sit two apart.
+  const numberCells = numberWidth + 1
+
+  const issueRow = (issue: Issue, age: string, i: number) => {
     // The lead's two cells, the gap before the right cluster, the number and the age.
     const keep = Math.max(TITLE_MIN, Math.floor(k.width / 2))
-    let used = gutter + 2 + k.space.item + numberWidth + k.space.item + ageWidth + Math.min([...issue.title].length, keep)
-    // Labels in GitHub's order, while each still fits beside the title's minimum; the rest are left out.
+    const used = gutter + 2 + k.space.item + numberCells + k.space.item + ageWidth + Math.min([...issue.title].length, keep)
+    // One label, GitHub's first, while it fits beside the title's minimum (its swatch, a space, its
+    // name, the gap before it); the rest say only how many they are. Should the row still run short,
+    // the count goes first, then the label, then the age, then the number.
     const labels: RightPart[] = []
-    for (const l of issue.labels) {
-      const w = [...l.name].length + k.space.item
-      if (used + w > k.width) break
-      used += w
-      // Should the row still run short, labels go before the age and the number, the last label first.
-      labels.push({ part: k.pill(`label-${l.name}`, l.name, l.color), drop: 3 })
+    const first = issue.labels[0]
+    if (first) {
+      const cells = 2 + [...first.name].length
+      if (used + cells + k.space.item <= k.width) {
+        labels.push({ part: k.pill(`label-${first.name}`, first.name, first.color), drop: 3, cells })
+        const rest = issue.labels.length - 1
+        const more = `+${rest}`
+        if (rest > 0 && used + cells + 2 * k.space.item + more.length <= k.width) labels.push({ part: more, drop: 4 })
+      }
     }
-    const prs = issue.prs.map((pr, i) =>
+    // Each linked PR on a dim row: what it is reads from its icon and its checks' status colour.
+    const prs = issue.prs.map((pr, j) =>
       k.item(`pr-${issue.number}-${pr.number}`, {
-        tree: treePrefix([], i === issue.prs.length - 1),
+        tree: treePrefix([], j === issue.prs.length - 1),
         lead: prIcon(pr),
         leadColor: prColor(pr),
         text: `#${pr.number}`,
+        dim: true,
         note: pr.title || undefined,
         right: [prNote(Text, pr, k.ink)],
         // In the gutter's column too, so the tree lines up under its issue.
         selected: keys ? false : undefined,
       }),
     )
-    // The open-issue mark; with keys, a Button the focus ring lands on, Enter on it starting the issue.
+    // The open-issue mark, dim: every issue here is open. With keys, a Button the focus ring lands on,
+    // Enter on it starting the issue.
     const lead =
       keys && Button ? (
         <Button key={markKey(issue.number)} plain label={`#${issue.number}`} onPress={() => st.start!(issue)}>
-          {k.icon('issue-opened', OPEN)}
+          {k.icon('issue-opened', MUTED)}
         </Button>
       ) : (
         'issue-opened'
       )
+    // An issue with PRs under it is a block: one blank row parts it from the issue before.
+    const prev = list.issues[i - 1]
+    const apart = prev && (prev.prs.length > 0 || issue.prs.length > 0)
     return (
-      <Box key={`issue-${issue.number}`} flexDirection="column">
+      <Box key={`issue-${issue.number}`} flexDirection="column" marginTop={apart ? k.space.block : 0}>
         {k.item(`row-${issue.number}`, {
           lead,
-          leadColor: OPEN,
+          leadColor: MUTED,
           text: issue.title,
-          // The age tells least, so it goes first, then the number; the CI marks sit on rows of their own.
-          right: [...labels, { part: figure('n', `#${issue.number}`, numberWidth), drop: 1, cells: numberWidth }, { part: figure('age', age, ageWidth), drop: 2, cells: ageWidth }],
+          right: [
+            ...labels,
+            { part: figure('n', `#${issue.number}`, numberCells), drop: 1, cells: numberCells },
+            { part: figure('age', age, ageWidth), drop: 2, cells: ageWidth },
+          ],
           selected: chosen(issue.number),
         })}
         {prs}
@@ -344,11 +372,23 @@ export const renderTerminal = (els: TermElements, list: IssueList | null, column
 
   // Last-good figures say how old they are while a read is under way, or once one failed.
   const age = st.reading || list.failed ? ago(Math.max(0, at - list.at)) : undefined
+  // The key hints, a block of their own under the list, starting in the rows' mark column (past the
+  // cursor's gutter) rather than a cell left of them.
+  const hints = keys ? k.hints('hints', HINTS, { width: k.width - gutter }) : null
   return pane(
-    list.repo || 'Issues',
-    k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null], { loading: st.reading, age, failed: Boolean(list.failed) }),
+    title,
+    // The open count, bold as the figure that matters, in the default foreground: an issue being
+    // open is no status here. The ages on the rows say what changed today, so the header doesn't.
+    k.summary([[open, 'open']], { loading: st.reading, age, failed: Boolean(list.failed) }),
     list.issues.length
-      ? [...list.issues.map((issue, i) => issueRow(issue, ages[i]!)), keys ? k.hints('hints', HINTS) : null]
+      ? [
+          ...list.issues.map((issue, i) => issueRow(issue, ages[i]!, i)),
+          hints ? (
+            <Box key="keys" marginTop={k.space.block} paddingLeft={gutter}>
+              {hints}
+            </Box>
+          ) : null,
+        ]
       : [k.note('empty', 'No open issues.')],
   )
 }
