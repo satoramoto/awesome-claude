@@ -1,11 +1,11 @@
 // Changed in this fork (awesome-claude) for the desktop version: the desktop surface draws hooks/desktop.tsx.
 // The terminal draws in the kit's terminal design system: a section header, TREE
 // connectors, the kit's status colours as theme keys, and its note lines.
-import { type BuiltinToolResults, type EngineInterface, type Register, type RenderElement, type Timer, update } from 'claude-code'
+import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import { ago, middle } from '../kit/format'
-import { C, GRAY, MUTED, termInk, treePrefix } from '../kit/tokens'
+import { C, MUTED, termInk, treePrefix } from '../kit/tokens'
 import { type Hint, kit, MARK } from '../kit/ui'
 
 import type { Activity, FileNode, FileTree } from '../types'
@@ -40,6 +40,8 @@ import {
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const PANE = 'filetree'
+/** The tab's name. The folder is the section header's title, so the tab doesn't repeat it. */
+const TAB = 'Files'
 /** Each activity tone's terminal colour: the kit's meaning for it (desktop's toneColor), as a theme key. */
 const SHIMMER: Record<string, string> = Object.fromEntries(TONES.map(k => [k, termInk(toneColor(k)).color ?? '']))
 /** The terminal's key hints while the pane has the keyboard, the most used first. */
@@ -280,9 +282,8 @@ async function reset($: EngineInterface, root: string, focus = false): Promise<v
   sizeEpoch += 1
   sizeQueue = []
   await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, showSize: prev.root ? prev.showSize : sizeDefault }))
-  const title = `Files: ${root.split('/').pop() || root}`
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!noDock) await $.ui.open({ id: PANE, title })
+  if (focus) await $.ui.open({ id: PANE, title: TAB, focus: true })
+  else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
   await loadDirs($, [root])
   await detectRepo($)
   await refreshGit($)
@@ -1062,7 +1063,7 @@ export const register: Register = (on, options) => {
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
       if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
-      else if (!noDock) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+      else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
     })()
     return next(e)
   })
@@ -1295,30 +1296,61 @@ export const register: Register = (on, options) => {
       const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
       const all = (p?.text ?? '').split('\n').length
       const hints = k.hints('keys', PREVIEW_HINTS)
-      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1) - (hints ? 1 : 0))
+      // The header, the note, the blank row the terminal's section leaves under it, and the hints.
+      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1) - (terminal ? 1 : 0) - (hints ? 1 : 0))
       const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
       const back = unicode ? '← files' : '\u{f004d} files'
-      // On the terminal the path is cut in the middle to what the two buttons leave it.
-      const shown = terminal ? middle(name, width - [...back].length - 3) : name
+      const rows = (
+        <Client
+          key="rows"
+          module="./rows.tsx"
+          props={{ rows: [], active: '', mark: MARK.selected, focused, tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+        />
+      )
+      if (terminal) {
+        // The file as a section of its own: its path the bold title, cut in the middle to
+        // what the actions leave it, a dim rule, then open-outside and back, both quiet.
+        // The note (binary, too large, the first lines only) is a dim line under it.
+        const external = unicode ? '↗' : '\u{f08e}'
+        const right = k.actions('preview', [
+          { key: 'external', label: external, quiet: true, onPress: () => void openFile($, t.preview, true) },
+          { key: 'back', label: back, quiet: true, onPress: () => void closePreview($) },
+        ])
+        // The arrow column, the gap and the shortest rule before the actions, the actions and their gap.
+        const room = width - k.edge.left - k.edge.right - k.space.item * 2 - 1 - [...external].length - k.space.group - [...back].length
+        return (
+          <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
+            {k.section({
+              id: 'preview',
+              title: middle(name, Math.max(6, room)),
+              right,
+              keepRight: true,
+              children: [p?.note ? k.note('note', p.note) : null, rows],
+            })}
+            {hints ? <Box flexGrow={1} /> : null}
+            {hints ? (
+              <Box key="hints" paddingLeft={k.edge.left}>
+                {hints}
+              </Box>
+            ) : null}
+          </Box>
+        )
+      }
       return (
         <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
           <Box flexDirection="row">
             <Button key="back" plain label={back} onPress={() => void closePreview($)} />
             <Text> </Text>
             <Box flexShrink={1} flexGrow={1} minWidth={0}>
-              <Text bold wrap={terminal ? 'truncate' : 'truncate-start'}>
-                {shown}
+              <Text bold wrap="truncate-start">
+                {name}
               </Text>
             </Box>
             <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
           </Box>
           {p?.note ? <Text dimColor>{p.note}</Text> : null}
-          <Client
-            key="rows"
-            module="./rows.tsx"
-            props={{ rows: [], active: '', mark: MARK.selected, focused, tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
-          />
+          {rows}
           {hints ? <Box flexGrow={1} /> : null}
           {hints}
         </Box>
@@ -1332,7 +1364,8 @@ export const register: Register = (on, options) => {
     const ignored = new Set(t.ignored)
     const untracked = new Set(t.untrackedDirs)
     const rows = visibleRows(t)
-    const hints = k.hints('keys', TREE_HINTS)
+    // In the rows' text column, one cell in from the section body.
+    const hints = k.hints('keys', TREE_HINTS, { width: k.width - 1 })
     // The terminal's rows around the tree: the header, the search line and the blank
     // row an open section leaves under its body, the branch line (or the no-repo note),
     // the empty note, the footer and the key hints.
@@ -1399,9 +1432,11 @@ export const register: Register = (on, options) => {
     }
     // The terminal, in the kit's terminal design system: the folder as a section
     // header with its actions on the right, and in its body (two cells in) the branch
-    // line, the search field and the tree, each row `[TREE connector][icon] name …
-    // figures status`. Colours are the kit's, each with its one meaning (as on the
-    // desktop), drawn as theme keys; quiet marks are the terminal's dim. The cursor
+    // line, the search field and the tree, each row `[gutter][TREE connector][icon]
+    // name … figures status`; icons share one column, names the next. No measure: a
+    // tree wants every cell for its names. Colour is only on what says a state: a
+    // name's git state, the branch line's totals, the context file's icon, Claude's
+    // activity; the figures after a name are dim. The cursor
     // row is the kit's selected list row: `▌` in the gutter and the name bold (the
     // mark dim and the weight plain while the pane hasn't the keyboard).
     /** A kit colour's terminal ink as a row run's fields. */
@@ -1411,7 +1446,7 @@ export const register: Register = (on, options) => {
     }
     const cells = (segs: Seg[]) => segs.reduce((sum, s) => sum + [...s.t].length, 0)
     const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
-    /** A folder's file counts, as the desktop draws them: the letter dim, the figure in its colour. */
+    /** A folder's file counts: the letter, the figure, its colour (the branch line's). */
     const countParts = (c: [number, number, number] | undefined): [string, number, string][] =>
       c
         ? ([
@@ -1420,19 +1455,22 @@ export const register: Register = (on, options) => {
             ['D', c[2], C.bad],
           ] as [string, number, string][]).filter(([, n]) => n > 0)
         : []
-    const countSegs = (c: [number, number, number] | undefined): Seg[] =>
-      countParts(c).flatMap(([letter, n, color]) => [{ t: ` ${letter}`, ...ink(GRAY.dark) }, { t: String(n), ...ink(color) }])
+    /** On a folder's row, dim as the rest of a row's meta. */
+    const countSegs = (c: [number, number, number] | undefined): Seg[] => countParts(c).map(([letter, n]) => ({ t: ` ${letter}${n}`, ...ink(MUTED) }))
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
 
     // Each row's connector, from the whole list so it holds while the view scrolls:
     // walking up from the bottom, `more[d]` says whether a later row sits at depth d
-    // under the same parent (a pipe above it, a tee rather than an elbow).
+    // under the same parent (a pipe above it, a tee rather than an elbow). The top
+    // level has none (the kit's `treePrefix` at depth 0), so its icons stand in the
+    // column of the branch line's and the search line's, and a child's connector
+    // starts under its folder's icon.
     const prefixes = new Map<string, string>()
     const more: boolean[] = []
     for (let i = rows.length - 1; i >= 0; i--) {
       const r = rows[i]!
       more.length = Math.min(more.length, r.depth + 1)
-      prefixes.set(r.node.id, treePrefix(Array.from({ length: r.depth }, (_, j) => Boolean(more[j])), !more[r.depth]))
+      prefixes.set(r.node.id, treePrefix(Array.from({ length: Math.max(0, r.depth - 1) }, (_, j) => Boolean(more[j + 1])), !more[r.depth], r.depth))
       more[r.depth] = true
     }
     const scrolls = !nativeScroll && rows.length > shown.length + pinned.length
@@ -1457,24 +1495,30 @@ export const register: Register = (on, options) => {
         : loc || n.kind !== 'file' || !n.mtime
           ? ''
           : ago(now - n.mtime)
+      // Everything after the name is meta, dim: the name's colour says the file's git
+      // state, and the letter, the lines changed and a folder's counts say it in words,
+      // without a second and third colour on the row.
       const right: Seg[] = []
       if (meta) right.push({ t: ` ${meta}`, ...ink(MUTED) })
-      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, ...ink(C.ok) })
-      if (loc && loc[1] > 0) right.push({ t: ` −${loc[1]}`, ...ink(C.bad) })
+      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, ...ink(MUTED) })
+      if (loc && loc[1] > 0) right.push({ t: ` −${loc[1]}`, ...ink(MUTED) })
       const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
       right.push(...dirCounts)
       // The status letter's column, kept when empty so the figures line up.
       if (!dirCounts.length) {
-        right.push(status ? { t: ` ${status}`, ...ink(statusColor(status)) } : isIgnored ? { t: unicode ? ' ⊘' : ' \u{f05e}', ...ink(MUTED) } : { t: '  ' })
+        right.push(status ? { t: ` ${status}`, ...ink(MUTED) } : isIgnored ? { t: unicode ? ' ⊘' : ' \u{f05e}', ...ink(MUTED) } : { t: '  ' })
       }
       const tree = prefixes.get(n.id) ?? ''
-      // The name gets what the gutter, the connector, the icon, the figures, a cell's gap and the scrollbar leave.
-      const room = Math.max(4, k.width - 1 - [...tree].length - 2 - cells(right) - 1 - (scrolls ? 1 : 0))
+      // The name gets what the gutter, the connector, the icon, the figures, a cell's gap and the scrollbar (a gap and its thumb) leave.
+      const room = Math.max(4, k.width - 1 - [...tree].length - 2 - cells(right) - 1 - (scrolls ? 2 : 0))
       const name = [...n.name].length > room ? [...n.name].slice(0, room - 1).join('') + '…' : n.name
       // Plain glyphs: the kit's folder (its fold arrow, as TERM_GLYPH draws it) and file.
       const glyph = unicode ? (n.kind === 'dir' ? (r.open ? '▾' : '▸') : '□') : fileIcon(n, r.open, n.kind === 'dir' && n.id === t.top)
       const lit = isBright || isDim
-      const nameInk = isIgnored || n.hidden ? ink(MUTED) : status ? ink(statusColor(status)) : {}
+      // A folder's git state is only its files' rolled up: its dim counts say it, and its
+      // name stays plain unless the folder itself is new (untracked as a whole).
+      const rolledUp = n.kind === 'dir' && status !== undefined && !untracked.has(n.id) && !underAny(dirname(n.id), untracked, t.root)
+      const nameInk = isIgnored || n.hidden ? ink(MUTED) : status && !rolledUp ? ink(statusColor(status)) : {}
       // The cursor row's name is bold while the pane has the keyboard (the kit's selected row);
       // the file selected as Claude's context has its icon in blue, what's live.
       const bold = n.id === t.cursor && focused ? true : undefined
@@ -1494,30 +1538,49 @@ export const register: Register = (on, options) => {
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar = scrolls ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize } : undefined
 
-    // The branch: its name, then ahead, behind and the upstream dim; on the right the
-    // lines and files changed, or "clean". Outside a repo, a note says so.
+    // The branch: its name, then ahead, behind and the upstream dim (the upstream only
+    // when it isn't the same name on a remote); on the right the lines and files
+    // changed, or "clean". It sits one cell in, as the tree's rows sit after their
+    // cursor gutter, so its icon and name share their columns. The note is left out
+    // when the name wouldn't fit beside it, so the name is cut once, in the middle,
+    // never again at its end; the file counts give way before the lines changed.
+    // Outside a repo, a note says so.
     const branchLine = () => {
-      if (!t.top) return k.note('norepo', 'no git repo · git status starts after git init')
+      if (!t.top)
+        return (
+          <Box key="norepo" paddingLeft={1}>
+            {k.note('norepo', 'no git repo · git status starts after git init', 'empty', { width: k.width - 1 })}
+          </Box>
+        )
       if (!t.branch) return null
       const b = t.branch
       const flash = bright.has(BRANCH_ROW) ? toneColor(t.flashTones[BRANCH_ROW] ?? 'teal', true) : undefined
-      const changed: RenderElement[] = [
-        ...(totals[0] > 0 ? [<Text key="add" {...termInk(C.ok)}>{`+${totals[0]}`}</Text>] : []),
-        ...(totals[1] > 0 ? [<Text key="del" {...termInk(C.bad)}>{`−${totals[1]}`}</Text>] : []),
-        ...countParts(t.counts[t.root]).map(([letter, n, color]) => (
-          <Text key={`n-${letter}`}>
-            <Text dimColor>{letter}</Text>
-            <Text {...termInk(color)}>{String(n)}</Text>
-          </Text>
-        )),
+      const figure = (key: string, text: string, color: string, drop?: number) => ({ part: <Text key={key} {...termInk(color)}>{text}</Text>, cells: [...text].length, ...(drop ? { drop } : {}) })
+      const changed = [
+        ...(totals[0] > 0 ? [figure('add', `+${totals[0]}`, C.ok, 1)] : []),
+        ...(totals[1] > 0 ? [figure('del', `−${totals[1]}`, C.bad, 1)] : []),
+        ...countParts(t.counts[t.root]).map(([letter, n, color]) => figure(`n-${letter}`, `${letter}${n}`, color, 2)),
       ]
+      const same = b.upstream.slice(b.upstream.indexOf('/') + 1) === b.head
+      const note = [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', same ? '' : b.upstream].filter(Boolean).join(' ')
+      // What the row leaves the name: the indent, the icon's column, and the figures.
+      const avail = k.width - 1 - 2
+      const cluster = (parts: { cells: number }[]) => parts.reduce((n, p) => n + p.cells + k.space.item, 0)
+      const head = [...b.head].length
+      // The file counts only while the name fits whole beside them; then the note likewise.
+      // (Untracked files alone have no lines to show, so their count stays.)
+      const lines = changed.filter(p => p.drop !== 2)
+      const shown = head + cluster(changed) <= avail || !lines.length ? changed : lines
+      const right = shown.length ? shown : [{ part: 'clean', cells: 5 }]
+      const fits = head + 2 + [...note].length <= avail - cluster(right)
       return k.item('branch', {
         lead: <Text {...(flash ? termInk(flash) : { dimColor: true })}>{unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd}</Text>,
         text: b.head,
         textColor: flash,
         path: true,
-        note: [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', b.upstream].filter(Boolean).join(' '),
-        right: changed.length ? changed : ['clean'],
+        indent: 1,
+        ...(note && fits ? { note } : {}),
+        right,
       })
     }
 
@@ -1547,15 +1610,17 @@ export const register: Register = (on, options) => {
       },
       { key: 'size', label: unicode ? 'Σ' : '\u{f02ca}', quiet: !t.showSize, onPress: () => void patch($, cur => ({ showSize: !cur.showSize })) },
       { key: 'collapse', label: unicode ? '⊟' : '\u{eac5}', quiet: true, onPress: () => void collapseAll($) },
-      t.selected ? { key: 'unselect', label: unicode ? '⊘' : '\u{f0777}', onPress: () => void patch($, () => ({ selected: '' })) } : null,
     ])
 
+    // The search field, in the branch line's columns: a dim search glyph, then the field.
     const searchLine = (
-      <Box key="search" flexDirection="row" gap={k.space.item}>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+      <Box key="search" flexDirection="row" paddingLeft={1}>
+        <Box width={2} flexShrink={0}>
+          <Text dimColor>{unicode ? '⌕' : '\u{f0349}'}</Text>
+        </Box>
+        <Box flexGrow={1} flexShrink={1} minWidth={0} marginRight={t.query ? k.space.item : 0}>
           <Input
             key="q"
-            label="/ "
             placeholder="search"
             submitLabel="jump"
             autoFocus
@@ -1568,22 +1633,27 @@ export const register: Register = (on, options) => {
       </Box>
     )
 
-    // The footer: the selected path, cut in the middle to what the gutter, its label and
-    // git's latest step leave it, then that step on the right.
+    // The footer, in the rows' text column: the file selected as Claude's context (its
+    // label dim, the path plain, cut in the middle to what the rest leaves it) with the
+    // button that clears it right after it, then git's latest step on the right.
     const chipCells = (a: Activity) =>
       [...(unicode ? a.plain : a.nerd)].length + k.space.pair + [...a.label].length + (a.state === 'running' ? 1 : 0) + (a.state === 'done' && a.kind === 'git commit' ? k.space.pair + (a.detail.split(' ')[0] ?? '').length : 0)
-    const selectedLabel = 'selected: '
+    const selectedLabel = 'selected'
+    const unselect = unicode ? '×' : '\u{f0156}'
     const selectedPath = t.selected ? (t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)) : ''
-    const pathRoom = width - k.edge.left - selectedLabel.length - k.space.group - (latest ? chipCells(latest) + k.space.group : 0)
+    const pathRoom = k.width - 1 - selectedLabel.length - k.space.item * 2 - [...unselect].length - (latest ? chipCells(latest) + k.space.group : 0)
     const footer =
       t.selected || latest ? (
-        <Box key="foot" flexDirection="row" gap={k.space.group} paddingLeft={k.edge.left}>
+        <Box key="foot" flexDirection="row" gap={k.space.group} paddingLeft={k.edge.left + 1} paddingRight={k.edge.right}>
           {t.selected ? (
-            <Box flexShrink={1} minWidth={0}>
-              <Text dimColor wrap="truncate">
-                {selectedLabel}
-                {middle(selectedPath, Math.max(1, pathRoom))}
-              </Text>
+            <Box flexDirection="row" flexShrink={1} minWidth={0} gap={k.space.item}>
+              <Box flexShrink={1} minWidth={0}>
+                <Text wrap="truncate">
+                  <Text dimColor>{selectedLabel} </Text>
+                  {middle(selectedPath, Math.max(1, pathRoom))}
+                </Text>
+              </Box>
+              <Button key="unselect" plain dimColor label={unselect} onPress={() => void patch($, () => ({ selected: '' }))} />
             </Box>
           ) : null}
           <Box flexGrow={1} />
@@ -1602,7 +1672,11 @@ export const register: Register = (on, options) => {
           children: [
             branchLine(),
             searchLine,
-            rows.length === 0 ? k.note('empty', t.query ? 'no match' : 'empty') : null,
+            rows.length === 0 ? (
+              <Box key="empty" paddingLeft={1}>
+                {k.note('empty', t.query ? 'no match' : 'empty', 'empty', { width: k.width - 1 })}
+              </Box>
+            ) : null,
             <Client
               key="rows"
               module="./rows.tsx"
@@ -1613,7 +1687,7 @@ export const register: Register = (on, options) => {
         <Box flexGrow={1} />
         {footer}
         {hints ? (
-          <Box key="hints" paddingLeft={k.edge.left}>
+          <Box key="hints" paddingLeft={k.edge.left + 1}>
             {hints}
           </Box>
         ) : null}

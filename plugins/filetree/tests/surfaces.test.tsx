@@ -623,7 +623,8 @@ test('open with preview: End shows the last screen, an edit reloads the file, a 
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain('"startLine":42')
+  // 20 rows less the header and the blank row the section leaves under it: lines 42 to 59.
+  expect(shown).toContain('"startLine":43')
   expect(shown).toContain('line 59')
   w.files![`${root}/a.ts`] = 'changed\n'
   await $.tool.call({ tool: 'Edit', file_path: `${root}/a.ts`, old_string: 'a', new_string: 'b' } as any)

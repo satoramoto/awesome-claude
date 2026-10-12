@@ -10,7 +10,7 @@ const LONG = 'a-file-whose-name-runs-on-and-on-well-past-any-sidebar.config.ts'
 type Dirs = Record<string, [string, 'file' | 'dir'][]>
 
 /** A repository on macOS: `src/a.ts` modified (+3 −1), `notes.md` new, the branch one ahead of its upstream. */
-function world(on: any, opts: { dirs?: Dirs; top?: string } = {}) {
+function world(on: any, opts: { dirs?: Dirs; top?: string; status?: string } = {}) {
   const dirs: Dirs = opts.dirs ?? {
     [ROOT]: [['src', 'dir'], ['README.md', 'file'], ['notes.md', 'file'], [LONG, 'file']],
     [`${ROOT}/src`]: [['a.ts', 'file'], ['b.ts', 'file']],
@@ -49,7 +49,7 @@ function world(on: any, opts: { dirs?: Dirs; top?: string } = {}) {
     const verb = argv.slice(4).find(a => !a.startsWith('-'))
     if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok('aaaaaaa1\n')
     if (verb === 'rev-parse') return top ? ok(`\n${top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
-    if (verb === 'status') return ok('## main...origin/main [ahead 1]\0 M src/a.ts\0?? notes.md\0')
+    if (verb === 'status') return ok(opts.status ?? '## main...origin/main [ahead 1]\0 M src/a.ts\0?? notes.md\0')
     if (verb === 'diff' && argv.includes('--numstat')) return ok('3\t1\tsrc/a.ts\0')
     if (verb === 'ls-files') return ok('src/a.ts\0src/b.ts\0README.md\0notes.md\0')
     return ok('')
@@ -77,54 +77,115 @@ const rowOf = async (ui: any, name: string) => (await rowsProps(ui)).rows.find(r
 const seg = (r: Row, t: string) => [...r.left, ...r.right].find(s => s.t === t || s.t === ` ${t}`)
 const cells = (segs: Seg[]) => segs.reduce((n, s) => n + [...s.t].length, 0)
 
-test('terminal: rows hang from TREE connectors, two cells a level, under a section header with its actions', async ($, on) => {
+test('terminal: nested rows hang from TREE connectors, two cells a level, under a section header with its actions', async ($, on) => {
   const { ui, clock } = await terminal($, on)
   // The header is the kit's section: the folder's name bold, the actions on the right.
   const title = (await ui.findAll({ type: 'Text', text: 'proj' })).find((t: any) => t.props.bold)
   expect(title).toBeDefined()
   for (const key of ['up', 'cwd', 'refresh', 'hidden', 'size', 'collapse']) expect(await ui.find({ type: 'Button', key })).toBeDefined()
+  // Nothing selected, so nothing to clear.
+  expect(await ui.find({ type: 'Button', key: 'unselect' })).toBeUndefined()
   let rows = (await rowsProps(ui)).rows
-  expect(rows.map(r => r.left[0]?.t)).toEqual([TREE.tee, TREE.tee, TREE.tee, TREE.last])
+  // The top level has no connector (the kit's treePrefix at depth 0): its icons share
+  // the branch and search lines' column.
+  expect(rows.map(r => r.left[0]?.t)).toEqual(['', '', '', ''])
   expect(rows.every(r => r.left[0]?.dc === true)).toBe(true)
   await ui.post({ press: `${ROOT}/src` }, { in: 'rows' })
   await clock.settle()
   rows = (await rowsProps(ui)).rows
   const tree = (name: string) => rows.find(r => r.id === `${ROOT}/${name}`)?.left[0]?.t
-  expect(tree('src')).toBe(TREE.tee)
-  expect(tree('src/a.ts')).toBe(TREE.pipe + TREE.tee)
-  expect(tree('src/b.ts')).toBe(TREE.pipe + TREE.last)
-  expect(rows.at(-1)?.left[0]?.t).toBe(TREE.last)
+  expect(tree('src')).toBe('')
+  // A child's connector starts under its folder's icon.
+  expect(tree('src/a.ts')).toBe(TREE.tee)
+  expect(tree('src/b.ts')).toBe(TREE.last)
   expect(rows.filter(r => r.left[0]?.t === TREE.last)).toHaveLength(1)
   await ui.unmount()
 })
 
-test('terminal: git marks, lines changed and ages in the kit status colours as theme keys, quiet marks dim', async ($, on) => {
+test('terminal: deeper rows carry a pipe for each open level above them that has more rows', async ($, on) => {
+  const dirs: Dirs = {
+    [ROOT]: [['src', 'dir'], ['README.md', 'file']],
+    [`${ROOT}/src`]: [['lib', 'dir'], ['main.ts', 'file']],
+    [`${ROOT}/src/lib`]: [['x.ts', 'file']],
+  }
+  const { ui, clock } = await terminal($, on, 60, { dirs })
+  for (const dir of ['src', 'src/lib']) {
+    await ui.post({ press: `${ROOT}/${dir}` }, { in: 'rows' })
+    await clock.settle()
+  }
+  const rows = (await rowsProps(ui)).rows
+  const tree = (name: string) => rows.find(r => r.id === `${ROOT}/${name}`)?.left[0]?.t
+  expect(tree('src/lib')).toBe(TREE.tee)
+  expect(tree('src/lib/x.ts')).toBe(TREE.pipe + TREE.last)
+  expect(tree('src/main.ts')).toBe(TREE.last)
+  expect(tree('README.md')).toBe('')
+  await ui.unmount()
+})
+
+test("terminal: a name takes its git state's colour as a theme key; the figures after it stay dim", async ($, on) => {
   const { ui, clock } = await terminal($, on)
   await ui.post({ press: `${ROOT}/src` }, { in: 'rows' })
   await clock.settle()
   const notes = await rowOf(ui, 'notes.md')
   expect(seg(notes, 'notes.md')?.c).toBe('success')
-  expect(seg(notes, '?')?.c).toBe('success')
+  // The letter says the state in words, dim: one colour on the row.
+  expect(seg(notes, '?')).toMatchObject({ dc: true })
+  expect(seg(notes, '?')?.c).toBeUndefined()
   const a = await rowOf(ui, 'src/a.ts')
   expect(seg(a, 'a.ts')?.c).toBe('warning')
-  expect(seg(a, 'M')?.c).toBe('warning')
-  expect(seg(a, '+3')?.c).toBe('success')
-  expect(seg(a, '−1')?.c).toBe('error')
+  for (const t of ['M', '+3', '−1']) {
+    expect(seg(a, t)?.dc).toBe(true)
+    expect(seg(a, t)?.c).toBeUndefined()
+  }
   const readme = await rowOf(ui, 'README.md')
   expect(seg(readme, 'README.md')?.c).toBeUndefined()
   expect(seg(readme, '3h')?.dc).toBe(true)
-  // A folder's lines changed and file counts: the letter dim, the figure in its colour.
+  // A folder's lines changed and file counts, dim like any row's figures; its name plain,
+  // as its state is only its files'.
   const src = await rowOf(ui, 'src')
+  expect(seg(src, 'src')?.c).toBeUndefined()
   expect(src.right.map(s => s.t).join('')).toBe(' +3 −1 M1')
-  expect(src.right.at(-2)?.dc).toBe(true)
-  expect(src.right.at(-1)?.c).toBe('warning')
+  expect(src.right.every(s => s.dc === true && s.c === undefined)).toBe(true)
   // No hex anywhere in the rows: theme keys and dim only.
   expect(JSON.stringify((await rowsProps(ui)).rows)).not.toMatch(/"c":"#/)
-  // The branch line: name, ahead and upstream dim, the lines changed coloured.
-  expect((await ui.findAll({ type: 'Text', text: /↑1 origin\/main/ })).length).toBeGreaterThan(0)
+  await ui.unmount()
+})
+
+test("terminal: the branch line keeps the repo's totals in colour and leaves out an upstream of the same name", async ($, on) => {
+  const { ui } = await terminal($, on)
+  // Ahead, dim after the name; `origin/main` only restates `main`.
+  expect((await ui.findAll({ type: 'Text', text: /↑1/ })).length).toBeGreaterThan(0)
+  expect(await ui.find({ type: 'Text', text: /origin\/main/ })).toBeUndefined()
   expect((await ui.findAll({ type: 'Text', text: '+3' })).some((t: any) => t.props.color === 'success')).toBe(true)
   expect((await ui.findAll({ type: 'Text', text: '−1' })).some((t: any) => t.props.color === 'error')).toBe(true)
+  expect((await ui.findAll({ type: 'Text', text: 'M1' })).some((t: any) => t.props.color === 'warning')).toBe(true)
   await ui.unmount()
+})
+
+test('terminal: a long branch name is cut once, in the middle, with the file counts and the note giving way first', async ($, on) => {
+  const head = 'feature/search-results-pane'
+  const clock = world(on, { status: `## ${head}...origin/dev [ahead 2]\0 M src/a.ts\0?? notes.md\0` })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const branch = async (columns: number) => {
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(columns) })
+    await clock.settle()
+    const all = ((await ui.findAll({ type: 'Text' })) as any[]).map(t => String(t.text ?? ''))
+    await ui.unmount()
+    return {
+      whole: all.includes(head),
+      cut: all.find(t => t.startsWith('…') && head.endsWith(t.slice(1))),
+      counts: all.includes('M1'),
+      note: all.some(t => /↑2 origin\/dev/.test(t)),
+    }
+  }
+  // Wide: the whole name, its note (ahead and a differently named upstream) and the counts.
+  expect(await branch(100)).toMatchObject({ whole: true, counts: true, note: true })
+  // Narrow: the counts and the note give way; the name is cut once, keeping its end.
+  const narrow = await branch(30)
+  expect(narrow).toMatchObject({ whole: false, counts: false, note: false })
+  expect(narrow.cut).toBeDefined()
+  expect([...narrow.cut!].length).toBeGreaterThan(8)
 })
 
 test("terminal: Claude's reads and writes shimmer in the kit's meanings, and a commit shows in the footer", async ($, on) => {
@@ -158,8 +219,8 @@ test('terminal: every row fits the section body at 30, 40, 60 and 100 columns', 
     const at = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(columns) })
     await clock.settle()
     const { rows, bar } = await rowsProps(at)
-    // The one-cell gutter the cursor's mark sits in, the runs, and the scrollbar.
-    for (const r of rows) expect(1 + cells(r.left) + cells(r.right) + (bar ? 1 : 0)).toBeLessThanOrEqual(columns - 2)
+    // The one-cell gutter the cursor's mark sits in, the runs, and the scrollbar (a gap and its thumb).
+    for (const r of rows) expect(1 + cells(r.left) + cells(r.right) + (bar ? 2 : 0)).toBeLessThanOrEqual(columns - 3)
     // The long name is cut with an ellipsis rather than pushed past the edge.
     expect(rows.find(r => r.id === `${ROOT}/${LONG}`)?.left.at(-1)?.t.endsWith('…')).toBe(columns < 100)
     await at.unmount()
@@ -242,13 +303,20 @@ async function selectDeep(ui: any, clock: any) {
 test('terminal: the selected path in the footer is cut in the middle, keeping its first folder and its name', async ($, on) => {
   const { ui, clock } = await terminal($, on, 60, { dirs: DEEP })
   await selectDeep(ui, clock)
-  const foot = await ui.find({ type: 'Text', text: /^selected: / })
-  expect(foot?.text).toBe('selected: packages/…/NavigationSidebarPanel.tsx')
+  const foot = await ui.find({ type: 'Text', text: /^selected / })
+  expect(foot?.text).toBe('selected packages/…/NavigationSidebarPanel.tsx')
+  // The label dim, the path plain.
+  expect(foot?.props.dimColor).toBeFalsy()
+  expect((await ui.findAll({ type: 'Text', text: /^selected\s*$/ })).some((t: any) => t.props.dimColor)).toBe(true)
   await ui.unmount()
   // Wide enough, the whole path.
   const wide = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(100) })
   await clock.settle()
-  expect((await wide.find({ type: 'Text', text: /^selected: / }))?.text).toBe('selected: packages/web/src/components/NavigationSidebarPanel.tsx')
+  expect((await wide.find({ type: 'Text', text: /^selected / }))?.text).toBe('selected packages/web/src/components/NavigationSidebarPanel.tsx')
+  // The button that clears it sits beside it, and clears it.
+  await wide.press({ key: 'unselect' })
+  await clock.settle()
+  expect(await wide.find({ type: 'Text', text: /^selected / })).toBeUndefined()
   await wide.unmount()
 })
 
@@ -258,9 +326,16 @@ test('terminal: the preview header cuts a long path in the middle, and its key h
   await ui.post({ press: DEEP_FILE }, { in: 'rows' })
   await clock.settle()
   const title = (await ui.findAll({ type: 'Text', text: /NavigationSidebarPanel\.tsx$/ })).find((t: any) => t.props.bold)
-  // 48 columns less `← files`, its gap and ↗: the first folder, an ellipsis, the name.
-  expect(title?.text).toBe('packages/…/NavigationSidebarPanel.tsx')
+  // A section of its own: the path its bold title, cut in the middle to what the arrow,
+  // the shortest rule and the two quiet actions leave of 48 columns.
+  expect(title?.text).toBe('…/NavigationSidebarPanel.tsx')
+  for (const key of ['external', 'back']) expect((await ui.find({ type: 'Button', key }))?.props.dimColor).toBe(true)
   expect(await ui.find({ type: 'Text', text: /^↑↓ scroll · ← back$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /move/ })).toBeUndefined()
   await ui.unmount()
+  // Wide enough, the whole path.
+  const wide = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(100, true) })
+  await clock.settle()
+  expect((await wide.findAll({ type: 'Text', text: 'packages/web/src/components/NavigationSidebarPanel.tsx' })).some((t: any) => t.props.bold)).toBe(true)
+  await wide.unmount()
 })

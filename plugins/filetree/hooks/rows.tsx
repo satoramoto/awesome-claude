@@ -3,6 +3,7 @@
 // through a row drawn in its activity's colour, not a hex gradient. The cursor row is
 // the kit's selected list row: a `▌` gutter mark in `suggestion` (dim while the pane
 // doesn't have the keyboard), never a background, which no fixed hex reads on every theme.
+// The scrollbar is only its thumb, dim.
 import type { ClientModule } from 'claude-code'
 
 /**
@@ -25,7 +26,7 @@ export type RowsProps = {
   tones: Record<string, string>
   spinner?: string[]
   pointer?: boolean
-  /** The scrollbar: its thumb drawn plain, its track dim. */
+  /** The scrollbar: its thumb a dim `┃`, no track (a full-height rule beside the names read as a border). */
   bar?: { pos: number; size: number }
   preview?: { text: string; path: string; startLine: number; markdown: boolean }
 }
@@ -153,11 +154,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
           </Box>
           <Box flexGrow={1} />
           {r.right.map(draw)}
-          {props.bar && (
-            <Text dimColor={!(i >= props.bar.pos && i < props.bar.pos + props.bar.size)}>
-              {i >= props.bar.pos && i < props.bar.pos + props.bar.size ? '┃' : '│'}
-            </Text>
-          )}
+          {props.bar && <Text dimColor>{i >= props.bar.pos && i < props.bar.pos + props.bar.size ? ' ┃' : '  '}</Text>}
         </Box>
       ))}
     </Box>
