@@ -58,7 +58,7 @@ const drive = async <T,>(clock: MockClock, work: Promise<T>): Promise<T> => {
 }
 
 /** Holds `rm -rf build`, then draws the component once the mod measured it and opened its pane. */
-const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop', where: typeof PANE | typeof BAND = PANE) => {
+const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop', where: { component: string; props: object } = PANE) => {
   const call = $.tool.call({ tool: 'Bash', command: 'rm -rf build' } as any) as Promise<any>
   await clock.settle()
   const ui = await drive(clock, $.ui.mount({ plugin: 'blast-radius', surface, ...where } as any))
@@ -67,18 +67,52 @@ const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop'
 
 const CANCELLED = 'the user pressed Cancel'
 
-test('the terminal draws the report as upstream did, and Cancel refuses the command', async ($, on) => {
+test('the terminal draws the report with the kit inside the warning border, and Cancel refuses the command', async ($, on) => {
   const clock = engine(on)
   const { call, ui } = await hold($, clock, 'terminal')
-  expect(await ui.find({ type: 'Text', text: '⚠ Blast Radius · rm -rf' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  build/index.html' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  + 11 more' })).toBeDefined()
+  // The one round border, in the warning colour's theme key.
+  const tree = (await ui.drawn()) as any
+  expect(tree.props).toMatchObject({ borderStyle: 'round', borderColor: 'warning' })
+  // The head: the alert glyph and what's held; no ⚠ title line (that's the pane's title).
+  expect(await ui.find({ type: 'Text', text: '▲' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'rm -rf' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Blast Radius|⚠/ })).toBeUndefined()
+  // Command and Would as property rows: dim label, then the value; what it would delete in the failed colour.
+  expect((await ui.find({ type: 'Text', text: 'Command' }))?.props).toMatchObject({ dimColor: true })
+  expect(await ui.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: 'Would' }))?.props).toMatchObject({ dimColor: true })
+  expect((await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' }))?.props).toMatchObject({ color: 'error', wrap: 'truncate' })
+  // The list as items: the file glyph, then the path, cut at the edge.
+  expect(await ui.findAll({ type: 'Text', text: '□' })).toHaveLength(2)
+  expect((await ui.find({ type: 'Text', text: 'build/assets/index.js' }))?.props).toMatchObject({ wrap: 'truncate' })
+  expect(await ui.find({ type: 'Text', text: '+ 11 more' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Paths: build' })).toBeDefined()
+  // At 60 columns the hint fits beside the actions; they carry hotkeys 1 and 2.
   expect(await ui.find({ type: 'Text', text: 'Claude is waiting on your answer' })).toBeDefined()
+  const buttons: { key?: string; props: Record<string, unknown> }[] = await ui.findAll({ type: 'Button' })
+  expect(buttons.map(b => [b.key, b.props.label, b.props.hotkey])).toEqual([
+    ['proceed', 'Proceed', '1'],
+    ['cancel', 'Cancel', '2'],
+  ])
   await drive(clock, ui.press({ key: 'cancel' }))
   const result = await drive(clock, call)
   expect(String(result.deny ?? result.text)).toContain(CANCELLED)
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, the report still fits: the hint goes, every long text truncates, and Proceed runs', async ($, on) => {
+  const clock = engine(on, false)
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: 'Blast Radius' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Claude is waiting on your answer' })).toBeUndefined()
+  for (const text of ['rm -rf build', 'build/index.html', 'Paths: build']) {
+    expect((await ui.find({ type: 'Text', text }))?.props).toMatchObject({ wrap: 'truncate' })
+  }
+  expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
+  await drive(clock, ui.press({ key: 'proceed' }))
+  const result = await drive(clock, call)
+  expect(result.deny).toBeUndefined()
+  expect(result.text).toBe('ran')
   await ui.unmount()
 })
 

@@ -35,10 +35,11 @@ const LIST_MAX = 10;
 // The call being held, or null. One at a time: Bash calls in a turn run in order.
 let held: Held | null = null;
 
-/** The report for the surface: upstream's on the terminal, the kit's elsewhere. */
+/** The report for the surface, drawn with the kit: in cells on the terminal, as the app's elsewhere. */
 function draw($: $, e: any, state: Held, band: boolean) {
   const els = $.ui.resolve(e);
-  return e.surface === "terminal" ? renderTerminal(els, state) : renderApp(els as unknown as AppElements, state, Number(e.props?.bodyColumns ?? 40), { band });
+  const columns = Number(e.props?.bodyColumns ?? 40);
+  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band }) : renderApp(els as unknown as AppElements, state, columns, { band });
 }
 
 export const register: Register = (on) => {
