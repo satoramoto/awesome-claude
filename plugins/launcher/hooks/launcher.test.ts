@@ -27,6 +27,8 @@ const result = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, s
 type World = {
   /** Ports something listens on, as lsof would list them. */
   listening: Set<number>
+  /** The CPU percent ps reports for every listening process. */
+  cpu: number
   /** Every spawn the mod asked for. */
   spawned: ProcessSpawnRequest[]
   /** Spawns that ended because the mod ended their loop. */
@@ -44,7 +46,7 @@ type World = {
  */
 const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => {
   const clock = mock.clock(on, { now: NOW })
-  const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock, opened: [] }
+  const world: World = { listening: new Set([6006]), cpu: 4, spawned: [], killed: [], clock, opened: [] }
   on('session.cwd', async () => ({ value: '/repo/app' }))
   on('ui.open', async (_$, e) => {
     world.opened.push({ id: e.id, title: e.title ?? '' })
@@ -58,9 +60,12 @@ const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => 
     if (e.path !== '/repo/.claude/launch.json') throw new Error(`ENOENT ${e.path}`)
     return { value: JSON.stringify(LAUNCH) }
   })
-  on('process.run', async (_$, e) =>
-    e.argv[0] === 'lsof' ? result([...world.listening].map(p => `p100\nf3\nn*:${p}`).join('\n'), world.listening.size ? 0 : 1) : result('', 1),
-  )
+  // Each listening port's process has the port for its pid; ps reports each at `world.cpu` percent and 200 MB.
+  on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'lsof') return result([...world.listening].map(p => `p${p}\nf3\nn*:${p}`).join('\n'), world.listening.size ? 0 : 1)
+    if (e.argv[0] === 'ps') return result(e.argv[e.argv.length - 1]!.split(',').map(pid => `${pid} ${world.cpu.toFixed(1)} 204800`).join('\n'))
+    return result('', 1)
+  })
   on('process.spawn', async function* (_$, e, next) {
     world.spawned.push(e)
     const name = e.argv.includes('dev') ? 'app' : 'storybook'
@@ -121,20 +126,22 @@ test('on the terminal, the head line, a blank row, then each row with its kit st
     const ui = await mountAt($, 'terminal', columns)
     expect(await ui.find({ type: 'Text', text: 'repo/.claude/launch.json' }), `head at ${columns}`).toBeDefined()
     expect((await ui.find({ key: 'top' }))?.props.marginBottom, `the blank row under the head at ${columns}`).toBe(1)
-    // A stopped server's state is the kit's status: its glyph and word.
-    expect(await ui.find({ type: 'Text', text: '■ stopped' }), `stopped at ${columns}`).toBeDefined()
+    // A stopped server's state is the kit's status glyph, then its word.
+    expect(await ui.find({ type: 'Text', text: '■' }), `stopped at ${columns}`).toBeDefined()
+    expect(await ui.find({ key: 'word-app', text: 'stopped' }), `the word stopped at ${columns}`).toBeDefined()
     expect(await ui.find({ type: 'Button', text: 'Start' }), `Start at ${columns}`).toBeDefined()
     // The one running elsewhere keeps its glyph and its address, the word only where it fits.
     expect(await ui.find({ type: 'Text', text: '✓' }), `running elsewhere at ${columns}`).toBeDefined()
     expect(await ui.find({ type: 'Link', text: '6006' }), `its address at ${columns}`).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '✓ running elsewhere' }), `the word at ${columns}`)[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    expect(await ui.find({ key: 'word-storybook', text: 'running elsewhere' }), `the word at ${columns}`)[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
     await ui.unmount()
   }
 
   // A crash unfolds its row: the exit code, then the output's tail, each line a dim note.
   await launcher($, 'start app')
   const ui = await mountAt($, 'terminal', 60)
-  expect(await ui.find({ type: 'Text', text: '✕ failed' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '✕' })).toBeDefined()
+  expect(await ui.find({ key: 'word-app', text: 'failed' })).toBeDefined()
   const line = await ui.find({ type: 'Text', text: 'Error: Cannot find module vite' })
   expect(line?.props.dimColor).toBe(true)
   expect(line?.props.wrap).toBe('truncate')
@@ -151,12 +158,92 @@ for (const columns of [30, 40]) {
     expect(await ui.find({ key: 'stop-app' })).toBeDefined()
     expect(await ui.find({ key: 'restart-app' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: '◐' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: '◐ starting' }))[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    expect(await ui.find({ key: 'word-app', text: 'starting' }))[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
     await ui.press({ key: 'stop-app' })
     expect(world.killed).toEqual(['app'])
     await ui.unmount()
   })
 }
+
+/** A running app (started here, answering) at `columns`, after `samples` reads of the ports. */
+const runningAt = async ($: Engine, on: On, columns: number, samples = 1) => {
+  const world = engine(on)
+  await launcher($)
+  await launcher($, 'start app')
+  world.listening.add(5173)
+  for (let i = 0; i < samples; i++) await launcher($, 'list')
+  return { world, ui: await mountAt($, 'terminal', columns) }
+}
+
+// The row's right side gives way in its declared order: the sparkline, then the
+// address shortens to its port, then the word goes, then the address, then Restart.
+// Stop never goes. For `app` the full row needs 47 columns, the short one 38.
+const ORDER = [
+  { columns: 60, address: 'localhost:5173', word: true, restart: true },
+  { columns: 40, address: ':5173', word: true, restart: true },
+  { columns: 32, address: ':5173', word: false, restart: true },
+  { columns: 25, address: null, word: false, restart: true },
+  { columns: 20, address: null, word: false, restart: false },
+]
+for (const o of ORDER) {
+  test(`on the terminal at ${o.columns} columns, a running row keeps ${[o.address ?? 'no address', o.word ? 'its word' : 'no word', o.restart ? 'Restart' : 'no Restart'].join(', ')}`, { timeoutMs: 15_000 }, async ($, on) => {
+    const { ui } = await runningAt($, on, o.columns)
+    expect(await ui.find({ type: 'Text', text: '✓' }), 'the glyph always').toBeDefined()
+    expect(await ui.find({ key: 'stop-app' }), 'Stop always').toBeDefined()
+    expect(await ui.find({ key: 'word-app', text: 'running' }), 'the word')[o.word ? 'toBeDefined' : 'toBeUndefined']()
+    if (o.address) expect(await ui.find({ type: 'Text', text: new RegExp(`^${o.address}$`) }), 'the address').toBeDefined()
+    else expect(await ui.find({ key: 'where-app' }), 'no address').toBeUndefined()
+    if (o.address === ':5173') expect(await ui.find({ type: 'Text', text: /localhost:5173/ }), 'shortened').toBeUndefined()
+    expect(await ui.find({ key: 'restart-app' }), 'Restart')[o.restart ? 'toBeDefined' : 'toBeUndefined']()
+    await launcher($, 'stop app')
+    await ui.unmount()
+  })
+}
+
+test('on the terminal, a running server draws a CPU sparkline that goes before its address shortens, and its CPU and memory unfolded', { timeoutMs: 15_000 }, async ($, on) => {
+  const { world, ui } = await runningAt($, on, 100, 1)
+  // One sample is no line yet.
+  expect(await ui.find({ key: 'spark-app' }), 'no sparkline from one sample').toBeUndefined()
+  world.cpu = 37
+  await launcher($, 'list')
+  expect(await ui.find({ key: 'spark-app' }), 'a sparkline from two samples').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^[⠀-⣿ ]*[⡀-⣿][⠀-⣿ ]*$/ }), 'drawn in Braille').toBeDefined()
+
+  await ui.press({ key: 'toggle-app' })
+  expect(await ui.find({ type: 'Text', text: '37%' }), 'the last CPU sample').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '200MB' }), 'its memory').toBeDefined()
+  await ui.unmount()
+
+  // At 50 columns the sparkline has gone and the address is still whole.
+  const narrow = await mountAt($, 'terminal', 50)
+  expect(await narrow.find({ key: 'spark-app' })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /^localhost:5173$/ })).toBeDefined()
+  await narrow.unmount()
+
+  // The desktop draws as before: no sparkline, no CPU figures.
+  const desk = await mountAt($, 'desktop', 100)
+  expect(await desk.find({ key: 'spark-app' })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: '37%' })).toBeUndefined()
+  await desk.unmount()
+
+  // Stopped, it measures nothing.
+  world.listening.delete(5173)
+  await launcher($, 'stop app')
+  const after = await mountAt($, 'terminal', 100)
+  expect(await after.find({ key: 'spark-app' })).toBeUndefined()
+  await after.unmount()
+})
+
+test('focused or not, the terminal pane draws the same rows and no key hints (the launcher binds no keys)', async ($, on) => {
+  engine(on)
+  await launcher($)
+  for (const isFocused of [true, false]) {
+    const ui = await $.ui.mount({ plugin: 'launcher', surface: 'terminal', ...PANE, props: { ...PANE.props, isFocused, bodyColumns: 60 } })
+    expect(await ui.find({ key: 'start-app' }), `Start, focused ${isFocused}`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /·/ }), `no hint line, focused ${isFocused}`).toBeUndefined()
+    await ui.unmount()
+  }
+})
 
 test('Start runs the configuration in the project root with PORT set; it shows running once the port answers, and Stop ends it', async ($, on) => {
   const world = engine(on)

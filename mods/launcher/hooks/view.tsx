@@ -1,9 +1,10 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import { basename } from '@kit/format'
-import { C, GRAY, MUTED } from '@kit/tokens'
+import { basename, bytes } from '@kit/format'
+import { C, GRAY, MUTED, STATUS } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { CELLS, EDGE, SPACE, kit } from '@kit/ui'
+import type { RightPart } from '@kit/ui'
 
 import type { LaunchConfig, LaunchFile, Server, Status } from '../types'
 
@@ -44,19 +45,34 @@ const serverOf = (c: LaunchConfig, servers: Record<string, Server>): Server =>
 /** How many output lines an unfolded row shows. */
 const TAIL = { terminal: 10, app: 14 } as const
 
-/** The terminal section's fold gutter, and the cells of title a row keeps before its right side gives up parts. */
+/**
+ * The terminal section's fold gutter, the cells of title a row keeps before its
+ * right side gives up parts, and the section header's gaps around its rule.
+ */
 const GUTTER = 2
 const TITLE_KEEPS = 12
+const RULE_GAPS = 2
+
+/** The cells of a running server's CPU sparkline on the terminal: the last 12 samples. */
+const SPARK_CELLS = 6
+/** The CPU percent a sparkline's top stands for at least, so an idle server's noise stays low. */
+const SPARK_FLOOR = 10
+
+/**
+ * What a terminal row's right side gives up first as it narrows (`RightPart.drop`,
+ * the highest first): the CPU sparkline, then the state's word, then the address,
+ * then Restart (it stays in `/launcher restart`). The address shortens to its
+ * port before any of them but the sparkline goes.
+ */
+const DROP = { spark: 4, word: 3, address: 2, restart: 1 } as const
 
 /** Notes that mean something went wrong reading the file, rather than there being none. */
 const isError = (note: string) => /^(Unreadable|Could not)/.test(note)
 
-/**
- * How a terminal row's right side fits its width, from fullest to barest:
- * 0 the state's word and the full address; 1 the port alone; 2 the state's glyph
- * alone; 3 no address; 4 no Restart (it stays in `/launcher restart`).
- */
-type Fit = 0 | 1 | 2 | 3 | 4
+const cells = (s: string) => [...s].length
+
+/** A CPU sample as a figure: a tenth under 10% (an idle server's 0.3%), whole above. */
+const percent = (cpu: number) => `${cpu < 10 ? cpu.toFixed(1).replace(/\.0$/, '') : Math.round(cpu)}%`
 
 /**
  * The pane, on every surface: the project as a plain line with how many answer,
@@ -64,12 +80,16 @@ type Fit = 0 | 1 | 2 | 3 | 4
  *
  *   yahaha/.claude/launch.json          1 running  1 failed
  *
- *   ▸ app        ✓ running  localhost:5173  Stop  Restart
- *   ▾ storybook  ✕ failed  :6006  Start
+ *   ▸ app ───── ✓ running  localhost:5173  ⣀⣤⣶  Stop  Restart
+ *   ▾ storybook ───────────────── ✕ failed  :6006  Start
  *     command    npm --prefix app run storybook
  *     exit       1
  *     > storybook dev -p 6006
  *     Error: …
+ *
+ * `focused` is whether the pane has the keyboard (`e.props.isFocused`). The
+ * launcher binds no keys of its own (its controls are buttons), so it draws no
+ * key hints.
  */
 export const renderPane = (
   els: PaneElements,
@@ -79,9 +99,10 @@ export const renderPane = (
   servers: Record<string, Server>,
   open: string[],
   act: Actions,
+  opts: { focused?: boolean } = {},
 ): RenderElement => {
   const { Box, Text, Link } = els
-  const k = kit(els, surface, columns)
+  const k = kit(els, surface, columns, { focused: opts.focused })
   const terminal = surface === 'terminal'
   if (!file) return terminal ? k.note('reading', 'Reading .claude/launch.json…', 'loading') : <Text dimColor>Reading .claude/launch.json…</Text>
   if (file.note) {
@@ -104,9 +125,10 @@ export const renderPane = (
 
   /**
    * One row's right side (its state, where it answers or its port, then what can
-   * be done to it). On the terminal the row has whole cells to fill, so the right
-   * side gives up its least telling parts first; the section (`keepRight`) then
-   * keeps it whole and cuts the title to what's left.
+   * be done to it). On the terminal it's a kit `item` whose text is the state's
+   * glyph and whose right parts carry `DROP` ranks, sized to the room the title
+   * leaves, so it gives up its least telling parts first; the section
+   * (`keepRight`) then keeps it whole and cuts the title to what's left.
    */
   const row = (c: LaunchConfig, s: Server) => {
     const look = LOOK[s.status]
@@ -117,42 +139,74 @@ export const renderPane = (
     const stop = mine ? { key: `stop-${c.name}`, label: 'Stop', onPress: () => act.stop(c.name) } : null
     const restart = mine ? { key: `restart-${c.name}`, label: 'Restart', quiet: true, onPress: () => act.restart(c.name) } : null
 
-    let fit: Fit = 0
+    const where = (label: string) =>
+      up ? (
+        <Link key={`url-${c.name}`} href={urlOf(s.port)} label={label}>
+          <Text {...k.ink(C.blue)} wrap="truncate">
+            {label}
+          </Text>
+        </Link>
+      ) : (
+        <Text key="port" {...(terminal ? { dimColor: true } : { color: GRAY.mid })} wrap="truncate">{`:${s.port}`}</Text>
+      )
+
     if (terminal) {
-      const name = [...c.name]
-      const width = (f: Fit) => {
-        const parts = [
-          f >= 2 ? 1 : 2 + look.word.length,
-          f >= 3 ? null : f >= 1 || !up ? 1 + String(s.port).length : `localhost:${s.port}`.length,
-          ...[start, stop, f >= 4 ? null : restart].filter(Boolean).map(a => a!.label.length),
-        ].filter((n): n is number => n !== null)
-        return parts.reduce((n, p) => n + p, 0) + CELLS.group * (parts.length - 1)
-      }
-      const room = columns - GUTTER - Math.min(name.length, TITLE_KEEPS) - CELLS.group
-      while (fit < 4 && width(fit) > room) fit = (fit + 1) as Fit
+      const status = STATUS[look.kind]
+      const full = up ? `localhost:${s.port}` : `:${s.port}`
+      const main = [start, stop].filter(a => a !== null)
+      const mainCells = main.reduce((n, a) => n + cells(a.label), 0) + CELLS.group * Math.max(0, main.length - 1)
+      const room = Math.max(1, columns - GUTTER - Math.min(cells(c.name), TITLE_KEEPS) - RULE_GAPS)
+      // The address shortens to its port first: the full one only while the whole row
+      // fits with it (a sparkline aside, which goes before it).
+      const whole =
+        1 +
+        CELLS.item +
+        cells(look.word) +
+        CELLS.group +
+        cells(full) +
+        (main.length ? CELLS.group + mainCells : 0) +
+        (restart ? CELLS.group + cells(restart.label) : 0)
+      const address = whole <= room ? full : `:${s.port}`
+      // Parts after the word sit a group apart, as the actions in a cluster do: the
+      // item puts one cell between parts, and each brings one more of its own.
+      const spaced = (key: string, part: RenderElement, n: number, drop?: number): RightPart => ({
+        part: (
+          <Box key={key} flexDirection="row" paddingLeft={CELLS.group - CELLS.item}>
+            {part}
+          </Box>
+        ),
+        cells: n + CELLS.group - CELLS.item,
+        ...(drop ? { drop } : {}),
+      })
+      const cpu = up && s.cpu && s.cpu.length >= 2 ? s.cpu : null
+      const parts: (RightPart | null)[] = [
+        {
+          part: (
+            <Box key={`word-${c.name}`} flexDirection="row" minWidth={0}>
+              <Text {...k.ink(status.color)} wrap="truncate">
+                {look.word}
+              </Text>
+            </Box>
+          ),
+          cells: cells(look.word),
+          drop: DROP.word,
+        },
+        spaced(`where-${c.name}`, where(address), cells(address), DROP.address),
+        cpu ? spaced(`spark-${c.name}`, k.spark(cpu, { width: SPARK_CELLS, max: Math.max(SPARK_FLOOR, ...cpu) }), SPARK_CELLS, DROP.spark) : null,
+        main.length ? spaced(`main-${c.name}`, k.actions(`actions-${c.name}`, main), mainCells) : null,
+        restart ? spaced(`more-${c.name}`, k.actions(`actions-restart-${c.name}`, [restart]), cells(restart.label), DROP.restart) : null,
+      ]
+      const right = k.item(`right-${c.name}`, { text: status.glyph, textColor: status.color, right: parts, width: room })
+      return { title: c.name, right }
     }
 
-    const buttons = [start, stop, fit >= 4 ? null : restart]
-    const where = up ? (
-      <Link key={`url-${c.name}`} href={urlOf(s.port)} label={fit >= 1 ? `:${s.port}` : `localhost:${s.port}`}>
-        <Text {...k.ink(C.blue)} wrap="truncate">
-          {fit >= 1 ? `:${s.port}` : `localhost:${s.port}`}
-        </Text>
-      </Link>
-    ) : (
-      <Text key="port" {...(terminal ? { dimColor: true } : { color: GRAY.mid })} wrap="truncate">{`:${s.port}`}</Text>
-    )
     const right = (
-      <Box key="right" flexDirection="row" alignItems="center" gap={terminal ? CELLS.group : SPACE.item} minWidth={0} flexShrink={1}>
-        {terminal ? (
-          k.status(look.kind, fit >= 2 ? undefined : look.word, 'state')
-        ) : (
-          <Text key="state" color={look.color} wrap="truncate">
-            {look.word}
-          </Text>
-        )}
-        {fit >= 3 ? null : where}
-        {buttons.some(Boolean) ? k.actions(`actions-${c.name}`, buttons) : null}
+      <Box key="right" flexDirection="row" alignItems="center" gap={SPACE.item} minWidth={0} flexShrink={1}>
+        <Text key="state" color={look.color} wrap="truncate">
+          {look.word}
+        </Text>
+        {where(up ? `localhost:${s.port}` : `:${s.port}`)}
+        {start || stop || restart ? k.actions(`actions-${c.name}`, [start, stop, restart]) : null}
       </Box>
     )
     return { title: c.name, right }
@@ -165,6 +219,9 @@ export const renderPane = (
     return [
       k.prop(`command-${c.name}`, 'command', commandOf(c)),
       c.cwd ? k.prop(`cwd-${c.name}`, 'cwd', c.cwd) : null,
+      // On the terminal, what the header's sparkline last measured, as figures.
+      terminal && s.cpu?.length ? k.prop(`cpu-${c.name}`, 'cpu', percent(s.cpu[s.cpu.length - 1]!)) : null,
+      terminal && s.cpu?.length && s.rss ? k.prop(`memory-${c.name}`, 'memory', `${bytes(s.rss)}B`) : null,
       s.status === 'elsewhere' ? (
         terminal ? (
           k.note(`note-${c.name}`, elsewhere)
