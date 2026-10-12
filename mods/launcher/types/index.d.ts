@@ -39,7 +39,12 @@ export type Status = 'stopped' | 'starting' | 'running' | 'elsewhere' | 'taken' 
 export type Adopted = {
   pid: number
   port: number
-  /** Its command line, as ps said when it was taken over. */
+  /**
+   * When it started and its command line, as ps said when it was taken over:
+   * Stop signals the pid only while ps still says both (not a later process
+   * given the same pid).
+   */
+  start: string
   command: string
   /** When it was taken over (ms since epoch). */
   at: number
@@ -48,7 +53,11 @@ export type Adopted = {
 /** A Kill pressed once, waiting for the second press that confirms it. */
 export type KillConfirm = {
   name: string
+  /** The process the first press found on `port`, and who it was (as in Adopted): the second press signals it only if it's still that. */
   pid: number
+  port: number
+  start: string
+  command: string
   /** When the confirm lapses (ms since epoch, the engine's clock). */
   until: number
 }
