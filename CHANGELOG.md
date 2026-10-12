@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **`blast-radius`** (0.3.0): the terminal hold is drawn with the kit's
+  terminal design system, in its calmer look: dim labels, plain values, key
+  hints when focused and paths cut in the middle.
+- **`filetree`** (0.4.0): the terminal tree is drawn with the kit's terminal
+  design system, in its calmer look: theme keys only, a `▌` cursor,
+  middle-cut paths and key hints.
 - **`overview`** (0.6.0): ships what merged since 0.5.0 and never reached
   marketplace installs: the three greys, links without underline, and the kit's
   Octicons and other kit changes since.

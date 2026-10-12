@@ -37,7 +37,7 @@
     {
       "name": "filetree",
       "source": "./plugins/filetree",
-      "version": "0.3.0",
+      "version": "0.4.0",
       "description": "An IDE-style file tree that shows what Claude reads, writes and commits, with git status and lines changed. Fork of data-goblin/claude-code-filetree (MIT)",
       "author": { "name": "Kurt Buhler" },
       "homepage": "https://github.com/data-goblin/claude-code-filetree",
@@ -46,7 +46,7 @@
     {
       "name": "blast-radius",
       "source": "./plugins/blast-radius",
-      "version": "0.2.0",
+      "version": "0.3.0",
       "description": "Holds risky shell commands (rm -rf, git reset --hard, git clean, force push, migrations) and shows what they would change, with Proceed and Cancel. Fork of Anthropic's claude-code-playground (Apache-2.0)",
       "author": { "name": "Anthropic PBC" },
       "homepage": "https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods/blast-radius",
