@@ -5,8 +5,17 @@ import { TERM_GLYPH } from '@kit/icons'
 import type { PerfRow } from '@kit/perf'
 import { C, GLYPH, INK, RAMP, STATUS, levelColor } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
-import { kit } from '@kit/ui'
+import { TERM_LOOKS, kit, setTermLook } from '@kit/ui'
+import type { TermLook } from '@kit/ui'
 
+import * as issuesMod from '../mods/issues/hooks/register'
+import * as launcherMod from '../mods/launcher/hooks/register'
+import * as overviewMod from '../mods/overview/hooks/register'
+import { load, onChange } from '../playground/engine'
+import * as issuesFixtures from '../playground/fixtures/issues'
+import * as launcherFixtures from '../playground/fixtures/launcher'
+import * as overviewFixtures from '../playground/fixtures/overview'
+import { collect, panes } from '../playground/host'
 import { CELL, draw, h } from '../playground/render'
 import type { Node, Surface } from '../playground/render'
 import { kitFor, show } from './show'
@@ -453,5 +462,106 @@ export const PerfFooter: Story = {
       row('tool.call', 0.3, 40),
     ].sort((a, b) => b.busyMs - a.busyMs)
     return show(kitFor(ctx).perf({ sinceMs: 12 * 60_000, rows }), ctx)
+  },
+}
+
+// ---- The terminal's design directions, side by side ----
+
+/** The looks, today's first. */
+const LOOKS = Object.keys(TERM_LOOKS) as TermLook[]
+
+/** The mods the directions sheet draws, each from its own render hook and its busy scenario. */
+const DIRECTION_MODS = [
+  { plugin: 'overview', hooks: collect(overviewMod as any), state: overviewFixtures.busy },
+  { plugin: 'issues', hooks: collect(issuesMod as any), state: issuesFixtures.busy },
+  { plugin: 'launcher', hooks: collect(launcherMod as any), state: launcherFixtures.busy },
+] as const
+
+/** A dark and a light terminal: the pane's ground and text, which inverse bands swap. */
+const TERMINAL_THEMES = {
+  dark: { bg: '#101014', fg: '#d8d8d8' },
+  light: { bg: '#fbfbf9', fg: '#1d1d1f' },
+} as const
+
+/**
+ * The same content (overview, issues and launcher, busy) in each terminal look
+ * (TERM_LOOKS in kit/ui.tsx), side by side at 40 and 60 columns, on a dark and a
+ * light terminal. The controls narrow it to one look, theme, width or mod, as the
+ * screenshots take it.
+ */
+export const TerminalDirections: Story = {
+  globals: { frame: 'pane', surface: 'terminal', columns: '110' },
+  args: { look: 'all', theme: 'both', width: 'both', mod: 'all' },
+  argTypes: {
+    look: { control: 'select', options: ['all', ...LOOKS] },
+    theme: { control: 'select', options: ['both', 'dark', 'light'] },
+    width: { control: 'select', options: ['both', '40', '60'] },
+    mod: { control: 'select', options: ['all', ...DIRECTION_MODS.map(m => m.plugin)] },
+  },
+  render: (args, ctx) => {
+    const looks = args.look === 'all' ? LOOKS : [args.look as TermLook]
+    const themes = (args.theme === 'both' ? ['dark', 'light'] : [args.theme]) as (keyof typeof TERMINAL_THEMES)[]
+    const widths = args.width === 'both' ? [40, 60] : [Number(args.width)]
+    const mods = DIRECTION_MODS.filter(m => args.mod === 'all' || m.plugin === args.mod)
+    const host = document.createElement('div')
+    host.style.cssText = 'display:flex;flex-direction:column;gap:24px;font:12px/1.4 -apple-system,system-ui,sans-serif;color:#8e8e93'
+    // A redraw that starts while one is still drawing wins; the look is a module setting, so they mustn't interleave.
+    let drawing = 0
+    const paint = async () => {
+      const mine = ++drawing
+      const rows: HTMLElement[] = []
+      try {
+        for (const theme of themes) {
+          for (const w of widths) {
+            const row = document.createElement('div')
+            row.style.cssText = 'display:flex;gap:18px;align-items:flex-start'
+            for (const look of looks) {
+              const cell = document.createElement('div')
+              cell.style.width = `calc(${w}ch + 24px)`
+              const label = document.createElement('div')
+              label.style.cssText = 'margin-bottom:4px;white-space:normal'
+              label.innerHTML = `<b style="color:inherit">${look}</b> · ${theme} · ${w} columns<br>${TERM_LOOKS[look].about}`
+              const pane = document.createElement('div')
+              pane.className = 'pane terminal'
+              const t = TERMINAL_THEMES[theme]
+              pane.style.background = t.bg
+              pane.style.color = t.fg
+              pane.style.setProperty('--r-bg', t.bg)
+              pane.style.setProperty('--r-fg', t.fg)
+              const body = document.createElement('div')
+              body.className = 'body'
+              body.style.cssText = `width:${w}ch;overflow:hidden;display:flex;flex-direction:column;gap:1.25em`
+              setTermLook(look)
+              for (const m of mods) {
+                for (const tree of await panes(m.hooks as any, 'terminal', w)) {
+                  if (mine !== drawing) return
+                  const drawn = draw(tree as Node, 'terminal', fn => fn(), { client: { site: `${ctx.id}-${look}-${theme}-${w}-${m.plugin}` } })
+                  if (drawn) body.append(drawn)
+                }
+              }
+              pane.append(body)
+              cell.append(label, pane)
+              row.append(cell)
+            }
+            rows.push(row)
+          }
+        }
+      } finally {
+        // Everything else draws in the default look.
+        setTermLook('inspector')
+      }
+      if (mine === drawing) host.replaceChildren(...rows)
+    }
+    for (const m of DIRECTION_MODS) load(m.plugin, m.state as Record<string, unknown>)
+    onChange(() => void paint())
+    void paint()
+    // The sheet draws its own panes: the toolbar's frame around it steps aside.
+    setTimeout(() => {
+      const frame = host.closest('.pane') as HTMLElement | null
+      const body = host.closest('.body') as HTMLElement | null
+      if (frame) frame.style.cssText = 'background:none;padding:0;display:block'
+      if (body) body.style.width = 'auto'
+    })
+    return host
   },
 }
