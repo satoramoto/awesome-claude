@@ -383,22 +383,41 @@ test("the context legend keys the bar with its own glyphs, ━ for the parts and
   }
 })
 
-test('the tokens each turn added are a Braille sparkline across Accounting', async ($, on) => {
+test('the tokens each turn added are a Braille sparkline on the Tokens row, from 4 turns', async ($, on) => {
   const clock = await session($, on)
   const usage = (output: number) => ({ input_tokens: 2_000, output_tokens: output, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 1_000, model: 'claude-opus-5-5' })
+  const tokensRow = async (columns: number) => {
+    const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
+    const row = shown(((await ui.find({ key: 'turn-tokens' })) ?? {}) as Drawn)
+    const section = await sectionText(ui, 'accounting')
+    await ui.unmount()
+    return { row, section }
+  }
   for (const [i, output] of [800, 4_000, 1_500, 12_000].entries()) {
     await $.turn.complete({ answer: '', durationMs: 20_000, isAborted: false, turnId: `t${i}`, reason: 'answer', usage: usage(output) } as never)
+    await clock.settle()
+    if (i === 2) {
+      // Three turns: too little to read a shape from, so no spark anywhere.
+      const { section } = await tokensRow(40)
+      expect(section).not.toMatch(/[⠁-⣿]/)
+    }
   }
-  await clock.settle()
   for (const columns of [40, 60]) {
+    const { row, section } = await tokensRow(columns)
+    // The last turn's tokens (input, output and cache writes), then the spark on the same row,
+    // newest on the right; no spark rows of its own.
+    expect(row, `at ${columns}`).toMatch(/15k last turn\s*[⠀-⣿]*[⠁-⣿]$/)
+    expect(section.replace(row, ''), `at ${columns}`).not.toMatch(/[⠁-⣿]/)
+  }
+})
+
+test('narrow, Activity drops its cache share before its header is cut', async ($, on) => {
+  const clock = await session($, on)
+  await $.turn.complete({ answer: '', durationMs: 20_000, isAborted: false, turnId: 't0', reason: 'answer', usage: { input_tokens: 2_000, output_tokens: 500, cache_read_input_tokens: 60_000, cache_creation_input_tokens: 1_000, model: 'claude-opus-5-5' } } as never)
+  await clock.settle()
+  for (const [columns, cached] of [[40, false], [70, true]] as const) {
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
-    // The last turn's tokens: input, output and cache writes; cache reads restate the context.
-    expect(await sectionText(ui, 'accounting')).toMatch(/15k last turn/)
-    const rows = (await sectionTexts(ui, 'accounting')).map(shown).filter(t => /^[⠀-⣿ ]+$/.test(t) && /[^ ]/.test(t))
-    expect(rows.length, `at ${columns}`).toBe(2)
-    for (const row of rows) expect([...row].length, `at ${columns}`).toBe(bodyAt(columns))
-    // Newest on the right edge: the last cell has dots.
-    expect(rows.at(-1)!.at(-1), `at ${columns}`).not.toBe(' ')
+    expect(/cached/.test(await sectionText(ui, 'activity')), `at ${columns}`).toBe(cached)
     await ui.unmount()
   }
 })

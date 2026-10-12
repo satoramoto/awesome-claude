@@ -81,7 +81,7 @@ const since = (at: number | undefined, now: number) => {
 const turnTokens = (p: { input: number; output: number; cacheWrite: number }) => p.input + p.output + p.cacheWrite
 
 export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelpers): RenderElement => {
-  const { Box } = els
+  const { Box, Text } = els
   // A dashboard of readings: drawn to the kit's measure, so a wide pane doesn't spread them apart.
   const k = kit(els, 'terminal', d.columns, { focused: d.focused, measure: MEASURE })
   const a = d.activity
@@ -157,7 +157,8 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
           right: k.summary([
             [String(chart.peak), 'peak'],
             chart.failures ? [String(chart.failures), 'failed', C.bad] : null,
-            [`${chart.allIn ? Math.round((chart.cacheIn / chart.allIn) * 100) : 0}%`, 'cached'],
+            // Narrow, the cache share goes first: the header would be cut.
+            k.width >= 50 ? [`${chart.allIn ? Math.round((chart.cacheIn / chart.allIn) * 100) : 0}%`, 'cached'] : null,
           ]),
           ...fold('activity'),
           children: [
@@ -216,6 +217,7 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
   // A spark rather than columns: one series over time with no parts to stack, and Braille's two
   // points a cell fit the whole turn log (40) in 20 cells, where columns show one turn a cell.
   const perTurn = a.turnLog.map(turnTokens)
+  const SPARK_MIN = 4
   const accounting = k.section({
     id: 'accounting',
     icon: GLYPH.cost,
@@ -224,13 +226,22 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
     ...fold('accounting'),
     children: [
       k.prop('model', 'Model', snap ? snap.model : '–'),
-      // The last turn's figure; the spark under it, scaled to the log's peak, gives the rest.
-      perTurn.length ? k.prop('turn-tokens', 'Tokens', `${tokens(perTurn.at(-1)!)} last turn`) : null,
-      perTurn.length ? (
-        <Box key="turn-spark">
-          {k.spark(perTurn, { height: 2 })}
-        </Box>
-      ) : null,
+      // The last turn's figure, then the spark on the same row, scaled to the log's peak; with
+      // fewer than SPARK_MIN turns there's no shape to read, so the figure stands alone.
+      perTurn.length
+        ? k.prop(
+            'turn-tokens',
+            'Tokens',
+            perTurn.length < SPARK_MIN ? (
+              `${tokens(perTurn.at(-1)!)} last turn`
+            ) : (
+              <Box flexDirection="row" gap={k.space.group}>
+                <Text wrap="truncate">{`${tokens(perTurn.at(-1)!)} last turn`}</Text>
+                {k.spark(perTurn, { height: 1, width: Math.min(20, Math.ceil(perTurn.length / 2)) })}
+              </Box>
+            ),
+          )
+        : null,
     ],
   })
 
