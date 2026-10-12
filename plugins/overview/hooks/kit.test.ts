@@ -251,6 +251,22 @@ test('a row drops its highest-ranked right parts first when narrow, whatever the
   expect(narrow).toContain('checks')
 })
 
+test("a legend label widens into the column's spare room and is cut with … only when the room runs out", async ($, on) => {
+  const draw = kitPane($, on)
+  const legend = (k: Kit) =>
+    k.legend('l', [
+      { label: 'SubagentStopped', color: C.cyan, figure: '12' },
+      { label: 'Bash', color: C.orchid, figure: '3' },
+      { label: 'Edit', color: C.cyan, figure: '7' },
+    ]) as never
+  const wide = shown(await draw(legend, { columns: 70 }))
+  expect(wide).toContain('SubagentStopped')
+  expect(wide).not.toContain('…')
+  const narrow = shown(await draw(legend, { columns: 40 }))
+  expect(narrow).not.toContain('SubagentStopped')
+  expect(narrow).toContain('SubagentSto…')
+})
+
 test('a path is cut in the middle, keeping its end', async ($, on) => {
   const draw = kitPane($, on)
   const path = 'mods/overview/hooks/terminal.tsx'

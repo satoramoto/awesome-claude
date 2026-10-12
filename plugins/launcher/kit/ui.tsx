@@ -548,9 +548,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
    * terminal's keys are the bar's own glyphs, `━` and `─`.
    *
    * On the terminal it's a compact grid, filled row by row in the items' order:
-   * every cell as wide as its longest label and figure need (labels up to 10
-   * cells), 3 cells apart, as many columns as fit (`maxCols`, 3 at most), so a
-   * label and its figure stay close however wide the pane. The app surfaces
+   * as many columns as fit with labels up to 10 cells (`maxCols`, 3 at most),
+   * 3 cells apart; then each column takes its share of the row, up to what its
+   * longest label, figure and note need, so labels widen into spare room and are
+   * cut with … only when it runs out, and a label stays close to its figure. The app surfaces
    * share the row out in up to three columns.
    */
   const legend = (
@@ -561,16 +562,22 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   ) => {
     if (terminal) {
       const len = (s: string) => [...s].length
-      const labelW = Math.min(LABEL, Math.max(1, ...items.map(t => len(t.label))))
+      const longest = Math.max(1, ...items.map(t => len(t.label)))
       const figW = Math.max(1, ...items.map(t => len(t.figure)))
       const noteW = Math.max(0, ...items.map(t => (t.note ? len(t.note) + 1 : 0)))
-      const cell = 2 + labelW + 1 + figW + noteW
+      const fixed = 2 + 1 + figW + noteW
       const gap = 3
-      const fit = Math.max(1, Math.floor((body + gap) / (cell + gap)))
+      // How many columns fit is decided at the compact width (labels up to LABEL cells)...
+      const compact = fixed + Math.min(LABEL, longest)
+      const fit = Math.max(1, Math.floor((body + gap) / (compact + gap)))
       const cols = Math.max(1, Math.min(maxCols ?? 3, fit, items.length))
       const rows = Array.from({ length: Math.ceil(items.length / cols) }, (_, r) => items.slice(r * cols, r * cols + cols))
-      // One cell narrower than its content needs (a pane under the cell's width): the label gives way.
-      const width = Math.min(cell, body)
+      // ...then each column takes its share of the row, up to what its longest label needs,
+      // and the label has what's left after the key, figure and note.
+      const share = Math.floor((body - gap * (cols - 1)) / cols)
+      const width = Math.max(1, Math.min(fixed + longest, share))
+      const labelRoom = Math.max(1, width - fixed)
+      const fitLabel = (s: string) => (len(s) <= labelRoom ? s : [...s].slice(0, Math.max(0, labelRoom - 1)).join('') + MARK.more)
       return (
         <Box key={key} flexDirection="column">
           {rows.map((row, r) => (
@@ -582,7 +589,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
                   </Box>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Text {...R.label} wrap="truncate">
-                      {t.label}
+                      {fitLabel(t.label)}
                     </Text>
                   </Box>
                   <Box width={figW + 1} flexShrink={0} flexDirection="row" justifyContent="flex-end">

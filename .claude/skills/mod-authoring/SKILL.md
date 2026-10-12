@@ -376,10 +376,11 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
   draws the `columns` eighths instead, a point a cell: for a font without
   Braille, or counts that should read as bars. The desktop draws an SVG line.
   Use `columns` for counts per bucket, `spark` for a series over time.
-- `legend`: a compact grid, row by row: each cell exactly as wide as the
-  longest label (up to 10) and figure need, 3 cells apart, as many columns as
-  fit (3 at most), so each label stays close to its figure however wide the
-  pane. Labels dim, figures plain, a `note` (`!2` failed) after the figure.
+- `legend`: a compact grid, row by row, 3 cells apart: as many columns as fit
+  with labels up to 10 cells (3 at most), then each column takes its share of
+  the row up to what its longest label, figure and note need, so a long label
+  shows whole when there's room and is cut with `…` only when there isn't; a
+  label stays close to its figure however wide the pane. Labels dim, figures plain, a `note` (`!2` failed) after the figure.
   `legend(key, items, maxCols, { bar: true })` for a legend that keys a `bar`
   (its items in the bar's order, `room` ones included): keys `━`, and `─` for room.
 - `prop`: dim label in the reading's label column, plain value left-aligned after it
