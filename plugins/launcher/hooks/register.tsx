@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandRunInput, EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register } from 'claude-code'
 
-import type { LaunchConfig, LaunchFile, Server, Status } from '../types'
+import type { Adopted, KillConfirm, LaunchConfig, LaunchFile, Server, Status } from '../types'
 import { LOOK, commandOf, renderPane, urlOf } from './view'
 import type { PaneElements } from './view'
 
@@ -13,6 +13,8 @@ const LOG_LINES = 200
 const file = atom({ plugin: 'launcher', key: 'file' } as const, null)
 const servers = atom({ plugin: 'launcher', key: 'servers' } as const, {})
 const open = atom({ plugin: 'launcher', key: 'open' } as const, [])
+const adopted = atom({ plugin: 'launcher', key: 'adopted' } as const, {})
+const confirm = atom({ plugin: 'launcher', key: 'confirm' } as const, null)
 
 // ---- reading .claude/launch.json ----
 
@@ -86,15 +88,23 @@ export const portsFromLsof = (stdout: string): Set<number> => {
   return ports
 }
 
-/** The process listening on each TCP port, from `lsof -Fpn`'s `p<pid>` and `n<addr>:<port>` lines. */
-export const pidsFromLsof = (stdout: string): Map<number, number> => {
-  const pids = new Map<number, number>()
+/**
+ * Every process listening on each TCP port, from `lsof -Fpn`'s `p<pid>` and
+ * `n<addr>:<port>` lines, in lsof's order: one port can have several (an IPv4
+ * and an IPv6 socket from different processes).
+ */
+export const pidsFromLsof = (stdout: string): Map<number, Set<number>> => {
+  const pids = new Map<number, Set<number>>()
   let pid = 0
   for (const line of stdout.split('\n')) {
     const l = line.trim()
     if (l.startsWith('p')) pid = Number(l.slice(1)) || 0
     const m = /^n.*:(\d+)$/.exec(l)
-    if (m && pid && !pids.has(Number(m[1]))) pids.set(Number(m[1]), pid)
+    if (!m || !pid) continue
+    const port = Number(m[1])
+    const set = pids.get(port) ?? new Set<number>()
+    set.add(pid)
+    pids.set(port, set)
   }
   return pids
 }
@@ -109,9 +119,15 @@ export const usageFromPs = (stdout: string): Map<number, { cpu: number; rss: num
   return usage
 }
 
-/** The last probe: every port something listens on, and the process on each where lsof said. */
+/** The last probe: every port something listens on, and the processes on each where lsof said. */
 let listening = new Set<number>()
-let pidOf = new Map<number, number>()
+let holders = new Map<number, Set<number>>()
+/** The process a row names for a port: the first lsof listed on it. */
+const pidOf = (port: number): number | undefined => holders.get(port)?.values().next().value
+/** Whether a probe has run since the module loaded. */
+let probed = false
+/** Whether the last probe's pids came from lsof (rather than none, from HTTP). */
+let byLsof = false
 
 /** Which ports answer: lsof's listening sockets, or, without lsof, an HTTP request to each configuration's port. */
 const probe = async ($: EngineInterface, wanted: number[]) => {
@@ -119,12 +135,15 @@ const probe = async ($: EngineInterface, wanted: number[]) => {
     const run = await $.process.run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn'], { timeoutMs: 5_000 })
     // lsof exits 1 when nothing listens at all.
     listening = portsFromLsof(run.stdout)
-    pidOf = pidsFromLsof(run.stdout)
+    holders = pidsFromLsof(run.stdout)
+    byLsof = true
   } catch {
     const answers = await Promise.all(wanted.map(p => $.http.fetch(urlOf(p)).then(() => p, () => null)))
     listening = new Set(answers.filter((p): p is number => p !== null))
-    pidOf = new Map()
+    holders = new Map()
+    byLsof = false
   }
+  probed = true
 }
 
 /** How many CPU samples a server keeps: two minutes of ticks. */
@@ -140,7 +159,7 @@ const usage = new Map<string, { cpu: number[]; rss: number }>()
 const sample = async ($: EngineInterface, configs: LaunchConfig[]) => {
   const pids = new Map<string, number>()
   for (const c of configs) {
-    const pid = pidOf.get(children.get(c.name)?.port ?? c.port)
+    const pid = pidOf(children.get(c.name)?.port ?? c.port)
     if (pid) pids.set(c.name, pid)
   }
   for (const name of [...usage.keys()]) if (!pids.has(name)) usage.delete(name)
@@ -169,6 +188,125 @@ const freePort = (from: number) => {
   let port = from
   while (listening.has(port) && port < 65_535) port++
   return port
+}
+
+// ---- whose process holds a port ----
+
+/**
+ * A listening process as ps and lsof tell it: when it started and its command
+ * line (together they tell it from a later process given the same pid), its
+ * parents' command lines (nearest first) and its working directory.
+ */
+export type Identity = { pid: number; start: string; command: string; chain: string[]; cwd?: string }
+
+type Row = { ppid: number; start: string; command: string }
+
+/** The columns every ps read asks for, in the C locale so `lstart` reads the same each time. */
+const PS_COLUMNS = ['-o', 'pid=,ppid=,lstart=,command='] as const
+const PS_ENV = { env: { LC_ALL: 'C' }, timeoutMs: 5_000 }
+
+/** `ps -o pid=,ppid=,lstart=,command=` lines: each process's parent, start time (`Mon Oct 12 10:00:00 2026`) and command line. */
+export const tableFromPs = (stdout: string): Map<number, Row> => {
+  const table = new Map<number, Row>()
+  for (const line of stdout.split('\n')) {
+    const m = /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\S+\s+\d+:\d+:\d+\s+\d+)\s+(.*)$/.exec(line)
+    if (m) table.set(Number(m[1]), { ppid: Number(m[2]), start: m[3]!.replace(/\s+/g, ' '), command: m[4]!.trim() })
+  }
+  return table
+}
+
+/** `lsof -a -d cwd -p <pids> -Fpn` output: each process's working directory. */
+export const cwdsFromLsof = (stdout: string): Map<number, string> => {
+  const cwds = new Map<number, string>()
+  let pid = 0
+  for (const line of stdout.split('\n')) {
+    const l = line.trim()
+    if (l.startsWith('p')) pid = Number(l.slice(1)) || 0
+    else if (l.startsWith('n') && pid && !cwds.has(pid)) cwds.set(pid, l.slice(1))
+  }
+  return cwds
+}
+
+/** How far up its parents a process's command lines are read: npm, bun or a wrapper start the real server a level or two down. */
+const CHAIN = 5
+
+/** Who each listening pid is, read once per pid (a pid's command line and folder don't change while it lives). */
+const ids = new Map<number, Identity>()
+
+/**
+ * Reads who holds each configuration's port that this session neither started
+ * nor took over: one `ps` for the process table and one `lsof` for their
+ * working directories, only for pids not read before. Without ps, nothing:
+ * the rows can't tell whose a port is, and say it answers.
+ */
+const identify = async ($: EngineInterface, ports: number[]) => {
+  const pids = [...new Set(ports.flatMap(p => [...(holders.get(p) ?? [])]))]
+  for (const pid of [...ids.keys()]) if (!pids.includes(pid)) ids.delete(pid)
+  const fresh = pids.filter(p => !ids.has(p))
+  if (!fresh.length) return
+  let table: Map<number, Row>
+  try {
+    table = tableFromPs((await $.process.run(['ps', '-A', ...PS_COLUMNS], PS_ENV)).stdout)
+  } catch {
+    return
+  }
+  let cwds = new Map<number, string>()
+  try {
+    cwds = cwdsFromLsof((await $.process.run(['lsof', '-a', '-d', 'cwd', '-p', fresh.join(','), '-Fpn'], { timeoutMs: 5_000 })).stdout)
+  } catch {
+    // Without folders, the command lines alone tell.
+  }
+  for (const pid of fresh) {
+    const own = table.get(pid)
+    if (!own) continue
+    const chain: string[] = []
+    let up = own.ppid
+    for (let i = 0; i < CHAIN && up > 1; i++) {
+      const p = table.get(up)
+      if (!p) break
+      chain.push(p.command)
+      up = p.ppid
+    }
+    const cwd = cwds.get(pid)
+    ids.set(pid, { pid, start: own.start, command: own.command, chain, ...(cwd ? { cwd: trim(cwd) } : {}) })
+  }
+}
+
+const base = (path: string) => path.slice(Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\')) + 1)
+
+/** Whether a command line runs the configuration: its executable (by name, anywhere in the line) followed by exactly its arguments, to the end. */
+export const runsConfig = (command: string, c: LaunchConfig) => {
+  const words = command.trim().split(/\s+/)
+  const exe = base(c.runtimeExecutable)
+  for (let i = 0; i + c.runtimeArgs.length < words.length; i++) {
+    if (base(words[i]!) !== exe) continue
+    const rest = words.slice(i + 1)
+    if (rest.length === c.runtimeArgs.length && rest.every((w, j) => w === c.runtimeArgs[j])) return true
+  }
+  return false
+}
+
+/** The folder a configuration's server works in: its `cwd`, then a `--cwd` or `--prefix` among its arguments (bun, npm). */
+export const workdirOf = (c: LaunchConfig, root: string) => {
+  let dir = c.cwd ? resolvePath(root, c.cwd) : trim(root)
+  const a = c.runtimeArgs
+  for (let i = 0; i < a.length; i++) {
+    const eq = /^--(?:cwd|prefix)=(.+)$/.exec(a[i]!)
+    if (eq) dir = resolvePath(dir, eq[1]!)
+    else if ((a[i] === '--cwd' || a[i] === '--prefix') && a[i + 1]) dir = resolvePath(dir, a[i + 1]!)
+  }
+  return trim(dir)
+}
+
+/**
+ * How surely a process is a configuration's server: 2 when it or a parent runs
+ * the configuration's command, 1 when it works in the configuration's folder,
+ * 0 when neither.
+ */
+export const matchScore = (id: Identity, c: LaunchConfig, root: string) => {
+  if ([id.command, ...id.chain].some(cmd => runsConfig(cmd, c))) return 2
+  if (id.cwd && id.cwd === workdirOf(c, root)) return 1
+  return 0
 }
 
 // ---- the servers this session started ----
@@ -212,28 +350,85 @@ const logOf = (name: string) => {
   return log.partial ? [...log.lines, log.partial].slice(-LOG_LINES) : [...log.lines]
 }
 
+/** The writes of `servers` that read it first, one at a time. */
+let chain: Promise<unknown> = Promise.resolve()
+const serial = <T,>(fn: () => Promise<T>): Promise<T> => {
+  const p = chain.then(fn)
+  chain = p.catch(() => undefined)
+  return p
+}
+
 /** Every configuration's server as it stands: what this session runs, what answers, how the last one ended. */
-const reconcile = async ($: EngineInterface) => {
+const reconcile = ($: EngineInterface) => serial(() => reconcileNow($))
+
+const reconcileNow = async ($: EngineInterface) => {
   const f = await read($, file)
   const old = await read($, servers)
+  const took = await read($, adopted)
+  const configs = f?.configs ?? []
+  const root = f?.root ?? ''
+  // A taken-over server whose process left its port, or whose pid is now a later process's, has ended: forget it.
+  const gone = Object.keys(took).filter(name => {
+    // Before the first probe (a reload) nothing is known to have ended.
+    if (!probed) return false
+    const a = took[name]!
+    const held = holders.get(a.port)
+    const id = ids.get(a.pid)
+    return (
+      !configs.some(c => c.name === name) ||
+      children.has(name) ||
+      !listening.has(a.port) ||
+      // Without lsof's pids (it answers to HTTP), there's no telling it left.
+      (held !== undefined && !held.has(a.pid)) ||
+      (id !== undefined && (id.start !== a.start || id.command !== a.command))
+    )
+  })
+  if (gone.length) await update($, adopted, a => Object.fromEntries(Object.entries(a).filter(([n]) => !gone.includes(n))))
+  const kept = Object.fromEntries(Object.entries(took).filter(([n]) => !gone.includes(n)))
+  // Ports a server of this session's (started or taken over) holds, and whose it is.
+  const owner = new Map<number, string>()
+  for (const [name, child] of children) owner.set(child.port, name)
+  for (const [name, a] of Object.entries(kept)) if (!owner.has(a.port)) owner.set(a.port, name)
+  // On each port held elsewhere, how surely the best configuration on it matches its process.
+  const best = new Map<number, number>()
+  for (const c of configs) {
+    const id = ids.get(pidOf(c.port) ?? 0)
+    if (id) best.set(c.port, Math.max(best.get(c.port) ?? 0, matchScore(id, c, root)))
+  }
   const next: Record<string, Server> = {}
-  for (const c of f?.configs ?? []) {
+  for (const c of configs) {
     const prev = old[c.name]
     const child = children.get(c.name)
+    const took1 = kept[c.name]
+    const holder = pidOf(c.port)
+    const id = holder ? ids.get(holder) : undefined
     let status: Status
     if (starting.has(c.name)) status = 'starting'
     else if (child) status = listening.has(child.port) ? 'running' : 'starting'
-    else if (listening.has(c.port)) status = 'elsewhere'
-    else if (prev?.status === 'failed') status = 'failed'
+    else if (took1) status = 'running'
+    else if (listening.has(c.port)) {
+      const other = owner.get(c.port)
+      // Another configuration's server of this session's holds it; or a process
+      // that runs a configuration on this port better than this one, or none.
+      if (other !== undefined && other !== c.name) status = 'taken'
+      else if (!id) status = 'elsewhere'
+      else status = matchScore(id, c, root) > 0 && matchScore(id, c, root) === best.get(c.port) ? 'elsewhere' : 'taken'
+    } else if (prev?.status === 'failed') status = 'failed'
     else status = 'stopped'
     const used = status === 'running' || status === 'elsewhere' ? usage.get(c.name) : undefined
+    const held = !child && (status === 'elsewhere' || status === 'taken' || Boolean(took1))
+    const pid = took1?.pid ?? (held ? holder : undefined)
+    const command = took1?.command ?? (held ? id?.command : undefined)
     next[c.name] = {
       status,
-      port: child?.port ?? c.port,
+      port: child?.port ?? took1?.port ?? c.port,
       log: logOf(c.name) ?? prev?.log ?? [],
       code: child ? null : (prev?.code ?? null),
       startedAt: child?.startedAt ?? 0,
       ...(used ? { cpu: used.cpu, rss: used.rss } : {}),
+      ...(pid ? { pid } : {}),
+      ...(command ? { command } : {}),
+      ...(took1 ? { adopted: true } : {}),
     }
   }
   // Only a real change redraws.
@@ -298,20 +493,37 @@ const run = async ($: EngineInterface, name: string, child: Child) => {
   const failed = !child.stopping && (cannot || result?.code !== 0)
   if (!child.stopping && result) appendLog(log, `\n${result.signal ? `ended by ${result.signal}` : `exited with code ${result.code}`}\n`)
   const ended: Server = { status: failed ? 'failed' : 'stopped', port: child.port, log: logOf(name) ?? [], code: result?.code ?? null, startedAt: 0 }
-  // A newer child of the same name owns the row now.
-  if (children.has(name) || starting.has(name)) return
-  await update($, servers, s => ({ ...s, [name]: ended }))
-  // A failure unfolds its row, so its output is in view.
-  if (failed) await update($, open, o => (o.includes(name) ? o : [...o, name]))
+  // In turn with reconcile, so neither writes over the other with what it read before.
+  await serial(async () => {
+    // A newer child of the same name owns the row now (or a Restart's Start is under way).
+    if (children.has(name) || (child.stopping && starting.has(name))) return
+    await update($, servers, s => ({ ...s, [name]: ended }))
+    // A failure unfolds its row, so its output is in view.
+    if (failed) await update($, open, o => (o.includes(name) ? o : [...o, name]))
+  })
 }
 
 /** Ends a server this session started; answers what happened, in a line. */
 const stop = async ($: EngineInterface, name: string): Promise<string> => {
   const child = children.get(name)
   if (!child) {
+    const took = (await read($, adopted))[name]
+    if (took) {
+      const check = await recheck($, took, { sole: false, released: false })
+      if (!check.ok) {
+        // It isn't the process taken over any more (or it left its port): nothing of this session's to stop.
+        await forget($, name)
+        await settle($, took.port)
+        return `${name}: not stopped, and no longer taken over: ${check.why}.`
+      }
+      const out = await terminate($, took, { sole: false })
+      if (out.ended) await forget($, name)
+      await settle($, took.port)
+      return out.ended ? `Stopped ${name}.` : `${name}: Stop failed: ${out.why}; still taken over.`
+    }
     const s = (await read($, servers))[name]
     return s?.status === 'elsewhere'
-      ? `${name} on ${urlOf(s.port)} was started elsewhere (another session or the desktop app); stop it there.`
+      ? `${name} on ${urlOf(s.port)} was started elsewhere (another session or the desktop app); take it over or kill it from the pane, or stop it there.`
       : `${name} isn't running from this session.`
   }
   child.stopping = true
@@ -328,8 +540,179 @@ const stop = async ($: EngineInterface, name: string): Promise<string> => {
 }
 
 const restart = async ($: EngineInterface, name: string) => {
-  if (children.has(name)) await stop($, name)
+  if (children.has(name) || (await read($, adopted))[name]) await stop($, name)
   return start($, name)
+}
+
+// ---- servers started elsewhere: take over, kill ----
+
+/** How long Kill waits after SIGTERM before SIGKILL, and how often it looks meanwhile. */
+const KILL_WAIT = 2_000
+const KILL_LOOK = 250
+/** How long a first press of Kill waits for the second that confirms it. */
+export const CONFIRM_MS = 4_000
+
+/** Whether the process lives: `kill -0` succeeds. */
+const alive = async ($: EngineInterface, pid: number) => {
+  try {
+    return (await $.process.run(['kill', '-0', String(pid)], { timeoutMs: 5_000 })).exitCode === 0
+  } catch {
+    return false
+  }
+}
+
+/** A process recorded to be signalled later: the port it listened on, and who it was then. */
+type Recorded = { pid: number; port: number; start?: string; command: string }
+
+type Check = { ok: true } | { ok: false; gone: boolean; why: string }
+
+/** `process 1`, `processes 1 and 2`, `processes 1, 2 and 3`. */
+const listPids = (pids: Iterable<number>) => {
+  const a = [...pids]
+  return a.length === 1 ? `process ${a[0]}` : `processes ${a.slice(0, -1).join(', ')} and ${a[a.length - 1]}`
+}
+
+/**
+ * Whether a recorded process is still the one to signal, read afresh: ps's
+ * start time and command line for its pid must be the recorded ones (a pid
+ * freed and given to a later process mustn't be signalled), and lsof must list
+ * it on its port. `sole`: no other process listens there either (Kill ends one
+ * process a press). `released`: its port may be free (a process shutting down
+ * after SIGTERM closes its socket first). `gone` says the recorded process has
+ * ended (its pid is no one's, or a later process's).
+ */
+const recheck = async ($: EngineInterface, was: Recorded, o: { sole: boolean; released: boolean }): Promise<Check> => {
+  if (!was.start) return { ok: false, gone: false, why: `process ${was.pid}'s start time was never read, so it can't be told from a later process given its pid` }
+  await probe($, [was.port])
+  if (!byLsof) return { ok: false, gone: false, why: `lsof couldn't say which process listens on port ${was.port}` }
+  let row: Row | undefined
+  try {
+    const run = await $.process.run(['ps', ...PS_COLUMNS, '-p', String(was.pid)], PS_ENV)
+    row = tableFromPs(run.stdout).get(was.pid)
+  } catch {
+    return { ok: false, gone: false, why: `ps couldn't say who process ${was.pid} is now` }
+  }
+  if (!row) return { ok: false, gone: true, why: `process ${was.pid} has ended` }
+  if (row.start !== was.start || row.command !== was.command) {
+    return { ok: false, gone: true, why: `process ${was.pid} is now another process (started ${row.start}: ${row.command})` }
+  }
+  const held = holders.get(was.port) ?? new Set<number>()
+  if (!held.has(was.pid)) {
+    if (o.released && !held.size) return { ok: true }
+    return { ok: false, gone: false, why: held.size ? `port ${was.port} is now held by ${listPids(held)}, not process ${was.pid}` : `process ${was.pid} no longer listens on port ${was.port}` }
+  }
+  if (o.sole && held.size > 1) return { ok: false, gone: false, why: severalOn(was.port, held) }
+  return { ok: true }
+}
+
+const severalOn = (port: number, held: Set<number>) => `${held.size} processes listen on port ${port} (${listPids(held)}); Kill ends one process, so end them from a terminal`
+
+/**
+ * Ends a process this module didn't spawn, already rechecked: SIGTERM, then
+ * SIGKILL if it still lives after KILL_WAIT and is still the recorded process.
+ * The engine has no signal call of its own, so `kill` runs on the host as the
+ * session's user (it can end only that user's processes).
+ */
+const terminate = async ($: EngineInterface, was: Recorded, o: { sole: boolean }): Promise<{ ended: true } | { ended: false; why: string }> => {
+  const pid = was.pid
+  if (!(pid > 1)) return { ended: false, why: `process ${pid} can't be signalled` }
+  await $.process.run(['kill', '-TERM', String(pid)], { timeoutMs: 5_000 }).catch(() => undefined)
+  for (let waited = 0; waited < KILL_WAIT; waited += KILL_LOOK) {
+    if (!(await alive($, pid))) return { ended: true }
+    await $.clock.sleep(KILL_LOOK).catch(() => undefined)
+  }
+  if (!(await alive($, pid))) return { ended: true }
+  const check = await recheck($, was, { sole: o.sole, released: true })
+  if (!check.ok) return check.gone ? { ended: true } : { ended: false, why: `process ${pid} outlived SIGTERM and wasn't sent SIGKILL: ${check.why}` }
+  await $.process.run(['kill', '-KILL', String(pid)], { timeoutMs: 5_000 }).catch(() => undefined)
+  return (await alive($, pid)) ? { ended: false, why: `could not end process ${pid} (it may be another user's)` } : { ended: true }
+}
+
+/** Forgets a taken-over server. */
+const forget = ($: EngineInterface, name: string) => update($, adopted, a => Object.fromEntries(Object.entries(a).filter(([n]) => n !== name)))
+
+/** Reads every configuration's port and its holders afresh, then the rows. */
+const settle = async ($: EngineInterface, port: number) => {
+  const ports = [...new Set([port, ...((await read($, file))?.configs ?? []).map(c => c.port)])]
+  await probe($, ports).catch(() => undefined)
+  await identify($, ports).catch(() => undefined)
+  await reconcile($)
+}
+
+/** The process holding a configuration's port right now, read afresh, and who it is. */
+const holderOf = async ($: EngineInterface, port: number) => {
+  const ports = [...new Set([port, ...((await read($, file))?.configs ?? []).map(c => c.port)])]
+  await probe($, ports)
+  await identify($, ports)
+  const pid = pidOf(port)
+  return pid ? { pid, held: holders.get(port)!, id: ids.get(pid) } : null
+}
+
+/**
+ * Takes over the server answering on a configuration's port: records its pid,
+ * so the row reads running and Stop signals it. Its output stays where it goes
+ * (the terminal or app that started it): the engine can't read another
+ * process's standard output.
+ */
+const adopt = async ($: EngineInterface, name: string): Promise<string> => {
+  const c = (await read($, file))?.configs.find(x => x.name === name)
+  if (!c) return `No configuration named "${name}".`
+  if (children.has(name)) return `${name} is already running from this session.`
+  const holder = await holderOf($, c.port)
+  if (!holder) return `${name}: nothing found listening on port ${c.port} to take over.`
+  // Stop will signal it only if it's still this process, so who it is must be known now.
+  if (!holder.id) return `${name}: ps couldn't say who process ${holder.pid} is, so it can't be taken over.`
+  const took: Adopted = { pid: holder.pid, port: c.port, start: holder.id.start, command: holder.id.command, at: await $.clock.now() }
+  await update($, adopted, a => ({ ...a, [name]: took }))
+  await reconcile($)
+  return `Took over ${name} (process ${holder.pid}) on ${urlOf(c.port)}.`
+}
+
+/**
+ * Kill, in two presses: the first arms it on the row for CONFIRM_MS (the row
+ * asks `Kill PID 1234?`), the second within that time ends the process holding
+ * the port, if it's still the process the first press saw (see `recheck`). A
+ * press after it lapsed arms it again. A port several processes listen on
+ * isn't armed: one press signals one process.
+ */
+const killPress = async ($: EngineInterface, name: string): Promise<string> => {
+  const c = (await read($, file))?.configs.find(x => x.name === name)
+  if (!c) return `No configuration named "${name}".`
+  const s = (await read($, servers))[name]
+  if (!s?.pid) return `${name}: no process found on port ${c.port}.`
+  const now = await $.clock.now()
+  const armed = await read($, confirm)
+  if (armed && armed.name === name && armed.pid === s.pid && armed.until > now) {
+    await update($, confirm, () => null)
+    return kill($, name, armed)
+  }
+  // Arming: who holds the port, read afresh, is what the second press must find.
+  const holder = await holderOf($, s.port).catch(() => null)
+  const refuse = async (why: string) => {
+    await reconcile($)
+    return `${name}: not killed: ${why}.`
+  }
+  if (!holder) return refuse(`nothing listens on port ${s.port} now`)
+  if (holder.held.size > 1) return refuse(severalOn(s.port, holder.held))
+  if (holder.pid !== s.pid) return refuse(`port ${s.port} is now held by process ${holder.pid}; look again`)
+  if (!holder.id) return refuse(`ps couldn't say who process ${holder.pid} is`)
+  const until = now + CONFIRM_MS
+  await update($, confirm, () => ({ name, pid: holder.pid, port: s.port, start: holder.id!.start, command: holder.id!.command, until }))
+  $.clock.after(CONFIRM_MS, () => void update($, confirm, x => (x && x.name === name && x.until === until ? null : x)).catch(() => undefined))
+  return `Kill-armed ${name}.`
+}
+
+/** Ends the process the first press of Kill saw on a configuration's port (SIGTERM, then SIGKILL), after which Start works. */
+const kill = async ($: EngineInterface, name: string, armed: KillConfirm): Promise<string> => {
+  const check = await recheck($, armed, { sole: true, released: false })
+  if (!check.ok) {
+    await settle($, armed.port)
+    return `${name}: not killed: ${check.why}.`
+  }
+  const out = await terminate($, armed, { sole: true })
+  if (out.ended && (await read($, adopted))[name]) await forget($, name)
+  await settle($, armed.port)
+  return out.ended ? `Killed process ${armed.pid} on port ${armed.port}.` : `${name}: ${out.why}.`
 }
 
 // ---- reading while the pane is shown ----
@@ -367,6 +750,7 @@ const refresh = async ($: EngineInterface, readFile: boolean) => {
     }
     const configs = (await read($, file))?.configs ?? []
     await probe($, configs.map(c => c.port))
+    await identify($, configs.map(c => c.port))
     await sample($, configs)
     await reconcile($)
   } finally {
@@ -447,7 +831,9 @@ export const register: Register = on => {
   on('command.run', { command: 'preview' }, ($, e) => command($, e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const say = (what: Promise<string>) => void what.then(text => (text.startsWith('Starting') || text.startsWith('Stopped') ? undefined : $.ui.toast(text))).catch(() => undefined)
+    // The row itself shows what happened; only a refusal or a failure needs a toast.
+    const quiet = /^(Starting|Stopped|Took over|Kill-armed|Killed)/
+    const say = (what: Promise<string>) => void what.then(text => (quiet.test(text) ? undefined : $.ui.toast(text))).catch(() => undefined)
     return renderPane(
       $.ui.resolve(e) as PaneElements,
       e.surface,
@@ -459,9 +845,11 @@ export const register: Register = on => {
         start: name => say(start($, name)),
         stop: name => say(stop($, name)),
         restart: name => say(restart($, name)),
+        adopt: name => say(adopt($, name)),
+        kill: name => say(killPress($, name)),
         toggle: name => void update($, open, o => (o.includes(name) ? o.filter(n => n !== name) : [...o, name])).catch(() => undefined),
       },
-      { focused: e.props.isFocused },
+      { focused: e.props.isFocused, confirm: await read($, confirm) },
     )
   })
 }

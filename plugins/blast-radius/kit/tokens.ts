@@ -81,6 +81,61 @@ export const MUTED = '#8e8e93'
  */
 export const GRAY = { light: '#b9b9b6', mid: '#8a8a87', dark: '#62625f' } as const
 
+/** A colour with one value for the light desktop theme and one for the dark. */
+export type Duo = { readonly light: string; readonly dark: string }
+
+/**
+ * File-type icon colours. One meaning: this file's type. Only a file tree's icons
+ * take them, never text, a header or a control (those stay grey), and only on the
+ * app surfaces: the terminal draws file icons monochrome (dim), as a file type is
+ * no state a theme key means.
+ *
+ * The values are IntelliJ's New UI ("expui") icon colours, each from the fill or
+ * stroke of the icon named beside it: intellij-community
+ * `platform/icons/src/expui/fileTypes/<name>.svg` (light) and `<name>_dark.svg`
+ * (dark), and `platform/icons/src/expui/nodes/` for the folders. Apache 2.0,
+ * © JetBrains s.r.o. and contributors (each SVG's header).
+ *
+ * An icon drawn in a Duo carries both values and picks one by the page's colour
+ * scheme (`iconSvg` in kit/icons.ts); where that can't be read it takes the dark.
+ */
+export const FILE_TYPE = {
+  /** typeScript.svg */
+  typescript: { light: '#3574F0', dark: '#548AF7' },
+  /** javaScript.svg */
+  javascript: { light: '#FFAF0F', dark: '#F2C55C' },
+  /** json.svg */
+  json: { light: '#834DF0', dark: '#B589EC' },
+  /** markdown.svg */
+  markdown: { light: '#3574F0', dark: '#548AF7' },
+  /** config.svg (its accent), toml.svg, docker.svg */
+  config: { light: '#3574F0', dark: '#548AF7' },
+  /** yaml.svg */
+  yaml: { light: '#DB3B4B', dark: '#DB5C5C' },
+  /** css.svg */
+  style: { light: '#4682FA', dark: '#548AF7' },
+  /** html.svg */
+  html: { light: '#369650', dark: '#57965C' },
+  /** xml.svg */
+  xml: { light: '#E66D17', dark: '#C77D55' },
+  /** csv.svg */
+  data: { light: '#208A3C', dark: '#57965C' },
+  /** sql.svg */
+  sql: { light: '#834DF0', dark: '#B589EC' },
+  /** image.svg */
+  image: { light: '#3574F0', dark: '#548AF7' },
+  /** archive.svg */
+  archive: { light: '#3574F0', dark: '#548AF7' },
+  /** text.svg, shell.svg, unknown.svg, font.svg: any other file, lockfiles included */
+  text: { light: '#6C707E', dark: '#CED0D6' },
+  /** nodes/folder.svg, nodes/folderGithub.svg */
+  folder: { light: '#6C707E', dark: '#CED0D6' },
+  /** nodes/excludeRoot.svg: a folder git ignores (node_modules, build output) */
+  excluded: { light: '#F28C35', dark: '#C77D55' },
+} as const satisfies Record<string, Duo>
+
+export type FileType = keyof typeof FILE_TYPE
+
 /** Slate under 75%, amber from 75%, red from 90%: colour only once it matters. */
 export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : INK)
 

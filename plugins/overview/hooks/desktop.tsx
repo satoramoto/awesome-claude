@@ -428,9 +428,8 @@ const renderBranches = (els: AppElements, k: ReturnType<typeof kit>, d: DesktopD
             ],
             [
               Button ? (
-                <Button key={`hide-${b.branch}`} plain onPress={() => d.hideBranch(b.branch)}>
-                  <Text color={GRAY.mid}>hide</Text>
-                </Button>
+                // dimColor, not a grey child Text: the desktop draws a Button's label alone.
+                <Button key={`hide-${b.branch}`} plain dimColor label="hide" onPress={() => d.hideBranch(b.branch)} />
               ) : null,
             ],
           ),
