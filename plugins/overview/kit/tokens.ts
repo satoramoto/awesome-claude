@@ -60,7 +60,11 @@ export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : 
  * - blue   C.blue   → 'suggestion'
  * - purple C.purple → 'merged'
  * - the greys (MUTED, GRAY, TRACK) → the terminal's own dim, never a grey hex
- * - slate, cyan, orchid and the RAMP shades have no key: drawn as their hex.
+ * - quantity (INK, slate) → the terminal's default foreground
+ * - the shades within one chart (RAMP, cyan, orchid) → plain and dim in turn
+ *   (TERM_TINT), the blue ramp as `suggestion` and dimmed `suggestion`
+ * - any other hex → the default foreground: no fixed hex reaches the terminal,
+ *   where it can vanish on a light, an ANSI-only or a colour-blind theme.
  */
 export const THEME_KEY: Readonly<Record<string, string>> = {
   [C.ok]: 'success',
@@ -72,12 +76,48 @@ export const THEME_KEY: Readonly<Record<string, string>> = {
 
 const QUIET = new Set<string>([MUTED, GRAY.light, GRAY.mid, GRAY.dark, TRACK])
 
+/** Text props on the terminal: a theme key, the terminal's dim, or neither (the default foreground). */
+export type TermInk = { color?: string; dimColor?: boolean }
+
 /**
- * A token's Text props on the terminal: a status as its theme key, a grey as
- * `dimColor`, anything else as given. Nothing for no colour.
+ * The chart shades on the terminal, which has no colours to spare for them: the
+ * slate ramp (quantity) is the default foreground and dim in turn, the blue ramp
+ * `suggestion` and dimmed `suggestion` in turn, cyan plain and orchid dim. Parts
+ * next to each other in a bar also differ by glyph (`█`, `▓`), so they read
+ * without colour too.
  */
-export const termInk = (color?: string): { color?: string; dimColor?: boolean } =>
-  !color ? {} : QUIET.has(color) ? { dimColor: true } : { color: THEME_KEY[color] ?? color }
+export const TERM_TINT: Readonly<Record<string, TermInk>> = {
+  [RAMP.slate[0]]: {},
+  [RAMP.slate[1]]: { dimColor: true },
+  [RAMP.slate[2]]: {},
+  [RAMP.slate[3]]: { dimColor: true },
+  [RAMP.blue[1]]: { color: 'suggestion', dimColor: true },
+  [RAMP.blue[2]]: { color: 'suggestion' },
+  [RAMP.blue[3]]: { color: 'suggestion', dimColor: true },
+  [C.cyan]: {},
+  [C.orchid]: { dimColor: true },
+}
+
+/** Whether `color` is one of the kit's tokens (a status, a grey, a chart shade), not data such as a GitHub label's hex. */
+export const isKitColor = (color: string): boolean => QUIET.has(color) || color in THEME_KEY || color in TERM_TINT
+
+/** A raw colour (hex, rgb(), hsl()) rather than a theme key's name. */
+const RAW = /^(#|rgba?\(|hsla?\()/i
+
+/**
+ * A colour's Text props on the terminal: a status as its theme key, a grey as
+ * `dimColor`, a chart shade as TERM_TINT says, a theme key's name as itself, and
+ * any other raw colour as nothing (the default foreground). Nothing for no colour.
+ */
+export const termInk = (color?: string): TermInk => {
+  if (!color) return {}
+  if (QUIET.has(color)) return { dimColor: true }
+  const key = THEME_KEY[color]
+  if (key) return { color: key }
+  const tint = TERM_TINT[color]
+  if (tint) return { ...tint }
+  return RAW.test(color) ? {} : { color }
+}
 
 /**
  * One glyph per idea, shared so mods read alike (the SVG icons are keyed by these).

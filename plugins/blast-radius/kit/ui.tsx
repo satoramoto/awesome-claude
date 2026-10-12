@@ -1,10 +1,10 @@
 import type { RenderElement, RenderSurface } from 'claude-code'
 
-import { pct, short } from './format'
+import { middle, pct, short } from './format'
 import { ICON_PX, glyphOf, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, GLYPH, GRAY, MUTED, STATUS, TRACK, termInk, treePrefix } from './tokens'
+import { C, GLYPH, GRAY, INK, MUTED, STATUS, TRACK, isKitColor, termInk, treePrefix } from './tokens'
 import type { StatusKind } from './tokens'
 
 /**
@@ -35,6 +35,8 @@ const BAR = 0.45
 
 /** One row's height in CSS pixels on the desktop, measured: a 0.45-row bar is 8.5px tall. */
 const ROW_PX = 8.5 / 0.45
+/** One column's width in CSS pixels on the desktop (as the playground calibrates it): what an SVG sized in cells is drawn at. */
+const COL_PX = 7.8
 
 /*
  * The grid. Mods use these, never raw spacing numbers:
@@ -83,16 +85,24 @@ const MIN_GAUGE = 6
 const MIN_LABEL = 6
 /** The cells of its text a terminal list item keeps (with its ellipsis) before its right cluster is cut. */
 const ITEM_KEEPS = 6
+/**
+ * The narrowest pane the terminal draws section bodies in. Narrower, each section
+ * draws its header and figures only (a floor, as bottom's basic mode), rather
+ * than every reading collapsing to an ellipsis.
+ */
+export const MIN_COLUMNS = 30
 
 /**
  * The terminal's meter glyphs. A gauge is a heavy line on a light one, to half a
- * cell (╸); a bar is solid blocks on a shaded track, to an eighth of a cell.
+ * cell (╸); a bar is solid blocks on a shaded track, to an eighth of a cell, its
+ * parts alternating solid and dark shade (`alt`) so neighbours differ without colour.
  */
 export const METER = {
   line: '━',
   half: '╸',
   rail: '─',
   block: '█',
+  alt: '▓',
   shade: '░',
   /** Left eighths, 0 to 8: an index of n is n/8 of a cell filled from the left. */
   eighths: ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
@@ -102,6 +112,24 @@ export const METER = {
 
 /** The terminal's fold arrows: the small triangles, a cell each. */
 export const FOLD = { open: '▾', closed: '▸' } as const
+
+/**
+ * The terminal's marks for lists and footers: a selected row's gutter mark (a
+ * left half block, in `suggestion`, Claude Code's own selection colour), the key
+ * hints' separator, and the ellipsis that ends anything cut.
+ */
+export const MARK = { selected: '▌', sep: ' · ', more: '…', stale: '↻' } as const
+
+/**
+ * Braille dots for a sparkline, filled from the bottom: a cell holds two points
+ * (its left and right dot columns), four levels each. `left[n]` is the left
+ * column's bottom n dots, `right[n]` the right column's; OR them onto U+2800.
+ */
+export const SPARK = {
+  base: 0x2800,
+  left: [0, 0x40, 0x44, 0x46, 0x47],
+  right: [0, 0x80, 0xa0, 0xb0, 0xb8],
+} as const
 /** A band's height: one text row plus this above and below. */
 const BAND_PAD_Y = 0.3
 /** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
@@ -109,8 +137,9 @@ const TILE_PAD_Y = 0.6
 const TILE_ROW_GAP = 0.2
 
 /**
- * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
- * ▶ a text glyph; without it macOS can draw it as an emoji.
+ * The desktop's fold arrow: full-size triangles, since text can't be sized.
+ * U+FE0E keeps ▶ a text glyph; without it macOS can draw it as an emoji. Never
+ * on the terminal, which draws FOLD and never gets a variation selector.
  */
 export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
 
@@ -159,10 +188,12 @@ const breakLine = (text: string, width: number): [string, string] => {
 
 /** A selected tile's fill: the tile's step, tinted towards the blue that marks what's live. Solid, as TILE. */
 const TILE_SELECTED = '#232a3c'
+/** A selected tile's fill while its pane doesn't have the keyboard: halfway back to the tile. */
+const TILE_SELECTED_BLURRED = mix(TILE_SELECTED, TILE, 0.5)
 
 
 /** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
-const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
+export const PERF_GLYPH: Readonly<Record<string, string>> ={ render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
 
 /*
  * The terminal's look ("rules", after lazygit and gh-dash). The terminal can't draw
@@ -200,9 +231,76 @@ export const TERM_ROLES: Readonly<Record<'title' | 'label' | 'value' | 'secondar
  */
 const TERM_HEADER_ICON = MUTED
 
-export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
+/** What the kit is told about the pane beyond its surface and width. */
+export type KitOptions = {
+  /**
+   * Whether the pane has the keyboard: pass `e.props.isFocused`. Key hints show
+   * only while it's true, and a selected list row is drawn dimmed while it's
+   * false. Left out, the pane counts as focused.
+   */
+  focused?: boolean
+}
+
+/**
+ * A part of a list row's right cluster that says when it gives way: at narrow
+ * widths the part with the highest `drop` goes first (ties: the later one), then
+ * the next, until the row fits; parts without one (rank 0) are never dropped,
+ * only cut. `cells` is its width on the terminal when it's an element the kit
+ * can't measure (a string measures itself).
+ */
+export type RightPart = { part: RenderElement | string; drop?: number; cells?: number }
+
+/** One key hint: the key as the person types it, and what it does. */
+export type Hint = { key: string; label: string }
+
+const isRightPart = (x: RenderElement | string | RightPart): x is RightPart => typeof x === 'object' && x !== null && 'part' in x && !('type' in x)
+
+/**
+ * The cells a part draws in on the terminal, as far as the kit can tell: a
+ * string's characters; a Text's text; a row Box's children and gaps; a plain
+ * Button's label (and `1: ` before it with a hotkey). Undefined when it can't.
+ */
+const cellsOf = (x: unknown): number | undefined => {
+  if (x == null || x === false) return 0
+  if (typeof x === 'string' || typeof x === 'number') return [...String(x)].length
+  if (Array.isArray(x)) {
+    let n = 0
+    for (const c of x) {
+      const m = cellsOf(c)
+      if (m === undefined) return undefined
+      n += m
+    }
+    return n
+  }
+  if (typeof x !== 'object') return undefined
+  const el = x as { type?: string; props?: Record<string, any>; children?: unknown[] }
+  const p = el.props ?? {}
+  const kids = el.children ?? (p.children as unknown[] | undefined) ?? []
+  if (el.type === 'Text') return cellsOf(kids)
+  if (el.type === 'Button') {
+    const label = p.label === undefined ? cellsOf(kids) : [...String(p.label)].length
+    if (label === undefined) return undefined
+    return (p.plain ? label : label + 4) + (p.hotkey ? 3 : 0)
+  }
+  if (el.type === 'Box') {
+    const list = (Array.isArray(kids) ? kids : [kids]).flat(Infinity as 1).filter(c => c != null && c !== false)
+    const sizes = list.map(cellsOf)
+    if (sizes.some(s => s === undefined)) return undefined
+    const n = sizes as number[]
+    if (p.flexDirection === 'column') return Math.max(0, ...n)
+    const gap = Number(p.columnGap ?? p.gap ?? 0)
+    return n.reduce((a, b) => a + b, 0) + gap * Math.max(0, n.length - 1)
+  }
+  return undefined
+}
+
+export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOptions = {}) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
+  /** Whether the pane has the keyboard; unknown counts as yes. */
+  const paneFocused = opts.focused !== false
+  /** Under MIN_COLUMNS the terminal draws section headers only. */
+  const floor = terminal && Math.floor(columns) < MIN_COLUMNS
   /** A text role's props on the terminal (see TERM_ROLES). */
   const R = TERM_ROLES
   /** Text a step below the main text: one of the three greys on the app surfaces; plain dim in the terminal, whose greys are its own. */
@@ -248,12 +346,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const w = Math.max(1, Math.floor(width))
     const eighths = w * 8
     // Each part's end in eighths, cumulative; anything above zero gets at least an eighth.
-    const ends: { end: number; color: string }[] = []
+    // A part's full cells are solid or dark shade in turn, so neighbours read apart without colour.
+    const ends: { end: number; color: string; glyph: string }[] = []
     let at = 0
     for (const p of parts) {
       if (!(p.value > 0)) continue
       at = Math.min(eighths, at + Math.max(1, Math.round((p.value / total) * eighths)))
-      ends.push({ end: at, color: p.color })
+      ends.push({ end: at, color: p.color, glyph: ends.length % 2 ? METER.alt : METER.block })
     }
     const partAt = (e: number) => ends.find(x => e < x.end)
     const cells: { glyph: string; props: Record<string, unknown> }[] = []
@@ -265,7 +364,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         continue
       }
       if (here.end >= from + 8) {
-        cells.push({ glyph: METER.block, props: ink(here.color) })
+        cells.push({ glyph: here.glyph, props: ink(here.color) })
         continue
       }
       const next = partAt(here.end)
@@ -370,15 +469,22 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   /**
    * A tile: one item of a list that has several lines (a branch and its PR), in its
    * own rounded fill a step lighter than the pane, so items read as units. A
-   * `selected` tile takes a blue-tinted fill: picked, without an outline.
+   * `selected` tile takes a blue-tinted fill: picked, without an outline; half
+   * as tinted while the pane isn't `focused` (the kit's `focused` by default).
+   * On the terminal, a blank row above and no fill, selected or not: a terminal
+   * list that selects draws its rows with `item`, which has a selection mark.
    */
-  const tile = (key: string, children: (RenderElement | null)[], opts: { selected?: boolean } = {}) =>
+  const tile = (key: string, children: (RenderElement | null)[], opts: { selected?: boolean; focused?: boolean } = {}) =>
     terminal ? (
       <Box key={key} flexDirection="column" marginTop={1}>
         {children}
       </Box>
     ) : (
-      rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' }, children)
+      rounded(
+        opts.selected ? ((opts.focused ?? paneFocused) ? TILE_SELECTED : TILE_SELECTED_BLURRED) : TILE,
+        { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' },
+        children,
+      )
     )
 
   /**
@@ -419,24 +525,48 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   /**
    * A label as GitHub draws one on a dark page: a rounded chip filled with the
    * label's colour, faint, and its name in a lighter tint of the same colour.
-   * Blended to solid colours over the tile (rounding needs a solid fill). In the
-   * terminal, the name in the label's colour.
+   * Blended to solid colours over the tile (rounding needs a solid fill). On the
+   * terminal, a `■` swatch and the name in the default foreground: a label's
+   * colour is data (GitHub's hex) that may not read on the person's theme, so it
+   * only ever tints the one-cell swatch, never the text. A status colour (a kit
+   * token) draws as its theme key, as everywhere.
    */
   const pill = (key: string, text: string, color: string) => {
-    if (terminal) return <Text key={key} {...ink(color)}>{text}</Text>
+    if (terminal) {
+      return (
+        <Text key={key}>
+          <Text {...(isKitColor(color) ? ink(color) : { color })}>■</Text>
+          {` ${text}`}
+        </Text>
+      )
+    }
     return rounded(mix(color, TILE, 0.22), { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t" color={mix(color, '#ffffff', 0.45)}>{text}</Text>])
   }
 
-  /** A small dot of colour, a legend's key: round on the app surfaces, a square block on the terminal (as the bar it keys). */
-  const swatch = (color: string) => <Text {...ink(color)}>{terminal ? '■' : '●'}</Text>
+  /**
+   * A small dot of colour, a legend's key: round on the app surfaces, a square
+   * block on the terminal (as the bar it keys). Given the part's `index` in its
+   * bar, the terminal draws the glyph that part's cells have (`█`, `▓` in turn),
+   * so a legend keys its bar without colour too.
+   */
+  const swatch = (color: string, index?: number) => (
+    <Text {...ink(color)}>{terminal ? (index === undefined ? '■' : index % 2 ? METER.alt : METER.block) : '●'}</Text>
+  )
 
   /**
    * A legend in columns (two by default): each cell a dot, a dim label that
    * truncates, and its figure right-aligned at the cell's end. `note` is an
    * optional coloured figure before it (a failure count). On the terminal, as
-   * many columns as fit at 18 cells each (one at 30 columns).
+   * many columns as fit at 18 cells each (one at 30 columns). With `bar: true`
+   * (a legend that keys a `bar`, its items in the bar's order) the terminal's
+   * keys are the bar's own glyphs, `█` and `▓` in turn, so it reads without colour.
    */
-  const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], maxCols?: number) => {
+  const legend = (
+    key: string,
+    items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[],
+    maxCols?: number,
+    opts: { bar?: boolean } = {},
+  ) => {
     // Few rows: two columns for up to four entries, three beyond. (The pane's reported
     // width in columns runs smaller than what the desktop draws, so it can't decide this.)
     // The terminal's width is exact, so there it does.
@@ -450,10 +580,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       <Box key={key} flexDirection="row" width="100%" gap={space.group}>
         {groups.map((col, c) => (
           <Box key={`${key}-col-${c}`} flexGrow={1} width={0} flexDirection="column">
-            {col.map(t => (
+            {col.map((t, j) => (
               // The full column's width (the desktop doesn't stretch it); the label gives way first.
               <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={space.pair} width="100%">
-                {swatch(t.color)}
+                {/* Keyed as the bar's parts are, in order: `█`, `▓` in turn on the terminal. */}
+                {swatch(t.color, opts.bar ? c * per + j : undefined)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text {...(terminal ? R.label : tone('light'))} wrap="truncate">
                     {t.label}
@@ -476,15 +607,39 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * A header's right side, one form for every section: figures, each followed by
    * a dim lowercase unit, SPACE.group apart. A figure is coloured only when the
    * colour is a status.
+   *
+   * Its state, before the figures, so a cut never takes it:
+   * - `loading`: no figures yet (the first read): the pending mark `◌` holds
+   *   their place, so a folded section still says it's coming;
+   * - `age`: how old the figures are when they're last-good figures kept through
+   *   a refresh, as a dim `↻ 2m`;
+   * - `failed`: the last refresh failed and these are the last-good figures: an
+   *   amber `▲` (with the age after it, dim, when given). Keep the figures; don't
+   *   swap the body for an error.
    */
-  const summary = (items: ([string, string?, string?] | null | false)[]) => {
+  const summary = (items: ([string, string?, string?] | null | false)[], state: { loading?: boolean; age?: string; failed?: boolean } = {}) => {
     const shown = items.filter((x): x is [string, string?, string?] => Boolean(x))
+    const pending = state.loading && !shown.length
     if (terminal) {
       // One line of text, the figures CELLS.group apart: too wide for its room, it's
       // cut wherever that falls and ends in an ellipsis, never mid-figure without one.
+      const mark = state.failed ? (
+        <Text key="state">
+          <Text {...ink(STATUS.warn.color)}>{STATUS.warn.glyph}</Text>
+          {state.age ? <Text {...R.secondary}>{` ${state.age}`}</Text> : null}
+          {shown.length ? ' '.repeat(CELLS.group) : null}
+        </Text>
+      ) : state.age ? (
+        <Text key="state" {...R.secondary}>
+          {`${MARK.stale} ${state.age}`}
+          {shown.length ? ' '.repeat(CELLS.group) : null}
+        </Text>
+      ) : null
       return (
         <Box flexDirection="row" minWidth={0} flexShrink={1}>
           <Text wrap="truncate">
+            {pending ? <Text key="pending" {...ink(STATUS.pending.color)}>{STATUS.pending.glyph}</Text> : null}
+            {mark}
             {shown.map(([figure, unit, color], i) => (
               <Text key={`${figure}-${unit ?? ''}`}>
                 {i ? ' '.repeat(CELLS.group) : null}
@@ -499,6 +654,15 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     // Too wide for the band, the last item ends in an ellipsis and what's past it is cut.
     return (
       <Box flexDirection="row" gap={space.group} minWidth={0} flexShrink={1} overflow="hidden">
+        {pending ? <Text key="pending" color={STATUS.pending.color}>{STATUS.pending.glyph}</Text> : null}
+        {state.failed ? (
+          <Text key="state">
+            <Text color={STATUS.warn.color}>{STATUS.warn.glyph}</Text>
+            {state.age ? <Text {...tone('mid')}>{` ${state.age}`}</Text> : null}
+          </Text>
+        ) : state.age ? (
+          <Text key="state" {...tone('mid')}>{`${MARK.stale} ${state.age}`}</Text>
+        ) : null}
         {shown.map(([figure, unit, color], i) => (
           <Text key={`${figure}-${unit ?? ''}`} wrap={i === shown.length - 1 ? 'truncate' : undefined}>
             <Text {...ink(color)}>{figure}</Text>
@@ -613,8 +777,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
      * way together. The desktop draws the same either way.
      */
     keepRight?: boolean
+    /** No figures yet: with no `right`, the figure slot shows the pending mark (`summary([], { loading: true })`). */
+    loading?: boolean
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
+    if (s.loading && !s.right) s = { ...s, right: summary([], { loading: true }) }
     if (terminal) {
       // ▾ ◔ Title ──────────── figures
       //   body, two cells in, under the icon column
@@ -630,8 +797,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         )
       const lead = GUTTER + (s.icon ? 2 : 0)
       const keeps = Math.min([...s.title].length, 12)
+      // Under MIN_COLUMNS, the header and its figures only: the body is left out.
+      const open = !s.collapsed && !floor
       return (
-        <Box key={`section-${s.id}`} flexDirection="column" marginBottom={s.collapsed ? 0 : 1}>
+        <Box key={`section-${s.id}`} flexDirection="column" marginBottom={open ? 1 : 0}>
           <Box flexDirection="row" justifyContent="space-between" gap={CELLS.item}>
             {/* The title keeps up to 12 cells of itself; past that, it and the figures give way
                 together. With `keepRight` only the title gives way: the arrow and icon stay. */}
@@ -660,11 +829,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
               </Box>
             ) : null}
           </Box>
-          {s.collapsed ? null : (
+          {open ? (
             <Box flexDirection="column" paddingLeft={GUTTER}>
               {s.children}
             </Box>
-          )}
+          ) : null}
         </Box>
       )
     }
@@ -727,20 +896,35 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * right edge. On the terminal, as an inspector lists them: the label in the
    * reading's label column (LABEL cells, wider labels keep their length), the
    * value after it, left-aligned and cut at the edge.
+   *
+   * `path: true` says a string value is a path (or a branch name): on the
+   * terminal it's cut in the middle, keeping its end (`src/…/view.tsx`), to fit
+   * `width` (a section body's by default).
    */
-  const prop = (key: string, label: string, value: RenderElement | string) =>
-    terminal ? (
-      <Box key={key} flexDirection="row" gap={CELLS.item}>
-        <Box width={Math.min(Math.max(LABEL, [...label].length), 16)} flexShrink={0}>
-          <Text {...R.label} wrap="truncate">
-            {label}
-          </Text>
+  const prop = (key: string, label: string, value: RenderElement | string, opts: { path?: boolean; width?: number } = {}) => {
+    if (terminal) {
+      const labelWidth = Math.min(Math.max(LABEL, [...label].length), 16)
+      const room = Math.max(1, Math.floor(opts.width ?? body) - labelWidth - CELLS.item)
+      return (
+        <Box key={key} flexDirection="row" gap={CELLS.item}>
+          <Box width={labelWidth} flexShrink={0}>
+            <Text {...R.label} wrap="truncate">
+              {label}
+            </Text>
+          </Box>
+          <Box minWidth={0} flexShrink={1} flexGrow={1}>
+            {typeof value === 'string' ? (
+              <Text {...R.value} wrap={opts.path ? 'truncate-middle' : 'truncate'}>
+                {opts.path ? middle(value, room) : value}
+              </Text>
+            ) : (
+              value
+            )}
+          </Box>
         </Box>
-        <Box minWidth={0} flexShrink={1} flexGrow={1}>
-          {typeof value === 'string' ? <Text {...R.value} wrap="truncate">{value}</Text> : value}
-        </Box>
-      </Box>
-    ) : (
+      )
+    }
+    return (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
       <Box minWidth={0} flexShrink={1}>
         <Text {...tone('mid')} wrap="truncate">
@@ -751,7 +935,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
       </Box>
     </Box>
-  )
+    )
+  }
 
   /**
    * A thin rounded gauge, `value` of `max`: a one-part bar. On the terminal a
@@ -1001,9 +1186,21 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * - `text` truncates first, `note` (dim) runs on after it, plain dim whatever
    *   `textColor` or `bold` the text has;
    * - `right`: figures (strings, dim) and elements, one cluster on the right edge.
-   *   On the terminal, once the text is down to its first 6 cells, the cluster's
-   *   last element is cut (a string with an ellipsis), then the ones before it,
-   *   rather than running past the edge.
+   *   On the terminal, once the text is down to its first 6 cells, parts that
+   *   declare a `drop` rank (`{ part, drop }`, see RightPart) are left out, the
+   *   highest rank first, until the row fits; then the cluster's last element
+   *   is cut (a string with an ellipsis), then the ones before it, rather than
+   *   running past the edge. Rank parts by how little they tell (an age before a
+   *   CI mark), whatever order they're drawn in.
+   * - `selected`: the row is the list's current one (a list that takes the
+   *   keyboard). Pass it, true or false, on every row of such a list: the
+   *   terminal then keeps a one-cell gutter on each, with a `▌` in `suggestion`
+   *   and the text bold on the selected row; while the pane isn't `focused`
+   *   (the kit's by default), the mark is dim and the text keeps its weight.
+   *   The desktop tints the selected row as a selected tile.
+   * - `path: true`: the text is a path or branch name: on the terminal it's cut
+   *   in the middle (`src/…/view.tsx`) rather than at the end.
+   * - `width`: the row's cells on the terminal when it isn't a section body's.
    */
   const item = (
     key: string,
@@ -1017,7 +1214,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       bold?: boolean
       dim?: boolean
       indent?: number
-      right?: (RenderElement | string | null | false)[]
+      right?: (RenderElement | string | RightPart | null | false)[]
+      selected?: boolean
+      focused?: boolean
+      path?: boolean
+      width?: number
     },
   ) => {
     const lead =
@@ -1028,17 +1229,41 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             ? status(r.lead as StatusKind)
             : icon(r.lead, r.leadColor ?? MUTED)
           : r.lead
-    const right = (r.right ?? []).filter((x): x is RenderElement | string => Boolean(x))
+    const parts = (r.right ?? []).filter((x): x is RenderElement | string | RightPart => Boolean(x)).map(x => (isRightPart(x) ? x : { part: x }))
+    const focused = r.focused ?? paneFocused
     if (terminal) {
       // The text gives way first (it shrinks a thousand times as fast) down to its first
-      // ITEM_KEEPS cells; then the right cluster is cut from its end, so nothing runs
-      // past the edge. The note is its own run, plain dim whatever the text's colour or weight.
+      // ITEM_KEEPS cells; then ranked parts drop, highest rank first; then the right
+      // cluster is cut from its end, so nothing runs past the edge. The note is its own
+      // run, plain dim whatever the text's colour or weight.
+      const row = Math.max(1, Math.floor(r.width ?? body) - (r.indent ?? 0))
+      const gutter = r.selected === undefined ? 0 : 1
+      const fixed = gutter + (r.tree ? [...r.tree].length : 0) + (lead ? 2 : 0)
+      const textCells = [...r.text].length
+      const kept = parts.map((p, i) => ({ ...p, i, cells: p.cells ?? cellsOf(p.part) ?? 0 }))
+      const clusterCells = () => (kept.length ? kept.reduce((n, p) => n + p.cells, 0) + CELLS.item * kept.length : 0)
+      const ranked = kept.filter(p => (p.drop ?? 0) > 0).sort((a, b) => (b.drop ?? 0) - (a.drop ?? 0) || b.i - a.i)
+      for (const p of ranked) {
+        if (fixed + Math.min(textCells, ITEM_KEEPS) + clusterCells() <= row) break
+        kept.splice(kept.indexOf(p), 1)
+      }
+      const right = kept.map(p => p.part)
       const last = right.length - 1
+      const chosen = Boolean(r.selected)
       const look = r.dim ? { dimColor: true } : ink(r.textColor)
-      const keeps = (r.tree ? [...r.tree].length : 0) + (lead ? 2 : 0) + Math.min([...r.text].length, ITEM_KEEPS)
+      const bold = chosen && focused ? true : r.bold
+      const keeps = fixed + Math.min(textCells, ITEM_KEEPS)
+      // A path is cut in the middle to the room the row leaves it (whatever the note).
+      const text = r.path ? middle(r.text, Math.max(ITEM_KEEPS, row - fixed - clusterCells())) : r.text
+      const wrap = r.path && !r.note ? 'truncate-middle' : 'truncate'
       return (
         <Box key={key} flexDirection="row" justifyContent="space-between" gap={CELLS.item} paddingLeft={r.indent ?? 0}>
           <Box flexDirection="row" flexShrink={1000} minWidth={right.length ? keeps : 0}>
+            {gutter ? (
+              <Box width={1} flexShrink={0}>
+                {chosen ? <Text {...ink(C.blue)} dimColor={!focused || undefined}>{MARK.selected}</Text> : <Text> </Text>}
+              </Box>
+            ) : null}
             {r.tree ? (
               <Box flexShrink={0}>
                 <Text dimColor>{r.tree}</Text>
@@ -1052,14 +1277,14 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
             <Box flexShrink={1} minWidth={0}>
               {r.note ? (
                 <Text wrap="truncate">
-                  <Text bold={r.bold} {...look}>
-                    {r.text}
+                  <Text bold={bold} {...look}>
+                    {text}
                   </Text>
                   <Text {...R.secondary}>{`  ${r.note}`}</Text>
                 </Text>
               ) : (
-                <Text wrap="truncate" bold={r.bold} {...look}>
-                  {r.text}
+                <Text wrap={wrap} bold={bold} {...look}>
+                  {text}
                 </Text>
               )}
             </Box>
@@ -1083,8 +1308,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         </Box>
       )
     }
+    const right = parts.map(p => p.part)
+    const tint = r.selected ? { backgroundColor: focused ? TILE_SELECTED : TILE_SELECTED_BLURRED } : {}
     return (
-      <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0}>
+      <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0} {...tint}>
         <Box flexDirection="row" flexShrink={1} minWidth={0} alignItems="center">
           {r.tree ? (
             <Box flexShrink={0}>
@@ -1203,6 +1430,116 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
+  /**
+   * A key-hint footer: `key what` pairs (keys plain, what they do dim), ` · `
+   * apart, on one line `width` cells wide (a section body's by default). Pairs
+   * that don't fit are dropped from the end and the line ends in a dim `…`, so
+   * put the most used first. Drawn only on the terminal and only while the pane
+   * has the keyboard (the kit's `focused`); elsewhere nothing, as the app
+   * surfaces' controls are buttons. Never hide a key inside a word.
+   */
+  const hints = (key: string, list: Hint[], o: { width?: number } = {}): RenderElement | null => {
+    if (!terminal || !paneFocused || !list.length) return null
+    const w = Math.max(1, Math.floor(o.width ?? body))
+    const len = (s: string) => [...s].length
+    const shown: Hint[] = []
+    let used = 0
+    for (let i = 0; i < list.length; i++) {
+      const hint = list[i]!
+      const cells = (shown.length ? len(MARK.sep) : 0) + len(hint.key) + 1 + len(hint.label)
+      // Room for ` …` after it, unless it's the last.
+      const tail = i < list.length - 1 ? 1 + len(MARK.more) : 0
+      if (used + cells + tail > w) break
+      shown.push(hint)
+      used += cells
+    }
+    // Not even the first fits: it's drawn and cut at the edge.
+    const drawn = shown.length ? shown : list.slice(0, 1)
+    const cut = drawn.length < list.length
+    return (
+      <Box key={key} flexDirection="row" minWidth={0}>
+        <Text wrap="truncate">
+          {drawn.map((hint, i) => (
+            <Text key={`h${i}`}>
+              {i ? <Text {...R.secondary}>{MARK.sep}</Text> : null}
+              <Text {...R.label}>{hint.key}</Text>
+              <Text {...R.secondary}>{` ${hint.label}`}</Text>
+            </Text>
+          ))}
+          {cut && shown.length ? <Text {...R.secondary}>{` ${MARK.more}`}</Text> : null}
+        </Text>
+      </Box>
+    )
+  }
+
+  /**
+   * A sparkline: a series over time, oldest left, newest on the right edge,
+   * scaled to `max` (the series' largest by default), in `color` (quantity, the
+   * default foreground on the terminal, by default).
+   *
+   * On the terminal, Braille dots `width` cells wide (a section body's by
+   * default) and `height` rows tall (1): two points a cell, four levels a row,
+   * filled from the bottom, so the last `2 × width` points show. With
+   * `glyphs: 'blocks'`, the `columns` eighths instead, a point a cell: for a font
+   * without Braille, or counts that should read as bars. On the desktop, an SVG
+   * line at the same size; with no SVG, columns.
+   */
+  const spark = (values: number[], o: { width?: number; height?: number; color?: string; max?: number; glyphs?: 'braille' | 'blocks' } = {}) => {
+    const color = o.color ?? INK
+    const clean = values.map(v => (Number.isFinite(v) ? Math.max(0, v) : 0))
+    const max = o.max && o.max > 0 ? o.max : Math.max(1e-9, ...clean)
+    const rows = Math.max(1, Math.round(o.height ?? 1))
+    const w = Math.max(1, Math.floor(o.width ?? body))
+    const blocks = (n: number) => {
+      const recent = clean.slice(-n)
+      const items: Part[][] = [...Array.from({ length: n - recent.length }, () => [] as Part[]), ...recent.map(v => [{ value: v, color }])]
+      return columnsChart(items, { height: rows, slots: n, width: n })
+    }
+    if (terminal) {
+      if (o.glyphs === 'blocks') return blocks(w)
+      const points = clean.slice(-2 * w)
+      const pad = 2 * w - points.length
+      // Each point's height in dots, from the bottom; anything above zero shows a dot.
+      const level = (i: number) => {
+        if (i < pad) return 0
+        const v = points[i - pad]!
+        return v > 0 ? Math.max(1, Math.round((Math.min(v, max) / max) * rows * 4)) : 0
+      }
+      const lines: RenderElement[] = []
+      for (let r = rows - 1; r >= 0; r--) {
+        let line = ''
+        for (let c = 0; c < w; c++) {
+          const a = Math.max(0, Math.min(4, level(2 * c) - r * 4))
+          const b = Math.max(0, Math.min(4, level(2 * c + 1) - r * 4))
+          line += a || b ? String.fromCharCode(SPARK.base | SPARK.left[a]! | SPARK.right[b]!) : ' '
+        }
+        lines.push(
+          <Text key={`spark${r}`} {...ink(color)}>
+            {line}
+          </Text>,
+        )
+      }
+      return (
+        <Box flexDirection="column" width={w} flexShrink={0}>
+          {lines}
+        </Box>
+      )
+    }
+    if (!Svg) return blocks(Math.min(clean.length, w) || 1)
+    const W = Math.max(8, Math.round(w * COL_PX))
+    const H = Math.max(6, Math.round(rows * ROW_PX))
+    const n = clean.length
+    const at = (v: number, i: number) => `${(n > 1 ? (i / (n - 1)) * (W - 2) + 1 : W / 2).toFixed(1)},${(H - 1 - (Math.min(v, max) / max) * (H - 2)).toFixed(1)}`
+    const source =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">` +
+      `<polyline points="${clean.map(at).join(' ')}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/></svg>`
+    return (
+      <Box flexDirection="row" overflow="hidden" minWidth={0}>
+        <Svg source={source} alt="sparkline" width={W} height={H} />
+      </Box>
+    )
+  }
+
   return {
     icon,
     pinned,
@@ -1231,6 +1568,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     note,
     action,
     actions,
+    hints,
+    spark,
+    /** Whether the pane has the keyboard, as the kit was told (unknown counts as yes). */
+    focused: paneFocused,
     ink,
     space,
     edge,

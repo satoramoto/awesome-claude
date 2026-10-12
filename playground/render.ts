@@ -27,7 +27,14 @@ export const CELL = { col: 7.8, row: 19 }
 /** A terminal row, in em of the terminal's font. */
 export const TERMINAL_ROW_EM = 1.25
 
-const THEME: Record<string, string> = {
+const kebab = (k: string) => k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)
+
+/**
+ * The theme keys' colours where nothing themes them (the desktop panes, the
+ * playground, a bare terminal pane). Each is drawn as `var(--t-<key>, <this>)`,
+ * so a terminal theme class (`term-<theme>`, see TERMINAL_THEMES) recolours them.
+ */
+const BASE: Record<string, string> = {
   text: 'var(--r-fg)',
   inverseText: 'var(--r-bg)',
   claude: '#d77757',
@@ -45,16 +52,75 @@ const THEME: Record<string, string> = {
   merged: '#8e4ec6',
   diffAdded: '#30a46c',
   diffRemoved: '#e5484d',
-  diffAddedDimmed: 'color-mix(in srgb, #30a46c 55%, transparent)',
-  diffRemovedDimmed: 'color-mix(in srgb, #e5484d 55%, transparent)',
   diffAddedWord: '#46c288',
   diffRemovedWord: '#f2757a',
   inactive: '#8e8e93',
   subtle: '#8e8e93',
 }
 
-/** A theme key's color, or the raw color. */
+/** A theme key's CSS variable. */
+const themeVar = (key: string) => `--t-${kebab(key)}`
+
+const THEME: Record<string, string> = {
+  ...Object.fromEntries(Object.entries(BASE).map(([k, v]) => [k, `var(${themeVar(k)}, ${v})`])),
+  diffAddedDimmed: `var(${themeVar('diffAddedDimmed')}, color-mix(in srgb, var(${themeVar('diffAdded')}, ${BASE.diffAdded}) 55%, transparent))`,
+  diffRemovedDimmed: `var(${themeVar('diffRemovedDimmed')}, color-mix(in srgb, var(${themeVar('diffRemoved')}, ${BASE.diffRemoved}) 55%, transparent))`,
+}
+
+/** A theme key's color, or the raw color (drawn as given, whatever the theme). */
 export const color = (v: string) => THEME[v] ?? v
+
+/** The terminal's themes, as Claude Code's `/theme` offers them. */
+export const TERMINAL_THEMES = ['dark', 'light', 'dark-ansi', 'light-ansi'] as const
+export type TerminalTheme = (typeof TERMINAL_THEMES)[number]
+
+/** The class string of a terminal pane drawn in `theme`; a bare `pane terminal` stays the plain dark terminal. */
+export const terminalPaneClass = (theme: TerminalTheme) => `pane terminal term-${theme}`
+
+/** macOS Terminal.app's Basic palette: what the ANSI themes' 16 colours look like here. */
+const ANSI = {
+  black: '#000000', red: '#990000', green: '#00a600', yellow: '#999900', blue: '#0000b2', magenta: '#b200b2', cyan: '#00a6b2', white: '#bfbfbf',
+  blackBright: '#666666', redBright: '#e50000', greenBright: '#00d900', yellowBright: '#e5e500', blueBright: '#0000ff', magentaBright: '#e500e5', cyanBright: '#00e5e5', whiteBright: '#e5e5e5',
+}
+
+/**
+ * Each terminal theme's ground and theme-key colours: approximations of Claude
+ * Code's own themes. Keys not named keep their BASE colour.
+ */
+const TERMINAL_PALETTES: Record<TerminalTheme, { bg: string; fg: string; light: boolean; keys: Record<string, string> }> = {
+  dark: {
+    bg: '#101014', fg: '#d8d8d8', light: false,
+    keys: { claude: 'rgb(215,119,87)', success: 'rgb(78,186,101)', error: 'rgb(255,107,128)', warning: 'rgb(255,193,7)', suggestion: 'rgb(177,185,249)', merged: 'rgb(175,135,255)', inactive: 'rgb(153,153,153)', subtle: 'rgb(80,80,80)', planMode: 'rgb(72,150,140)', permission: 'rgb(177,185,249)', autoAccept: 'rgb(175,135,255)', diffAdded: 'rgb(78,186,101)', diffRemoved: 'rgb(255,107,128)' },
+  },
+  light: {
+    bg: '#fbfbf9', fg: '#1d1d1f', light: true,
+    keys: { claude: 'rgb(215,119,87)', success: 'rgb(44,122,57)', error: 'rgb(171,43,63)', warning: 'rgb(150,108,30)', suggestion: 'rgb(87,105,247)', merged: 'rgb(135,0,255)', inactive: 'rgb(102,102,102)', subtle: 'rgb(175,175,175)', planMode: 'rgb(0,102,102)', permission: 'rgb(87,105,247)', autoAccept: 'rgb(135,0,255)', diffAdded: 'rgb(44,122,57)', diffRemoved: 'rgb(171,43,63)' },
+  },
+  'dark-ansi': {
+    bg: '#000000', fg: ANSI.whiteBright, light: false,
+    keys: { claude: ANSI.redBright, success: ANSI.greenBright, error: ANSI.redBright, warning: ANSI.yellowBright, suggestion: ANSI.blueBright, merged: ANSI.magentaBright, inactive: ANSI.white, subtle: ANSI.white, planMode: ANSI.cyanBright, permission: ANSI.blueBright, autoAccept: ANSI.magentaBright, remember: ANSI.blueBright, ide: ANSI.blueBright, promptBorder: ANSI.white, bashBorder: ANSI.magentaBright, diffAdded: ANSI.green, diffRemoved: ANSI.red, diffAddedWord: ANSI.greenBright, diffRemovedWord: ANSI.redBright },
+  },
+  'light-ansi': {
+    bg: '#ffffff', fg: ANSI.black, light: true,
+    keys: { claude: ANSI.redBright, success: ANSI.green, error: ANSI.red, warning: ANSI.yellow, suggestion: ANSI.blue, merged: ANSI.magenta, inactive: ANSI.blackBright, subtle: ANSI.blackBright, planMode: ANSI.cyan, permission: ANSI.blue, autoAccept: ANSI.magenta, remember: ANSI.blue, ide: ANSI.blue, promptBorder: ANSI.blackBright, bashBorder: ANSI.magenta, diffAdded: ANSI.green, diffRemoved: ANSI.red, diffAddedWord: ANSI.greenBright, diffRemovedWord: ANSI.redBright },
+  },
+}
+
+/**
+ * Each terminal theme's class: its ground, its key colours, and the renderer's
+ * own variables. Set on the theme's element and again on any `.terminal` under it
+ * (a terminal Button, a field), which the bare `.terminal` rule would otherwise reset to dark.
+ */
+const terminalThemeStyles = () =>
+  TERMINAL_THEMES.map(theme => {
+    const t = TERMINAL_PALETTES[theme]
+    const keys = Object.entries(t.keys).map(([k, v]) => `${themeVar(k)}: ${v};`).join(' ')
+    const edge = t.light ? '#a0a0a0' : '#5a5a5a'
+    const code = t.light ? '--r-kw: #8e3fbf; --r-str: #2f7d32; --r-num: #b5651d;' : '--r-kw: #c792ea; --r-str: #a5d6a7; --r-num: #f2b179;'
+    const vars = `--r-bg: ${t.bg}; --r-fg: ${t.fg}; --r-accent: ${t.keys.claude}; --r-field: transparent; --r-edge: ${edge}; --r-code: transparent; ${code} --r-add: color-mix(in srgb, ${t.keys.diffAdded} 22%, transparent); --r-del: color-mix(in srgb, ${t.keys.diffRemoved} 22%, transparent); ${keys}`
+    return `  .term-${theme}, .term-${theme} .terminal { ${vars} }
+  .pane.terminal.term-${theme} { background: ${t.bg}; color: ${t.fg}; color-scheme: ${t.light ? 'light' : 'dark'}; }`
+  }).join('\n')
 
 const VERTICAL = new Set(['top', 'bottom', 'height', 'minHeight', 'marginTop', 'marginBottom', 'marginY', 'paddingTop', 'paddingBottom', 'paddingY', 'rowGap'])
 
@@ -64,8 +130,6 @@ export const unit = (surface: Surface, key: string, v: unknown) => {
   if (surface === 'terminal') return VERTICAL.has(key) ? `${v * TERMINAL_ROW_EM}em` : `${v}ch`
   return `${v * (VERTICAL.has(key) ? CELL.row : CELL.col)}px`
 }
-
-const kebab = (k: string) => k.replace(/[A-Z]/g, m => `-${m.toLowerCase()}`)
 
 const borderOf = (surface: Surface, style: string, c: string | undefined, dim: boolean | undefined) => {
   const width = style === 'bold' ? 2 : style === 'double' ? 3 : 1
@@ -341,6 +405,9 @@ const STYLES = `
   .r-image.blank { display: flex; align-items: center; justify-content: center; opacity: 0.6; outline: 1px dashed var(--r-edge); outline-offset: -1px; overflow: hidden; }
   .r-client { position: relative; display: flex; flex-direction: column; outline: none; touch-action: none; }
   .r-client .r-unmounted { opacity: 0.6; white-space: nowrap; }
+
+  /* The terminal's themes, after the bare .terminal so they win on the same element. */
+${terminalThemeStyles()}
 `
 
 // ---- Svg ----
@@ -594,9 +661,13 @@ const paint = (node: Child, ctx: Ctx): globalThis.Node | null => {
       return el
     }
     case 'Text': {
-      const el = apply(document.createElement('span'), { display: 'block', ...textStyle(p) })
+      const middle = surface === 'terminal' && (p.wrap === 'truncate-middle' || p.wrap === 'middle')
+      const el = apply(document.createElement('span'), { display: 'block', ...textStyle(middle ? { ...p, wrap: 'truncate' } : p) })
       if (hover) join(member(el, () => textStyle({ ...p, ...without(hover, 'scope') })), hover, ctx.scope, ctx.site)
-      return withKids(el, kids(), true)
+      withKids(el, kids(), true)
+      // Plain text only: a Text with styled runs inside keeps the end ellipsis.
+      if (middle && children.every(c => typeof c === 'string' || typeof c === 'number' || c === null || c === undefined || c === false)) truncateMiddle(el)
+      return el
     }
     case 'Link': {
       const a = document.createElement('a')
@@ -632,6 +703,37 @@ const paint = (node: Child, ctx: Ctx): globalThis.Node | null => {
     default:
       return withKids(document.createElement('div'), kids())
   }
+}
+
+/**
+ * Ink's `wrap="truncate-middle"` on the terminal: once laid out, a Text that
+ * doesn't fit keeps its start and end with `…` between, cut in whole cells as
+ * cli-truncate cuts them; again whenever its box resizes.
+ */
+const truncateMiddle = (el: HTMLElement) => {
+  const full = el.textContent ?? ''
+  const chars = [...full]
+  const fit = () => {
+    if (!el.isConnected) return
+    el.textContent = full
+    const room = el.clientWidth
+    if (el.scrollWidth <= room || !chars.length) return
+    // A cell's width, from the full line laid out in the monospace font.
+    const cell = el.scrollWidth / chars.length
+    const columns = Math.floor(room / cell + 0.01)
+    if (columns < 1) return
+    if (columns === 1) return void (el.textContent = '…')
+    const half = Math.floor(columns / 2)
+    el.textContent = `${chars.slice(0, half).join('')}…${chars.slice(chars.length - (columns - half) + 1).join('')}`
+  }
+  requestAnimationFrame(() => {
+    fit()
+    if (!el.isConnected) return
+    // Its own box shrinks with the cut text, so the box around it says when there's room again.
+    const watcher = new ResizeObserver(() => (el.isConnected ? fit() : watcher.disconnect()))
+    watcher.observe(el)
+    if (el.parentElement) watcher.observe(el.parentElement)
+  })
 }
 
 const fragment = (nodes: Child[], ctx: Ctx) => {

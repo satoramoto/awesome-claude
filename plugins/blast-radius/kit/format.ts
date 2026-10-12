@@ -55,5 +55,40 @@ export const money =(usd: number) => (usd >= 100 ? `$${Math.round(usd)}` : `$${u
 /** `value` as a whole percent of `max`, clamped: the desktop takes whole percentages only. */
 export const pct = (value: number, max: number) => `${Math.round(Math.max(0, Math.min(100, (value / Math.max(max, 1)) * 100)))}%`
 
+/**
+ * `text` cut in the middle to at most `cells` characters, the end kept: a path
+ * keeps its first segment and as many whole segments from its end as fit
+ * (`src/…/hooks/view.tsx`), then `…/view.tsx`, then the end of its name; other
+ * text keeps its start and end around `…`. Text that fits comes back as is.
+ */
+export const middle = (text: string, cells: number): string => {
+  const chars = [...text]
+  const n = Math.max(0, Math.floor(cells))
+  if (chars.length <= n) return text
+  if (n <= 1) return n === 1 ? '…' : ''
+  const parts = text.split('/')
+  if (parts.length >= 2) {
+    const len = (s: string) => [...s].length
+    const head = parts[0]!
+    const tail: string[] = [parts[parts.length - 1]!]
+    // As many whole segments from the end as fit after `head/…/`.
+    for (let i = parts.length - 2; i > 0; i--) {
+      const next = [parts[i]!, ...tail].join('/')
+      if (len(`${head}/…/${next}`) > n) break
+      tail.unshift(parts[i]!)
+    }
+    const kept = tail.join('/')
+    if (len(`${head}/…/${kept}`) <= n) return `${head}/…/${kept}`
+    if (len(`…/${kept}`) <= n) return `…/${kept}`
+    // Not even the name fits: the end of the name.
+    const name = [...kept]
+    return `…${name.slice(name.length - (n - 1)).join('')}`
+  }
+  // Plain text: a little more of the start than the end.
+  const front = Math.ceil((n - 1) / 2)
+  const back = n - 1 - front
+  return `${chars.slice(0, front).join('')}…${back ? chars.slice(chars.length - back).join('') : ''}`
+}
+
 /** The last path segment. */
 export const basename = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() ?? path

@@ -196,7 +196,7 @@ test('the context bar and its scale span the section body at every width, the co
   await session($, on)
   for (const columns of WIDTHS) {
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
-    const bar = await ui.find({ type: 'Text', text: /^[█▏▎▍▌▋▊▉░]+$/ })
+    const bar = await ui.find({ type: 'Text', text: /^[█▓▏▎▍▌▋▊▉░]+$/ })
     expect([...(bar?.text ?? '')].length).toBe(columns - 2)
     const scale = await ui.find({ type: 'Text', text: /^[╵ ]*▴[╵ ]*$/ })
     expect([...(scale?.text ?? '')].length).toBe(columns - 2)
