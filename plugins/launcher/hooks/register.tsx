@@ -371,6 +371,7 @@ export const register: Register = on => {
     }
     worker?.cancel()
     worker = $.clock.every(TICK, () => void tick($).catch(() => undefined))
+    void $.ui.open({ id: PANE, title: TITLE })
 
     return next(e)
   })

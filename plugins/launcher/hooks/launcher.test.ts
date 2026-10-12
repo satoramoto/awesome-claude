@@ -33,6 +33,8 @@ type World = {
   killed: string[]
   /** The test's clock. */
   clock: ReturnType<typeof mock.clock>
+  /** Every pane the mod opened. */
+  opened: { id: string; title: string }[]
 }
 
 /**
@@ -42,9 +44,12 @@ type World = {
  */
 const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => {
   const clock = mock.clock(on, { now: NOW })
-  const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock }
+  const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock, opened: [] }
   on('session.cwd', async () => ({ value: '/repo/app' }))
-  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.open', async (_$, e) => {
+    world.opened.push({ id: e.id, title: e.title })
+    return { value: { isPlaced: true } }
+  })
   on('ui.panes', async () => ({ value: [] }))
   on('ui.toast', async () => ({ value: undefined }))
   on('command.run', async () => ({ text: '' }))
@@ -78,6 +83,14 @@ const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => 
 
 const launcher = ($: Engine, args = '') =>
   $.command.run({ command: 'launcher', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+test('the pane opens on its own when a session starts', async ($, on) => {
+  const { opened } = engine(on)
+  on('command.register', async () => ({ value: undefined }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo/app', surface: 'terminal', isInteractive: true })
+  expect(opened).toEqual([{ id: 'launcher', title: 'Launcher' }])
+})
 
 test('/launcher opens a pane listing each configuration of launch.json, on the terminal and the desktop', async ($, on) => {
   engine(on)

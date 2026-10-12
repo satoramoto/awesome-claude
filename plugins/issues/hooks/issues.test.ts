@@ -39,12 +39,19 @@ const PANE = {
   props: { title: 'Issues', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
-/** The engine beneath the mod: a clock that holds still, and gh answering from GH_ISSUES. */
+/**
+ * The engine beneath the mod: a clock that holds still, and gh answering from
+ * GH_ISSUES. Returns the panes the mod opened, as `{ id, title }`.
+ */
 const engine = (on: On) => {
+  const opened: { id: string; title: string }[] = []
   mock.clock(on, { now: NOW })
   // A call on `$` (an op) is answered with `{ value }`; an event like command.run with its result.
   on('session.cwd', async () => ({ value: '/repo' }))
-  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.open', async (_$, e) => {
+    opened.push({ id: e.id, title: e.title })
+    return { value: { isPlaced: true } }
+  })
   on('command.run', async () => ({ text: '' }))
   on('process.run', async (_$, e) => ({
     value:
@@ -52,11 +59,20 @@ const engine = (on: On) => {
         ? { exitCode: 0, stdout: JSON.stringify(GH_ISSUES), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
         : { exitCode: 1, stdout: '', stderr: 'not answered in this test', isStdoutTruncated: false, isStderrTruncated: false },
   }))
+  return opened
 }
 
 /** `/issues` as the person types it; it settles once gh was read into state. */
 const open = ($: Engine) =>
   $.command.run({ command: 'issues', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
+
+test('the pane opens on its own when a session starts', async ($, on) => {
+  const opened = engine(on)
+  on('command.register', async () => ({ value: undefined }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(opened).toEqual([{ id: 'issues', title: 'Issues' }])
+})
 
 test('/issues opens a pane listing the open issues, on the terminal and the desktop', async ($, on) => {
   engine(on)

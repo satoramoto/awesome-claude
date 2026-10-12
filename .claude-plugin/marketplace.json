@@ -9,28 +9,28 @@
     {
       "name": "overview",
       "source": "./plugins/overview",
-      "version": "0.5.0",
+      "version": "0.6.0",
       "description": "A session overview pane: context, cost, time, turns, tools, files, subagents, limits and git; cells in the terminal, charts in the desktop app",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "issues",
       "source": "./plugins/issues",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "description": "A pane listing the open GitHub issues of the session's repository",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "launcher",
       "source": "./plugins/launcher",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "The project's dev servers from .claude/launch.json in a pane: start, stop and restart each, see which answer and read their output",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "lab",
       "source": "./plugins/lab",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "description": "Experiments that probe what the rendering engine accepts: SVG, animation, interaction and every element, each in its own pane",
       "author": { "name": "Ryan Gavin" }
     },

@@ -2,6 +2,20 @@
 
 ## Unreleased
 
+- **`overview`** (0.6.0): ships what merged since 0.5.0 and never reached
+  marketplace installs: the three greys, links without underline, and the kit's
+  Octicons and other kit changes since.
+- **`issues`** (0.2.0): ships linked PRs, label pills, Select, the three greys
+  and the kit's Octicons, merged since 0.1.0; and the pane now opens on its own
+  when a session starts (`/issues` opens it again).
+- **`launcher`** (0.1.1): the pane opens on its own when a session starts
+  (`/launcher` opens it again).
+- **`lab`** (0.1.1): ships the kit changes merged since 0.1.0; the index opens
+  on its own when a session starts.
+- **CI** fails a pull request that changes a mod's compiled output in
+  `plugins/<mod>/` without raising its version above the base's, so every change
+  reaches marketplace installs. README's Install section says how to get updates
+  and turn on auto-update.
 - **`filetree`** (0.2.24): forked from
   [data-goblin/claude-code-filetree](https://github.com/data-goblin/claude-code-filetree)
   at `bf8de32`, MIT, code unchanged.

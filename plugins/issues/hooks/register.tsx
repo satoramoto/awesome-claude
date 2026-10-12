@@ -221,6 +221,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'issues', description: "Open a pane with the open GitHub issues of this session's repository" })
     worker?.cancel()
     worker = $.clock.every(5_000, () => void tick($).catch(() => undefined))
+    void $.ui.open({ id: PANE, title: 'Issues' })
 
     return next(e)
   })

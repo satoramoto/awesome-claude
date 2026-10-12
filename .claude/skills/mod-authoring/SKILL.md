@@ -45,8 +45,11 @@ Copy `mods/issues/` as the template (it's the smaller mod):
    (it tests the issues pane and fails anywhere else).
 2. Add an entry for it to `.claude-plugin/marketplace.json` (`name`,
    `source: ./plugins/<name>`, `description`, `version` equal to `plugin.json`'s).
-   Bumping a mod's version means bumping it in both places; CI fails on drift
-   and on a `plugins/` folder the marketplace doesn't list.
+   Any later change to a mod's compiled output (`plugins/<name>/`, a `kit/`
+   change included) raises its version in both places, since marketplace
+   installs only update when it changes. CI fails on drift between the two, on
+   a `plugins/` folder the marketplace doesn't list, and on a PR that changes a
+   mod's output without raising its version above the base's.
 3. Add a fixture `playground/fixtures/<name>.ts` and a story
    `stories/<name>.stories.ts` (see the `storybook-prototyping` skill).
 4. Run the checks below, then add the mod to README's mod table.

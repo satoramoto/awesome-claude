@@ -32,8 +32,12 @@ restate a function's code.
 
 A new mod appears in `plugins/` only after `bun build.ts`, and needs an entry
 in `.claude-plugin/marketplace.json` (`name`, `source: ./plugins/<mod>`,
-`description`, `version`). Bumping a mod's version in its `plugin.json` means
-bumping it in the marketplace too.
+`description`, `version`). Any change to a mod's compiled output
+(`plugins/<mod>/`, so a `kit/` change too) bumps its version, in its
+`plugin.json` and in `.claude-plugin/marketplace.json`: marketplace installs only
+update when the version changes. CI fails a PR that changes a mod's output
+without raising its version above the base's, or whose two versions differ.
+Add a `CHANGELOG.md` entry with the bump.
 
 ## Design rules
 
@@ -50,7 +54,9 @@ it) rather than letting it overflow.
 CI ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs on every PR: the
 build (and fails if `plugins/` wasn't rebuilt and committed), `claude plugin
 validate` for every mod, `claude plugin test` for every mod that has a
-`*.test.ts` or `*.test.tsx`, and `claude plugin validate .` for the marketplace.
+`*.test.ts` or `*.test.tsx`, `claude plugin validate .` for the marketplace, and
+on a PR, that every existing mod whose `plugins/<mod>/` changed has a higher
+version than the base's.
 Work on a branch, open a PR, and let CI be the final check; `main` takes PRs
 only. Every PR gets auto-merge turned on when it's opened (`main` requires the
 CI check, so it merges once CI passes).
