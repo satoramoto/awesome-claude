@@ -70,7 +70,7 @@ export type Helpers = {
  */
 // Grouped into four, so the legend is short: what the system brings, what MCP
 // brings, what the person's setup brings (memory, skills, agents), and the conversation.
-const CATEGORY: Record<string, { name: string; color: string }> = {
+export const CATEGORY: Record<string, { name: string; color: string }> = {
   'System prompt': { name: 'System', color: RAMP.slate[0] },
   'System tools': { name: 'System', color: RAMP.slate[0] },
   'MCP tools': { name: 'MCP', color: RAMP.slate[1] },
@@ -103,7 +103,7 @@ const statusColor = (status: string): string =>
  * A PR's state as one colour: merged purple; closed or draft grey; an open one green,
  * red while it has conflicts (on GitHub or in the checkout), amber while CI fails.
  */
-const prColor = (pr: GitPr, conflicted: boolean) =>
+export const prColor = (pr: GitPr, conflicted: boolean) =>
   pr.state === 'MERGED'
     ? C.purple
     : pr.state === 'CLOSED' || pr.isDraft
@@ -115,20 +115,20 @@ const prColor = (pr: GitPr, conflicted: boolean) =>
           : C.ok
 
 /** "2h18", "3d4h", from "resets in 2h 18m". */
-const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
+export const compact = (s: string) => s.replace('resets in ', '').replace(/ /g, '')
 
 /** The context bar's free room: a step brighter than the empty track. */
 const FREE = 'rgba(128,128,128,0.34)'
 /** The context bar's buffer past compaction: the compaction mark's amber, faint. */
 const BUFFER = 'rgba(227,163,59,0.32)'
 
-const shortTool =(name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
+export const shortTool = (name: string) => (name.startsWith('mcp__') ? (name.split('__').pop() ?? name) : name)
 
 /**
  * The footer's lead: the session's share of the machine, ours against the
  * system's, under muted three-letter labels; ours turns amber or red when it's a big share.
  */
-const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[] => {
+export const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[] => {
   if (!r) return []
   const hot = (part: number, whole: number) => (whole > 0 && part / whole > 0.5 ? C.bad : whole > 0 && part / whole > 0.25 ? C.warn : undefined)
   const pctOf = (n: number) => `${Math.round(n)}%`
@@ -137,6 +137,52 @@ const machine = (k: ReturnType<typeof kit>, r: Resources | null): RenderElement[
     k.share('mem', 'mem', bytes(r.mem), bytes(r.memAll), hot(r.mem, r.memAll)),
     k.share('net', 'net', r.net === null ? '–' : bytes(r.net), bytes(r.netAll), r.net === null ? undefined : hot(r.net, r.netAll)),
   ]
+}
+
+/** The context window's used segments summed into their groups, in the groups' order; the free room up to compaction; the buffer past it. */
+export const contextParts = (snap: Snapshot | null) => {
+  const parts: { value: number; color: string; label: string }[] = []
+  for (const s of snap?.segments ?? []) {
+    if (s.kind !== 'used' || s.tokens <= 0) continue
+    const c = CATEGORY[s.name] ?? { name: s.name, color: INK }
+    const at = parts.find(p => p.label === c.name)
+    if (at) at.value += s.tokens
+    else parts.push({ value: s.tokens, color: c.color, label: c.name })
+  }
+  const free = snap ? Math.max(0, (snap.compactAt ?? snap.max) - snap.total) : 0
+  const buffer = snap?.compactAt && snap.max > snap.compactAt ? snap.max - snap.compactAt : 0
+  return { parts, free, buffer }
+}
+
+/**
+ * The activity chart's data: tool calls per turn, each turn's column sliced by tool.
+ * The busiest tools take shades of blue (one series, parts told apart), the rest one slate slice.
+ */
+export const activityChart = (a: Activity) => {
+  const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
+  const named = allTools.slice(0, RAMP.blue.length).map(([name], i) => ({ name, color: RAMP.blue[i]! }))
+  const OTHER = RAMP.slate[1]
+  const SLOTS = 16
+  const log = a.turnLog.slice(-SLOTS)
+  const first = a.turns - log.length + 1
+  const sliced = log.map(p => {
+    const by = p.tools ?? {}
+    const other = Object.entries(by).reduce((n, [name, c]) => n + (named.some(t => t.name === name) ? 0 : c), 0)
+    // Stacked bottom up, the busiest tool at the base; a turn without calls keeps a sliver.
+    const stack = [...named.map(t => ({ value: by[t.name] ?? 0, color: t.color })), { value: other, color: OTHER }].reverse()
+    return stack.some(x => x.value > 0) ? stack : [{ value: 0.05, color: TRACK }]
+  })
+  const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
+  const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
+  // Failed tool calls (the only place failures are counted).
+  const failures = allTools.reduce((n, [, t]) => n + t.err, 0)
+  const otherErr = allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0)
+  const errNote = (err: number) => (err > 0 ? { note: `!${err}`, noteColor: C.bad } : {})
+  const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
+  const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
+  // Turn numbers under the first, middle and last bar.
+  const ticks = log.length ? [0, Math.floor((log.length - 1) / 2), log.length - 1].filter((v, i, xs) => xs.indexOf(v) === i) : []
+  return { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, failures, otherErr, errNote, cacheIn, allIn, ticks }
 }
 
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
@@ -150,22 +196,13 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
 
   // ---- context: the instrument's main meter ----
-  // Used segments summed into their groups, in the groups' order.
-  const parts: { value: number; color: string; label: string }[] = []
-  for (const s of snap?.segments ?? []) {
-    if (s.kind !== 'used' || s.tokens <= 0) continue
-    const c = CATEGORY[s.name] ?? { name: s.name, color: INK }
-    const at = parts.find(p => p.label === c.name)
-    if (at) at.value += s.tokens
-    else parts.push({ value: s.tokens, color: c.color, label: c.name })
-  }
+  const { parts, free, buffer } = contextParts(snap)
   // What's left, as two more shades of the same bar: the free room up to compaction,
   // then the buffer past it (amber, as the compaction mark is), with their own legend entries.
   const room = [...parts]
   if (snap) {
-    const free = Math.max(0, (snap.compactAt ?? snap.max) - snap.total)
     if (free > 0) room.push({ value: free, color: FREE, label: 'Free' })
-    if (snap.compactAt && snap.max > snap.compactAt) room.push({ value: snap.max - snap.compactAt, color: BUFFER, label: 'Buffer' })
+    if (buffer > 0) room.push({ value: buffer, color: BUFFER, label: 'Buffer' })
   }
   const context = k.section({
     id: 'context',
@@ -224,30 +261,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   // ---- activity: tool calls per turn, each bar sliced by tool ----
-  // The busiest tools take shades of blue (one series, parts told apart), the rest one slate slice.
-  const allTools = Object.entries(a.tools).sort((x, y) => y[1].n - x[1].n)
-  const named = allTools.slice(0, RAMP.blue.length).map(([name], i) => ({ name, color: RAMP.blue[i]! }))
-  const OTHER = RAMP.slate[1]
-  const SLOTS = 16
-  const log = a.turnLog.slice(-SLOTS)
-  const first = a.turns - log.length + 1
-  const sliced = log.map(p => {
-    const by = p.tools ?? {}
-    const other = Object.entries(by).reduce((n, [name, c]) => n + (named.some(t => t.name === name) ? 0 : c), 0)
-    // Stacked bottom up, the busiest tool at the base; a turn without calls keeps a sliver.
-    const stack = [...named.map(t => ({ value: by[t.name] ?? 0, color: t.color })), { value: other, color: OTHER }].reverse()
-    return stack.some(x => x.value > 0) ? stack : [{ value: 0.05, color: TRACK }]
-  })
-  const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
-  const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
-  // Failed tool calls (the only place failures are counted).
-  const failures = allTools.reduce((n, [, t]) => n + t.err, 0)
-  const otherErr = allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0)
-  const errNote = (err: number) => (err > 0 ? { note: `!${err}`, noteColor: C.bad } : {})
-  const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
-  const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
-  // Turn numbers under the first, middle and last bar.
-  const ticks = log.length ? [0, Math.floor((log.length - 1) / 2), log.length - 1].filter((v, i, xs) => xs.indexOf(v) === i) : []
+  const { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, failures, otherErr, errNote, cacheIn, allIn, ticks } = activityChart(a)
   const activity =
     log.length || toolCalls
       ? k.section({

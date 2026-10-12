@@ -1,0 +1,385 @@
+import type { Elements, RenderElement } from 'claude-code'
+
+import { basename, money, short, tokens } from '../kit/format'
+import { C, GLYPH, MUTED, TRACK, levelColor } from '../kit/tokens'
+import type { StatusKind } from '../kit/tokens'
+import { kit } from '../kit/ui'
+import type { Kit } from '../kit/ui'
+
+import type { Agent, BranchView, GitFile, GitInfo, GitPr, TreeRow } from '../types'
+import { activityChart, compact, contextParts, machine, prColor, shortTool } from './desktop'
+import type { DesktopData } from './desktop'
+
+/*
+ * The terminal mode: the same instrument inspector as the desktop, in cells.
+ * Same sections in the same order (Context, Limits, Activity, Agents,
+ * Workspaces, Accounting), plus the session's own checkout and its pull
+ * requests (Git), which the terminal has always shown. Every row is drawn
+ * with the kit's terminal primitives, sized from the pane's `bodyColumns`.
+ */
+
+/** The elements the terminal draws with. */
+export type TermElements = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
+
+/** What the terminal mode borrows from register.tsx, passed in so this file has no cycle back. */
+export type TermHelpers = {
+  limitLabel: (kind: string) => string
+  resetIn: (resetsAt: string | undefined, at: number) => string
+  fitTree: (list: Agent[], budget: number) => { rows: TreeRow[]; hidden: number }
+  subSummary: (row: TreeRow) => string
+}
+
+/** The most agent rows drawn; finished subtrees fold first, then the rest is counted. */
+const AGENT_ROWS = 12
+/** The most pull requests the Git section lists. */
+const GIT_PRS = 3
+
+/** An agent's status as the kit's status kind. */
+export const agentStatus = (status: string): StatusKind =>
+  status === 'running'
+    ? 'running'
+    : status === 'pending'
+      ? 'pending'
+      : status === 'completed'
+        ? 'done'
+        : status === 'failed'
+          ? 'failed'
+          : status === 'killed'
+            ? 'stopped'
+            : 'idle'
+
+/** A PR's icon key: its state, as GitHub draws it. */
+const prIcon = (pr: GitPr) => (pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open')
+
+/** A PR's checks as one status and word, or null when there's nothing to say. */
+const prChecks = (pr: GitPr, conflicted = 0): [StatusKind, string] | null => {
+  if (pr.state === 'MERGED') return ['merged', 'merged']
+  if (pr.state === 'CLOSED') return ['stopped', 'closed']
+  if (conflicted) return ['failed', `${conflicted} conflict${conflicted === 1 ? '' : 's'}`]
+  if (pr.conflicting) return ['failed', 'conflicts']
+  if (pr.checks.failed) return ['failed', `${pr.checks.failed} failing`]
+  if (pr.checks.pending) return ['pending', `${pr.checks.pending} pending`]
+  if (pr.checks.passed) return ['done', 'passing']
+  return null
+}
+
+/** A changed file's colour: conflicts and deletions red, additions and staged green, edits amber, untracked grey. */
+const fileColor = (f: GitFile) =>
+  f.kind === 'conflict' || f.kind === 'deleted' ? C.bad : f.kind === 'added' || f.staged ? C.ok : f.kind === 'untracked' ? MUTED : C.warn
+
+/** The folder a path sits in, or '' at the top. */
+const dirOf = (path: string) => path.split(/[\\/]/).slice(0, -1).join('/')
+
+export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelpers): RenderElement => {
+  const { Box } = els
+  const k = kit(els, 'terminal', d.columns)
+  const a = d.activity
+  const snap = d.snap
+  const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
+  const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
+
+  // ---- context: the used groups on a block bar, the compaction mark on the scale under it ----
+  const { parts, free, buffer } = contextParts(snap)
+  const context = k.section({
+    id: 'context',
+    icon: GLYPH.context,
+    title: 'Context',
+    right: snap ? k.summary([[`${snap.percent}%`, `of ${tokens(snap.max)}`, levelColor(snap.percent)]]) : k.summary([['measuring…']]),
+    ...fold('context'),
+    children: snap
+      ? [
+          <Box key="meter" flexDirection="column">
+            {k.bar(parts, snap.max)}
+            {k.scale(snap.compactAt ? snap.compactAt / Math.max(snap.max, 1) : undefined)}
+            {k.axis(
+              'ctx-axis',
+              [0, 0.5, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
+            )}
+          </Box>,
+          <Box key="legend" marginTop={k.space.block}>
+            {k.legend('ctx', [
+              ...parts.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
+              // The bar's track is the free room; the buffer starts at the scale's mark, in its amber.
+              ...(free > 0 ? [{ label: 'Free', color: TRACK, figure: tokens(free) }] : []),
+              ...(buffer > 0 ? [{ label: 'Buffer', color: C.warn, figure: tokens(buffer) }] : []),
+            ])}
+          </Box>,
+        ]
+      : null,
+  })
+
+  // ---- limits ----
+  const windows = d.limits ?? []
+  const limits = windows.length
+    ? k.section({
+        id: 'limits',
+        icon: GLYPH.limits,
+        title: 'Limits',
+        ...fold('limits'),
+        children: windows.map(w =>
+          k.reading(`limit-${w.kind}`, {
+            label: fx.limitLabel(w.kind),
+            value: Math.min(100, Math.max(0, w.percent)),
+            max: 100,
+            color: levelColor(w.percent),
+            figure: `${Math.round(w.percent)}%`,
+            unit: w.resetsAt ? compact(fx.resetIn(w.resetsAt, d.at)) : undefined,
+          }),
+        ),
+      })
+    : null
+
+  // ---- activity: tool calls per turn ----
+  const chart = activityChart(a)
+  const toolCalls = Object.values(a.tools).reduce((n, t) => n + t.n, 0)
+  // The chart's own width (whole cells per slot), so the turn numbers sit under their columns.
+  const chartWidth = Math.max(1, Math.floor(k.width / chart.SLOTS)) * chart.SLOTS
+  const activity =
+    chart.log.length || toolCalls
+      ? k.section({
+          id: 'activity',
+          icon: GLYPH.tools,
+          title: 'Activity',
+          right: k.summary([
+            [String(chart.peak), 'peak'],
+            chart.failures ? [String(chart.failures), 'failed', C.bad] : null,
+            [`${chart.allIn ? Math.round((chart.cacheIn / chart.allIn) * 100) : 0}%`, 'cached'],
+          ]),
+          ...fold('activity'),
+          children: [
+            <Box key="chart" flexDirection="column">
+              {k.columns(chart.sliced, { slots: chart.SLOTS, height: 3 })}
+              {k.axis(
+                'act-axis',
+                chart.ticks.map(i => ({ at: (i + 0.5) / chart.SLOTS, text: String(chart.first + i).padStart(2, '0') })),
+                chartWidth,
+              )}
+            </Box>,
+            <Box key="legend" marginTop={k.space.block}>
+              {k.legend('act', [
+                ...chart.named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n), ...chart.errNote(a.tools[t.name]!.err) })),
+                ...(chart.otherCount ? [{ label: 'Other', color: chart.OTHER, figure: String(chart.otherCount), ...chart.errNote(chart.otherErr) }] : []),
+              ])}
+            </Box>,
+          ],
+        })
+      : null
+
+  // ---- agents: a tree, each row its status, description, type, tokens and time ----
+  const { rows: tree, hidden } = fx.fitTree(d.agents, AGENT_ROWS)
+  const agents = d.agents.length
+    ? k.section({
+        id: 'agents',
+        icon: GLYPH.agents,
+        title: 'Agents',
+        right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
+        ...fold('agents'),
+        children: [
+          ...tree.map(row => {
+            const { agent } = row
+            const x = d.extras[agent.id]
+            const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
+            const sub = fx.subSummary(row)
+            return k.item(`agent-${agent.id}`, {
+              tree: row.depth ? k.tree(row.guides, row.last, row.depth) : undefined,
+              lead: agentStatus(agent.status),
+              text: agent.description || agent.type,
+              note: [agent.description ? agent.type : '', sub].filter(Boolean).join(' · '),
+              right: [x?.tokens !== undefined ? tokens(x.tokens) : null, ms !== undefined ? short(ms) : null],
+            })
+          }),
+          hidden > 0 ? k.note('agents-more', `… ${hidden} more`) : null,
+        ],
+      })
+    : null
+
+  // ---- accounting ----
+  const accounting = k.section({
+    id: 'accounting',
+    icon: GLYPH.cost,
+    title: 'Accounting',
+    right: k.summary([[a.cost !== undefined ? money(a.cost) : '–']]),
+    ...fold('accounting'),
+    children: [k.prop('model', 'Model', snap ? snap.model : '–')],
+  })
+
+  return k.pinned(
+    [context, limits, activity, agents, ...workspaces(els, k, d, fold), gitSection(els, k, d, fold), accounting],
+    k.perf(d.perf, { lead: machine(k, d.resources) }),
+    d.rows,
+  )
+}
+
+type Fold = (id: string) => { collapsed: boolean; onToggle: () => void }
+
+/**
+ * Workspaces: the branches the session started, two rows each: the PR's state as
+ * its icon, the branch and its actions; then the PR's number and title, the
+ * lines changed and CI.
+ */
+const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): RenderElement[] => {
+  const { Box, Text } = els
+  if (!d.branches.length) return []
+  const entries = d.branches.map((b: BranchView, i) => {
+    const pr = b.pr
+    const open = pr?.state === 'OPEN'
+    const ci = pr ? prChecks(pr, b.conflicted) : b.conflicted ? (['failed', `${b.conflicted} conflicts`] as [StatusKind, string]) : null
+    const main =
+      !b.exists
+        ? null
+        : d.creating === b.branch
+          ? null
+          : !pr
+            ? { key: `create-${b.branch}`, label: 'Create PR', onPress: () => d.createPr(b.branch) }
+            : open && !pr.isDraft
+              ? { key: `merge-${pr.number}`, label: 'Merge', onPress: () => d.mergePr(pr) }
+              : null
+    const where = b.worktree ? `${b.place} (worktree)` : b.place
+    return (
+      <Box key={`branch-${b.branch}`} flexDirection="column" marginTop={i === 0 ? 0 : k.space.block}>
+        {k.item(`branch-${b.branch}-head`, {
+          lead: pr ? prIcon(pr) : GLYPH.branch,
+          leadColor: pr ? prColor(pr, b.conflicted > 0) : MUTED,
+          text: b.branch,
+          note: pr ? `#${pr.number}` : undefined,
+          dim: !b.exists,
+          bold: b.checkedOut,
+          right: [
+            d.creating === b.branch ? 'creating PR…' : null,
+            k.actions(`branch-${b.branch}-actions`, [main, { key: `hide-${b.branch}`, label: 'hide', quiet: true, onPress: () => d.hideBranch(b.branch) }]),
+          ],
+        })}
+        {k.item(`branch-${b.branch}-pr`, {
+          indent: k.edge.left,
+          text: pr ? pr.title : where,
+          dim: !pr,
+          right: [
+            b.insertions || b.deletions ? (
+              <Text key="diff">
+                <Text {...k.ink(C.ok)}>{`+${b.insertions}`}</Text>
+                <Text {...k.ink(C.bad)}>{` −${b.deletions}`}</Text>
+              </Text>
+            ) : null,
+            ci ? k.status(ci[0], ci[1], 'ci') : null,
+          ],
+        })}
+      </Box>
+    )
+  })
+  const merged = d.branches.filter(b => b.pr?.state === 'MERGED').length
+  const openPrs = d.branches.filter(b => b.pr?.state === 'OPEN').length
+  return [
+    k.section({
+      id: 'workspaces',
+      icon: GLYPH.branch,
+      title: 'Workspaces',
+      right: k.summary([openPrs ? [String(openPrs), 'open', C.blue] : null, merged ? [String(merged), 'merged', C.purple] : null]),
+      ...fold('workspaces'),
+      children: entries,
+    }),
+  ]
+}
+
+/**
+ * Git: the session's own checkout (branch, upstream, worktree, what changed) and
+ * the open pull requests it has, each a list row with its status.
+ */
+const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): RenderElement => {
+  const { Box, Text } = els
+  const repo = d.git
+  const hub = d.gh
+  const head = (right: RenderElement | null, children: (RenderElement | null)[]) =>
+    k.section({ id: 'git', icon: GLYPH.branch, title: 'Git', right, ...fold('git'), children })
+  if (repo === null) return head(null, [k.note('git-reading', 'Reading git…', 'loading')])
+  if (!repo.ok) return head(null, [k.note('git-note', repo.note)])
+  const g: GitInfo = repo
+
+  // The branch row: where the checkout is against its upstream.
+  const sync: (RenderElement | string | null)[] = g.detached
+    ? [k.status('warn', 'detached', 'sync')]
+    : !g.upstream
+      ? ['no upstream']
+      : g.ahead || g.behind
+        ? [
+            g.ahead ? <Text key="ahead">{`${GLYPH.up}${g.ahead}`}</Text> : null,
+            g.behind ? <Text key="behind" {...k.ink(C.warn)}>{`${GLYPH.down}${g.behind}`}</Text> : null,
+          ]
+        : [k.status('done', 'synced', 'sync')]
+
+  const changes =
+    g.conflicted || g.staged || g.modified || g.untracked || g.insertions || g.deletions
+      ? k.summary([
+          g.conflicted ? [String(g.conflicted), 'conflicted', C.bad] : null,
+          g.staged ? [String(g.staged), 'staged', C.ok] : null,
+          g.modified ? [String(g.modified), 'modified', C.warn] : null,
+          g.untracked ? [String(g.untracked), 'untracked'] : null,
+          g.insertions ? [`+${g.insertions}`, undefined, C.ok] : null,
+          g.deletions ? [`−${g.deletions}`, undefined, C.bad] : null,
+        ])
+      : k.status('done', 'working tree clean', 'clean')
+
+  const files = g.files.map(f =>
+    k.item(`file-${f.path}`, {
+      lead: 'file',
+      leadColor: fileColor(f),
+      text: basename(f.path),
+      note: dirOf(f.path) || undefined,
+      right: [f.kind === 'conflict' ? 'conflict' : f.kind],
+    }),
+  )
+
+  // ---- pull requests ----
+  const prs: (RenderElement | null)[] = []
+  if (hub === null || hub.root !== g.root) prs.push(k.note('prs-reading', 'Reading pull requests…', 'loading'))
+  else if (hub.note) prs.push(k.note('prs-note', hub.note))
+  else if (hub.prs.length === 0) prs.push(k.note('prs-none', 'No open pull requests'))
+  else {
+    for (const pr of hub.prs.slice(0, GIT_PRS)) {
+      const ci = prChecks(pr)
+      prs.push(
+        k.item(`pr-${pr.number}`, {
+          lead: prIcon(pr),
+          leadColor: prColor(pr, false),
+          text: `#${pr.number} ${pr.title}`,
+          bold: pr.current,
+          right: [ci ? k.status(ci[0], ci[1], 'ci') : null],
+        }),
+      )
+      // What else the PR is waiting on, dim, under its title: the failing checks, the review, whether it's this branch's.
+      const more = [
+        pr.state === 'OPEN' && pr.failing.length ? pr.failing.slice(0, 3).join(', ') : '',
+        pr.state === 'OPEN' && pr.isDraft ? 'draft' : '',
+        pr.state === 'OPEN' && pr.review === 'APPROVED' ? 'approved' : '',
+        pr.state === 'OPEN' && pr.review === 'CHANGES_REQUESTED' ? 'changes requested' : '',
+        pr.state === 'OPEN' && pr.review === 'REVIEW_REQUIRED' ? 'review required' : '',
+        pr.current ? 'this branch' : '',
+      ].filter(Boolean)
+      if (more.length) {
+        prs.push(
+          <Box key={`pr-${pr.number}-more`} paddingLeft={k.edge.left} minWidth={0}>
+            <Text dimColor wrap="truncate">
+              {more.join(' · ')}
+            </Text>
+          </Box>,
+        )
+      }
+    }
+    if (hub.prs.length > GIT_PRS) prs.push(k.note('prs-more', `… ${hub.prs.length - GIT_PRS} more`))
+  }
+
+  return head(k.summary([[g.repo]]), [
+    k.item('git-branch', { lead: GLYPH.branch, text: g.branch, bold: true, right: sync }),
+    k.prop(
+      'git-worktree',
+      g.worktree.linked ? 'Worktree' : 'Checkout',
+      g.worktree.linked ? `${g.worktree.name}, linked (${g.worktree.count} total)` : g.worktree.count > 1 ? `main (+${g.worktree.count - 1} worktrees)` : 'main',
+    ),
+    <Box key="git-changes" minWidth={0}>
+      {changes}
+    </Box>,
+    ...files,
+    g.fileCount > g.files.length ? k.note('git-files-more', `… ${g.fileCount - g.files.length} more`) : null,
+    <Box key="git-gap" height={k.space.block} />,
+    ...prs,
+  ])
+}
