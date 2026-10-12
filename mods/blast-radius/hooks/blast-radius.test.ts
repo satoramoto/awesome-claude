@@ -82,9 +82,9 @@ test('the terminal draws the report with the kit inside the warning border, and 
   expect((await ui.find({ type: 'Text', text: 'rm -rf build' }))?.props).toMatchObject({ bold: true })
   expect((await ui.find({ type: 'Text', text: 'Would' }))?.props.dimColor).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' }))?.props).toMatchObject({ color: 'error', wrap: 'truncate' })
-  // The list as items: the file glyph, then the path, cut at the edge.
+  // The list as items: the file glyph, then the path, cut in the middle.
   expect(await ui.findAll({ type: 'Text', text: '□' })).toHaveLength(2)
-  expect((await ui.find({ type: 'Text', text: 'build/assets/index.js' }))?.props).toMatchObject({ wrap: 'truncate' })
+  expect((await ui.find({ type: 'Text', text: 'build/assets/index.js' }))?.props).toMatchObject({ wrap: 'truncate-middle' })
   expect(await ui.find({ type: 'Text', text: '+ 11 more' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Paths: build' })).toBeDefined()
   // At 60 columns the hint fits beside the actions; they carry hotkeys 1 and 2.
@@ -110,9 +110,10 @@ test('in a narrow terminal band, the report still fits: the hint goes, every lon
   const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
   expect(await ui.find({ type: 'Text', text: 'Blast Radius' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Claude is waiting on your answer' })).toBeUndefined()
-  for (const text of ['rm -rf build', 'build/index.html', 'Paths: build']) {
+  for (const text of ['rm -rf build', 'Paths: build']) {
     expect((await ui.find({ type: 'Text', text }))?.props).toMatchObject({ wrap: 'truncate' })
   }
+  expect((await ui.find({ type: 'Text', text: 'build/index.html' }))?.props).toMatchObject({ wrap: 'truncate-middle' })
   expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
   await drive(clock, ui.press({ key: 'proceed' }))
   const result = await drive(clock, call)
@@ -169,5 +170,32 @@ test('with no room for a pane, the band on the desktop draws the report and answ
   await drive(clock, ui.press({ key: 'proceed' }))
   const result = await drive(clock, call)
   expect(result.text).toBe('ran')
+  await ui.unmount()
+})
+
+test('on the terminal, the focused pane shows its key hints', async ($, on) => {
+  const clock = engine(on)
+  const { call, ui } = await hold($, clock, 'terminal')
+  expect(await ui.find({ type: 'Text', text: '1 proceed · 2 cancel' })).toBeDefined()
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await ui.unmount()
+})
+
+test('on the terminal, a pane without the keyboard shows no key hints', async ($, on) => {
+  const clock = engine(on)
+  const { call, ui } = await hold($, clock, 'terminal', { ...PANE, props: { ...PANE.props, isFocused: false } })
+  expect(await ui.find({ type: 'Text', text: ' proceed' })).toBeUndefined()
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, a long file path is cut in the middle and keeps its name', async ($, on) => {
+  const clock = engine(on, false, ['1 100 1', 'build/assets/very/deeply/nested/folder/index.html'].join('\n'))
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: /^build\/.*….*index\.html$/ })).toBeDefined()
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
   await ui.unmount()
 })

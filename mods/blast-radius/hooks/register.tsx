@@ -39,7 +39,7 @@ let held: Held | null = null;
 function draw($: $, e: any, state: Held, band: boolean) {
   const els = $.ui.resolve(e);
   const columns = Number(e.props?.bodyColumns ?? 40);
-  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band }) : renderApp(els as unknown as AppElements, state, columns, { band });
+  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band, focused: e.props?.isFocused }) : renderApp(els as unknown as AppElements, state, columns, { band });
 }
 
 export const register: Register = (on) => {
