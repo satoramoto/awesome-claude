@@ -39,7 +39,9 @@ let held: Held | null = null;
 function draw($: $, e: any, state: Held, band: boolean) {
   const els = $.ui.resolve(e);
   const columns = Number(e.props?.bodyColumns ?? 40);
-  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band, focused: e.props?.isFocused }) : renderApp(els as unknown as AppElements, state, columns, { band });
+  // The rows it has (the band's most, or the pane's body), so the list is cut before the actions are.
+  const rows = Number(e.props?.maxRows ?? e.props?.scroll?.bodyRows) || undefined;
+  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band, focused: e.props?.isFocused, rows }) :renderApp(els as unknown as AppElements, state, columns, { band });
 }
 
 export const register: Register = (on) => {

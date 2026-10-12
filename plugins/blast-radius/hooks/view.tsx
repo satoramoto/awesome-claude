@@ -9,7 +9,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { C, GRAY } from '../kit/tokens'
-import { EDGE, SPACE, kit } from '../kit/ui'
+import { EDGE, SPACE, TERM_ROLES, kit } from '../kit/ui'
 
 /** What a risky command is, from the classifier. */
 export type Risk = {
@@ -44,25 +44,31 @@ const decider = (state: Held) => (choice: string) => () => {
 
 /** The line beside the buttons, drawn on the terminal only where it fits whole. */
 const HINT = 'Claude is waiting on your answer'
+/** Who's asking, in the band. */
+const WHO = 'Blast Radius'
 
 /**
  * The terminal, in the pane or the band: the desktop's report in cells, inside
- * the one round border in the warning colour (the band that has to stop the person):
+ * the one round border in the warning colour (the band that has to stop the person).
+ * The command is the one bold thing; what it would do and the list under it are
+ * quiet; each fact is said once (no label that restates the command, no key hints
+ * that restate the buttons' hotkeys, no "Paths:" note that restates its paths):
  *
  *   ╭──────────────────────────────────────────────╮
- *   │ ▲ rm -rf                         Blast Radius │   (the band only)
+ *   │ ▲ rm -rf build                  Blast Radius │   (bold command; who, in the band only)
  *   │                                              │
- *   │ Command    rm -rf build                      │
- *   │ Would      delete 1284 files (about 46 MB)   │   (red)
+ *   │ Would delete 1284 files (about 46 MB)        │   (Would dim)
  *   │                                              │
- *   │ □ build/index.html                           │
+ *   │ □ build/index.html                           │   (dim)
  *   │   + 1274 more                                │
- *   │ Paths: build                                 │   (dim)
  *   │                                              │
  *   │ Claude is waiting on…  1: Proceed  2: Cancel │   (Proceed red; Cancel focused)
  *   ╰──────────────────────────────────────────────╯
+ *
+ * `rows` is how many rows the band or pane has: the list is cut to fit it, so
+ * the actions always show.
  */
-export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?: boolean; focused?: boolean } = {}): RenderElement {
+export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?: boolean; focused?: boolean; rows?: number } = {}): RenderElement {
   const { Box, Text } = t
   // Inside the border and its one-cell padding: four cells fewer than the pane's body.
   const inner = Math.max(1, Math.floor(columns) - 4)
@@ -72,15 +78,27 @@ export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?:
   const report = state.report!
   const { kind } = state.risk
   const decide = decider(state)
-  const loss = !harmless(report.summary)
 
-  const lines = report.lines.map((line, i) => {
+  // A note that only lists the command's own paths says nothing the head doesn't.
+  const note = report.note && !restates(report.note, state.command) ? report.note : null
+  const noteRows = note ? ([...note].length > inner ? 2 : 1) : 0
+
+  // Border 2, head 1, blank 1, Would 1, blank 1 above the list, blank 1 and the actions 1: 8 rows besides the list and note.
+  const room = opts.rows ? Math.max(0, Math.floor(opts.rows) - 8 - noteRows) : Infinity
+  let shown = report.lines.length
+  let more = report.more ?? 0
+  if (shown + (more ? 1 : 0) > room) {
+    // One row goes to `+ N more`.
+    shown = Math.max(0, Math.min(shown, room - 1))
+    more += report.lines.length - shown
+  }
+  const lines = report.lines.slice(0, shown).map((line, i) => {
     const it = item(kind, line)
     const right = [it.before, it.after].filter((x): x is string => Boolean(x))
     // Files and folders are paths: cut in the middle, so the name at the end stays.
-    return k.item(`l${i}`, { lead: it.icon, text: it.text, right, path: it.icon === 'file' || it.icon === 'folder' })
+    return k.item(`l${i}`, { lead: it.icon, text: it.text, right, dim: true, path: it.icon === 'file' || it.icon === 'folder' })
   })
-  if (report.more) lines.push(k.item('more', { text: `+ ${report.more} more`, dim: true, indent: 2 }))
+  if (more && room > 0) lines.push(k.item('more', { text: `+ ${more} more`, dim: true, indent: 2 }))
 
   // Proceed runs the command: red, as on the desktop. Cancel holds the focus, so Enter refuses, as upstream.
   const buttons = k.actions('actions', [
@@ -89,27 +107,29 @@ export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?:
   ])
   // `1: Proceed  2: Cancel` is 21 cells; the hint shows only when it fits beside them whole.
   const hint = inner >= 21 + k.space.group + HINT.length
+  // The band names the mod (the pane's title does that), right of the command when the whole command fits beside it: lead 2, the command, 1, the name.
+  const who = opts.band && 2 + [...state.command].length + k.space.item + WHO.length <= inner
 
   return (
     <Box flexDirection="column" width="100%" minWidth={0} borderStyle="round" borderColor={k.ink(C.warn).color} paddingX={1}>
-      {k.item('head', { lead: 'alert', leadColor: C.warn, text: state.risk.label, bold: true, right: opts.band ? ['Blast Radius'] : [] })}
-      <Box key="props" flexDirection="column" minWidth={0} marginTop={k.space.block}>
-        {k.prop('cmd', 'Command', state.command)}
-        {k.prop(
-          'sum',
-          'Would',
-          <Text {...(loss ? k.ink(C.bad) : {})} wrap="truncate">
-            {report.summary}
-          </Text>,
-        )}
+      {/* The command is the head: the one strong thing. Who's asking shows only beside the whole command. */}
+      {k.item('head', { lead: 'alert', leadColor: C.warn, text: state.command, bold: true, right: who ? [WHO] : [] })}
+      {/* One sentence, `Would delete 8 files`, rather than a label column: it keeps 6 more cells for the summary at 40 columns. */}
+      <Box key="sum" flexDirection="row" gap={k.space.pair} minWidth={0} marginTop={k.space.block}>
+        <Box flexShrink={0}>
+          <Text {...TERM_ROLES.label}>Would</Text>
+        </Box>
+        <Box minWidth={0} flexShrink={1}>
+          <Text wrap="truncate">{report.summary}</Text>
+        </Box>
       </Box>
-      {lines.length ? (
+      {lines.length || note ? (
         <Box key="list" flexDirection="column" minWidth={0} marginTop={k.space.block}>
           {lines}
+          {/* A long note (why it couldn't measure) gets two lines before it's cut. */}
+          {note ? k.note('note', note, 'empty', { lines: 2 }) : null}
         </Box>
       ) : null}
-      {/* A long note (why it couldn't measure) gets two lines before it's cut. */}
-      {report.note ? k.note('note', report.note, 'empty', { lines: 2 }) : null}
       <Box key="buttons" flexDirection="row" justifyContent={hint ? 'space-between' : 'flex-end'} gap={k.space.group} minWidth={0} marginTop={k.space.block}>
         {hint ? (
           <Box key="hint" flexShrink={1} minWidth={0}>
@@ -120,12 +140,14 @@ export function renderTerminal(t: any, state: Held, columns = 40, opts: { band?:
         ) : null}
         {buttons}
       </Box>
-      {k.hints('hints', [
-        { key: '1', label: 'proceed' },
-        { key: '2', label: 'cancel' },
-      ])}
     </Box>
   )
+}
+
+/** Whether a note only lists paths the command already shows (`Paths: build`). */
+const restates = (note: string, command: string) => {
+  const paths = /^Paths: (.+)$/.exec(note)?.[1]
+  return paths !== undefined && paths.split(' ').every(p => command.includes(p))
 }
 
 /** The icon beside the summary: what kind of loss it is. */
