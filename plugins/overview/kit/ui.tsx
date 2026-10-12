@@ -4,7 +4,7 @@ import { middle, pct, short } from './format'
 import { ICON_PX, glyphOf, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, GLYPH, GRAY, INK, MUTED, STATUS, TRACK, isKitColor, termInk, treePrefix } from './tokens'
+import { C, FILL, GLYPH, GRAY, INK, MUTED, STATUS, TRACK, isKitColor, termInk, tint, treePrefix } from './tokens'
 import type { StatusKind } from './tokens'
 
 /**
@@ -143,28 +143,6 @@ const TILE_ROW_GAP = 0.2
  */
 export const fold = (collapsed: boolean) => (collapsed ? '▶︎' : '▼')
 
-/**
- * A section header's band: a tonal step that marks where each section starts. Solid,
- * not translucent, so its rounded border in the same colour doesn't show as a ring.
- * Tuned for the desktop's dark pane.
- */
-const HEAD = '#272727'
-
-/** A tile's fill: between the pane and a header band. Solid, for the same reason as HEAD. */
-const TILE = '#222222'
-
-/** `a` blended with `b`: `share` of `a` (0 to 1) over `b`, as solid #rrggbb. Takes #rgb or #rrggbb; anything else comes back as `a`. */
-const mix = (a: string, b: string, share: number) => {
-  const rgb = (c: string) => {
-    const hex = c.replace('#', '')
-    const full = hex.length === 3 ? [...hex].map(x => x + x).join('') : hex
-    return /^[0-9a-f]{6}$/i.test(full) ? [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16)) : null
-  }
-  const x = rgb(a)
-  const y = rgb(b)
-  if (!x || !y) return a
-  return `#${x.map((v, i) => Math.round(v * share + y[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
-}
 
 /**
  * `text` split for two terminal lines `width` cells wide: the first holds as many
@@ -185,11 +163,6 @@ const breakLine = (text: string, width: number): [string, string] => {
   if (cut <= 0) return [chars.slice(0, width).join(''), chars.slice(width).join('').trimStart()]
   return [chars.slice(0, cut).join('').trimEnd(), chars.slice(cut + 1).join('').trimStart()]
 }
-
-/** A selected tile's fill: the tile's step, tinted towards the blue that marks what's live. Solid, as TILE. */
-const TILE_SELECTED = '#232a3c'
-/** A selected tile's fill while its pane doesn't have the keyboard: halfway back to the tile. */
-const TILE_SELECTED_BLURRED = mix(TILE_SELECTED, TILE, 0.5)
 
 
 /** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
@@ -389,8 +362,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   /*
    * Rounding on the desktop. Boxes have no corner radius; what rounds is:
    *
-   * - `rounded`: a box a row or more tall. A `round` border in the fill's own colour,
-   *   which must be solid (a translucent one paints twice where border and fill
+   * - `rounded`: a box a row or more tall. A transparent `round` border over the fill
+   *   (a border in a see-through fill's own colour paints twice where border and fill
    *   overlap and draws a ring). Not on thin boxes: the border takes room inside the
    *   box, so a thin one has nothing left for its content.
    * - `capped`: anything thin (bars, gauges). SVG end caps drawn at an exact pixel
@@ -453,15 +426,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   }
 
   /**
-   * A filled box with rounded corners, a row or more tall. `color` must be solid
-   * (hex, not rgba): the border that rounds it is the same colour. In the terminal,
-   * the box without fill or border.
+   * A filled box with rounded corners, a row or more tall. The `round` border that
+   * rounds it is transparent, so the fill shows under it once: a see-through fill
+   * (FILL's) in a border of its own colour would paint twice there and draw a ring.
+   * In the terminal, the box without fill or border.
    */
   const rounded = (color: string, props: Record<string, unknown>, children: RenderElement | (RenderElement | null)[] | null) =>
     terminal ? (
       <Box {...props}>{children}</Box>
     ) : (
-      <Box {...props} backgroundColor={color} borderStyle="round" borderColor={color}>
+      <Box {...props} backgroundColor={color} borderStyle="round" borderColor="transparent">
         {children}
       </Box>
     )
@@ -481,7 +455,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       </Box>
     ) : (
       rounded(
-        opts.selected ? ((opts.focused ?? paneFocused) ? TILE_SELECTED : TILE_SELECTED_BLURRED) : TILE,
+        opts.selected ? ((opts.focused ?? paneFocused) ? FILL.selected : FILL.selectedBlurred) : FILL.tile,
         { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' },
         children,
       )
@@ -523,9 +497,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   }
 
   /**
-   * A label as GitHub draws one on a dark page: a rounded chip filled with the
-   * label's colour, faint, and its name in a lighter tint of the same colour.
-   * Blended to solid colours over the tile (rounding needs a solid fill). On the
+   * A label as GitHub draws one: a rounded chip filled with the label's colour,
+   * faint and see-through (FILL.pill), and its name in the theme's foreground, which
+   * reads on the light desktop theme and the dark one whatever the label's colour
+   * (a label without a hex colour gets the track's grey). On the
    * terminal, a `■` swatch and the name in the default foreground: a label's
    * colour is data (GitHub's hex) that may not read on the person's theme, so it
    * only ever tints the one-cell swatch, never the text. A status colour (a kit
@@ -540,7 +515,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         </Text>
       )
     }
-    return rounded(mix(color, TILE, 0.22), { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t" color={mix(color, '#ffffff', 0.45)}>{text}</Text>])
+    return rounded(tint(color, FILL.pill) ?? TRACK, { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t">{text}</Text>])
   }
 
   /**
@@ -849,7 +824,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     return (
       <Box key={`section-${s.id}`} flexDirection="column" marginTop={1}>
         {rounded(
-          HEAD,
+          FILL.head,
           {
             flexDirection: 'row',
             justifyContent: 'space-between',
@@ -1123,7 +1098,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         </Box>
       ) : (
         rounded(
-          HEAD,
+          FILL.head,
           { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
           row,
         )
@@ -1309,9 +1284,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       )
     }
     const right = parts.map(p => p.part)
-    const tint = r.selected ? { backgroundColor: focused ? TILE_SELECTED : TILE_SELECTED_BLURRED } : {}
+    const picked = r.selected ? { backgroundColor: focused ? FILL.selected : FILL.selectedBlurred } : {}
     return (
-      <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0} {...tint}>
+      <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0} {...picked}>
         <Box flexDirection="row" flexShrink={1} minWidth={0} alignItems="center">
           {r.tree ? (
             <Box flexShrink={0}>

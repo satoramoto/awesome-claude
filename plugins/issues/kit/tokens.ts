@@ -34,12 +34,47 @@ export const RAMP = {
 /** A bar's empty part and other quiet fills: a grey that reads on light and dark. */
 export const TRACK = 'rgba(128,128,128,0.18)'
 
+/**
+ * `color` (#rgb or #rrggbb) at `alpha` (0 to 1), as rgba(): a tint that lets the
+ * pane show through, so it reads on the light desktop theme and the dark one.
+ * Undefined for anything that isn't a hex colour.
+ */
+export const tint = (color: string, alpha: number): string | undefined => {
+  const hex = color.replace(/^#/, '')
+  const full = hex.length === 3 ? [...hex].map(x => x + x).join('') : hex
+  if (!/^[0-9a-f]{6}$/i.test(full)) return undefined
+  const [r, g, b] = [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16))
+  return `rgba(${r},${g},${b},${alpha})`
+}
+
+/**
+ * The app surfaces' fills, behind text. The engine gives render hooks no desktop
+ * theme to read and no theme key for a fill, so each is a see-through tint over
+ * the pane: a neutral grey darkens the light pane and lightens the dark one by
+ * about the same step, and the text over it keeps the theme's own foreground.
+ * Never on the terminal, which draws no fills.
+ *
+ * - head: a section header's band, the step that marks where a section starts;
+ * - tile: one item of a list of several-line items, a step quieter than a band;
+ * - selected: the picked tile or row, tinted towards the blue that means live;
+ * - selectedBlurred: the same while the pane doesn't have the keyboard, half as strong;
+ * - pill: how strongly a label's own colour fills its chip.
+ */
+export const FILL = {
+  head: 'rgba(128,128,128,0.09)',
+  tile: 'rgba(128,128,128,0.05)',
+  selected: tint(C.blue, 0.13)!,
+  selectedBlurred: tint(C.blue, 0.065)!,
+  pill: 0.22,
+} as const
+
 /** Text, icons and marks that should recede. */
 export const MUTED = '#8e8e93'
 
 /**
  * Three greys for text below the main text, each a step quieter, so a row can say
- * what matters most without colour (tuned for the desktop's dark pane):
+ * what matters most without colour (tuned for the desktop's dark pane; mid and
+ * dark also read on the light one):
  * - light: secondary text a reader still reads (a linked PR's title, a byline);
  * - mid: metadata scanned past (ages, counts, secondary actions);
  * - dark: the quietest marks (an icon beside a count, a heading over a list).
