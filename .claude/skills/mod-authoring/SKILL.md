@@ -169,18 +169,28 @@ change on all four.
 ### Grid
 
 - Whole cells only. Use `k.space` (`CELLS` on the terminal: pair 1, item 1,
-  group 2, block 1) and `k.edge` (left 2, right 0), never `SPACE` numbers, which
-  are fractions for the desktop and round unevenly in cells.
+  group 2, block 1) and `k.edge` (left 2, right 1), never `SPACE` numbers, which
+  are fractions for the desktop and round unevenly in cells. Figures stop one
+  cell short of the pane's edge.
+- Measure: a dashboard of readings passes `measure: MEASURE` (72) to `kit()`:
+  wider than that, its sections keep 72 cells and the rest of the pane stays
+  empty, so readings, legends and figures don't spread across a wide pane. A
+  list that wants every cell (a file tree) leaves it out.
 - Indent: a section body starts 2 cells in (the fold-arrow gutter), under the
   header's icon column. Each tree level adds 2 (`TREE` connectors are 2 wide).
 - Columns of a reading: label 10 | gauge (the rest) | figure 5 | unit 6, one cell
   apart, figures right-aligned so the unit ends on the right edge.
 - Widths are exact: the kit knows the pane's columns, so bars, gauges, scales,
-  axes and chart columns are drawn to `k.width` (the section body's width,
-  columns − 2) by default. A reading or bar that sits deeper or outside a
-  section takes `width` explicitly.
-- Rows: sections stack with no blank row; an open section leaves one blank row
-  under its body. Separate a head line from the sections with one blank row.
+  axes and chart columns are drawn to `k.width` (the section body's width:
+  the measure or the pane, less the gutter 2 and the right margin 1) by
+  default. A reading or bar that sits deeper or outside a section takes `width`
+  explicitly.
+- Rows, one rhythm: every section leaves one blank row under it, open or folded
+  (none under the narrow floor). Inside a body, no blank rows except one
+  between blocks (`k.space.block`): a chart taller than a row and its legend,
+  the checkout and its PR list, one multi-line list item and the next. A
+  one-row bar's legend sits right under it. Separate a head line from the
+  sections with one blank row.
 - The narrow floor: below `MIN_COLUMNS` (30) pane columns each section draws its
   header and figures only, no body, rather than every reading collapsing to an
   ellipsis. Make sure a section's figures say what matters on their own.
@@ -209,72 +219,89 @@ Text props; the kit's components apply it themselves.
 | any other hex, `rgb()`, `hsl()` | (not a kit colour) | the default foreground |
 | a theme key's name (`success`, `claude`) | as the theme says | itself |
 
-Parts that sit next to each other in a bar also differ by glyph (`█`, `▓`), so
-shades that come out the same on a theme still read apart. `isKitColor(color)`
+A bar's parts are solid theme colours, one glyph (`━`): neighbours differ by
+tone (default foreground, dim, a theme key), as `TERM_TINT` alternates them.
+Never shades or dithers (`▓ ▒ ░`): real terminal fonts draw them as a
+checkerboard. Put two parts the same tone apart, or give one a ramp shade.
+`isKitColor(color)`
 says whether a colour is one of the kit's tokens or data (a GitHub label's hex).
 The one place data's own hex reaches the terminal is `pill`'s one-cell `■`
 swatch; its name is drawn in the default foreground.
 
-Structure has one colour of its own: `claude`, the brand orange Claude Code's
-chrome is drawn in, which no status uses. It marks section titles and nothing
-else. Everything that says how something is (done, failed, near a limit, live,
-merged) is a status colour from the table above. Text steps down by the five
-roles under "The look", not by more colours. Uppercase only captions. Never a
-grey hex on the terminal: use dim. Italic never carries a role alone: meta is
-dim and italic, since some terminals don't draw italic (a test checks it).
+Structure has no colour: a section title is bold in the default foreground.
+(The brand orange `claude` on every title read as loud in a real terminal; no
+kit primitive draws it.) Everything that says how something is (done, failed,
+near a limit, live, merged) is a status colour from the table above. Text
+steps down by the roles under "The look", not by more colours. Uppercase only
+captions. Never a grey hex on the terminal: use dim. No italics at all: real
+terminal fonts draw them oddly and some not at all (a test checks no role is
+italic).
 
 ### The look (rules)
 
-The terminal draws one look, "rules" (after lazygit and gh-dash). The kit applies
-it; a mod never picks colours for a header or a reading's text itself.
+The terminal draws one look, "rules" (after lazygit and gh-dash), kept quiet:
+restraint over emphasis. The kit applies it; a mod never picks colours or
+weights for a header or a reading's text itself.
 
 ```
-▾ ◔ Context ─────────────────────────── 31% of 200k
-  System        ━━━━━━━━━━━──────────   17.3k
-▸ ⌘ Activity ──────────────── 10 peak  4 failed
+▾ ◕ Context     31% of 200k ─────────────────────────
+  ━━━━━━━━━━━━━━━╸───────────────────────────────────
+  ━ System   17.3k   ━ MCP        6.4k   ━ Messages 37.3k
+  ─ Free      106k   ─ Buffer      33k
+
+▸ ◔ Limits      96% weekly ──────────────────────────
 ```
 
 Header anatomy, left to right: the fold arrow (dim, a Button when the section
-folds), the icon (dim), the title (bold orange), one cell, a dim `─` rule that
-fills whatever room is left, one cell, the figures. The rule grows from no width
-and is cut at its box, so it always ends right where the figures start, at
-every width; it never pushes them.
+folds), the icon (dim), the title (bold, default foreground) in a 10-cell
+column, 2 cells, the figures, one cell, then a dim `─` rule out to the edge.
+Every header's figures start on the same column, right after the titles, so the
+eye reads `Context 31%` without crossing the pane; the rule only takes the room
+left. Without figures, the rule follows the title. Narrow, the title's column
+gives way first (down to 12 cells of title), then the figures are cut with `…`.
+A header whose right side is controls (`keepRight`) keeps them on the right
+edge, the rule between.
 
-The five text roles are `TERM_ROLES` in `kit/ui.tsx`, the one place to tune the
-hierarchy:
+The text roles are `TERM_ROLES` in `kit/ui.tsx`, the one place to tune the
+hierarchy. Two tones and one weight:
 
 | Role | What it is | Drawn |
 | --- | --- | --- |
-| title | a section's name | bold, `claude` orange |
-| label | what a value is: a reading's, a prop's, a legend entry's label | plain |
-| value | the figure or word that answers: a reading's figure, a header's figures, a prop's value | bold |
+| title | a section's name | bold |
+| label | what a value is: a reading's, a prop's, a legend entry's label | dim |
+| value | the figure or word that answers: a reading's figure, a prop's value, a legend's figure, list text | plain |
+| strong | the one figure per section that matters: a header's first figure | bold |
 | secondary | text still read, after the main text: a list row's note | dim |
-| meta | text scanned past: units, ages, counts on a row's right, captions | dim italic |
+| meta | text scanned past: units, ages, counts on a row's right, captions | dim |
 
-A value in a status colour keeps its role's weight (bold) and takes the status's
-colour (`4 failed`: bold red figure, dim italic unit).
+A figure in a status colour keeps its role's weight and takes the status's
+colour (`4 failed`: a plain red figure, a dim unit). Put the figure that matters
+first in a `summary`: it's the bold one.
 
 Do:
 - Let the kit draw headers, readings, props, legends and list rows; they apply
   the roles.
-- Keep orange to the title word. The header icon is dim on purpose: a one-cell
-  orange glyph reads too close to an amber status glyph (`▲`, `↑`) in the row
-  beneath, and the two colours sit near each other in some themes.
+- Say each fact once. A header's figures restate a body that's folded; when
+  they only restate the readings under them (Limits' fullest window), pass
+  `restated: true` so they show only while the body is hidden. Don't list the
+  same PR in two sections, or a merged PR's state as both its icon and a word.
+- Keep a row's actions beside what they act on (`item`'s `after`), not alone on
+  the far edge.
 - Say a state with its status colour and glyph (`k.status`, `STATUS`).
 
 Don't:
-- Colour anything else `claude`: not a figure, a glyph, a selected row or a
-  link. Orange means "a section starts here".
-- Use a status colour (amber above all) for structure, or orange for a status.
-- Bold labels or notes, dim values, or add a sixth tone; change `TERM_ROLES`
-  instead if the hierarchy needs tuning.
+- Colour structure: no `claude` orange, no status colour on a title, rule or icon.
+- Bold anything but the title and the one strong figure: not labels, notes,
+  list text or every figure; change `TERM_ROLES` instead if the hierarchy needs tuning.
+- Use italics, or add a tone.
 - Draw your own rule, leader dots or band in a header.
 
-The alternatives it was picked from (`inspector`, today's former default;
-`panel`, teal title bands; `ledger`, dot leaders and dim capital labels) are in
-commit ab3a37a, with the `Kit/Terminal Directions` story that compared them.
-Storybook's `Kit/Terminal Look` draws the look on a dark and a light terminal at
-40 and 60 columns.
+The alternatives it was picked from (`inspector`; `panel`, teal title bands;
+`ledger`, dot leaders and dim capital labels) are in commit ab3a37a, with the
+`Kit/Terminal Directions` story that compared them. Storybook's `Kit/Terminal
+Look` draws the look on a dark and a light terminal at 40 and 60 columns. It's
+an emulator: judge a look in a real terminal too (see "Checking it in a real
+terminal" below).
 
 ### Glyphs
 
@@ -300,11 +327,11 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
 | --- | --- |
 | Fold | `▾` open, `▸` closed (`FOLD`), dim; the desktop keeps ▼ ▶︎ |
 | Gauge (`k.gauge`, a reading's) | `━` fill to the half cell `╸`, on a dim `─` rail |
-| Bar (`k.bar`) | `█` fill to the eighth cell `▏▎▍▌▋▊▉`, on a dim `░` track; parts alternate `█` and `▓` (`METER.alt`); a part ending mid-cell is drawn over the next part's colour |
+| Bar (`k.bar`) | one row: each part `━` in its own solid colour to the half cell `╸`; `room` parts (free space, a reserve) `─` in their colour; the rest a dim `─` rail. No `█ ▓ ░` |
 | Scale (`k.scale`) | dim `╵` ticks at 0/25/50/75/100%, `▴` marker |
 | Columns (`k.columns`) | `▁▂▃▄▅▆▇█`, rows tall, to the eighth of a row |
 | Sparkline (`k.spark`) | Braille `⣀⣤⣶⣿` (U+2800 block, `SPARK`), two points a cell, four levels a row; `glyphs: 'blocks'` draws the columns' eighths |
-| Legend key (`k.swatch`) | `■`; given the part's index, the bar's own `█` or `▓`; `●` on the desktop |
+| Legend key (`k.swatch`) | `■`; keying a bar (`line: true`), the bar's own `━`, `─` for room; `●` on the desktop |
 | Selected row (`item`) | `▌` (`MARK.selected`) in `suggestion`, in a one-cell gutter |
 | Key hints (`k.hints`) | ` · ` between pairs (`MARK.sep`), `…` (`MARK.more`) when some are dropped |
 | Stale figures (`summary`) | dim `↻` (`MARK.stale`) and the age; failed refresh amber `▲` |
@@ -315,10 +342,12 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
 
 ### Each primitive on the terminal
 
-- `section`: `▾ ◔ Title ──── figures`, as under "The look". Dim arrow (a Button
-  when `onToggle`, key `toggle-<id>`), dim icon, bold orange title, the rule (key
-  `rule`); the title keeps up to 12 cells, then it and the figures truncate
-  together. No band or box. With `keepRight: true`
+- `section`: `▾ ◔ Title     figures ────`, as under "The look". Dim arrow (a Button
+  when `onToggle`, key `toggle-<id>`), dim icon, bold title in its column (key
+  `title`), the figures (key `right`), the rule (key `rule`); the title's column
+  gives way first, then the figures truncate. No band or box. `restated: true`
+  draws the figures only while the body is hidden (folded, or under the floor),
+  for figures that only restate the body. With `keepRight: true`
   the right side (figures, buttons) keeps its natural width and only the title is
   cut, with an ellipsis: use it when the right side is controls that must all
   show (filetree's header buttons, a launcher row), and size that side to fit the
@@ -326,14 +355,19 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
   title by hand. The desktop draws the same with or without it. `loading: true`
   with no `right` puts the pending `◌` in the figure slot (see "States"). Below
   30 columns only the header draws (see "Grid").
-- `summary`: figures bold values (in their status colour if any), units dim italic meta, 2 apart, as
+- `summary`: the first figure bold (strong), the rest plain (each in its status
+  colour if any), units dim, 2 apart, as
   one line of text: too narrow, it's cut wherever that falls and ends in `…`
   (`4 fa…`), never a figure clipped without one. `summary(items, { loading, age,
   failed })` adds the section's state before the figures (see "States").
 - `reading`: as the grid above. Under 6 cells of gauge the label narrows to 6,
   then the gauge is left out and the figures stay.
 - `gauge`, `bar`, `scale`, `axis`, `columns`: drawn to the exact width as above.
-  A bar's parts alternate `█` and `▓`, so neighbours read apart without colour.
+  A bar is one row, the gauge's heavy line in each part's solid colour; give
+  free space or a reserve as `room: true` parts, drawn as the light rail in
+  their colour (the context bar's buffer is an amber `─` at its end, which
+  replaces a scale row's compaction mark). One row says it: don't add a scale
+  and an axis under a bar whose header already gives the total.
 - `spark(values, { width, height, color, max, glyphs })`: a series over time
   (activity, tokens a minute, a server's CPU), newest on the right edge. Braille,
   two points a cell and four levels a row, filled from the bottom, so the last
@@ -342,17 +376,22 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
   draws the `columns` eighths instead, a point a cell: for a font without
   Braille, or counts that should read as bars. The desktop draws an SVG line.
   Use `columns` for counts per bucket, `spark` for a series over time.
-- `legend`: as many columns as fit at 18 cells (one at 30 columns, two at 40+).
+- `legend`: a compact grid, row by row: each cell exactly as wide as the
+  longest label (up to 10) and figure need, 3 cells apart, as many columns as
+  fit (3 at most), so each label stays close to its figure however wide the
+  pane. Labels dim, figures plain, a `note` (`!2` failed) after the figure.
   `legend(key, items, maxCols, { bar: true })` for a legend that keys a `bar`
-  (its items in the bar's order): its keys are the bar's own `█`/`▓` in turn.
-- `prop`: plain label in the reading's label column, bold value left-aligned after it
+  (its items in the bar's order, `room` ones included): keys `━`, and `─` for room.
+- `prop`: dim label in the reading's label column, plain value left-aligned after it
   and cut at the edge (the desktop puts the value on the right edge).
   `prop(key, label, value, { path: true, width })` cuts a path or branch name in
   the middle, keeping its end (`src/…/view.tsx`), to fit `width` (a section
   body's by default). `middle(text, cells)` in `@kit/format` does the cut.
 - `item` (new): the list row every list uses: `[tree][lead] text  note ……… right`.
   `lead` is a status kind, an icon key or an element; `right` holds meta figures
-  (dim italic) and elements (a status, `actions`). Use it for issues, tasks, PRs, files.
+  (dim) and elements (a status). `after` is an element right after the text and
+  note, 2 cells on, that never gives way: a row's `actions`, beside what they
+  act on. Use it for issues, tasks, PRs, files.
   The `note` is always secondary (plain dim), whatever `textColor` or `bold` the text has.
   When the row runs out of room the text gives way first, down to its first 6
   cells (with `…`); then ranked right parts drop; then the right cluster is cut
@@ -438,6 +477,28 @@ the section is folded:
   Don't pass a raw hex to a terminal `Text` at all: go through `k.ink`.
 - Don't mix glyph sets: one failed mark (`✕`, not `✗`), one running mark (`◐`).
 - Don't size bars from a guess (`columns - 20`); let the kit fill the width.
+
+### Checking it in a real terminal
+
+Storybook's terminal is an emulator with a browser font: it hides how shade
+glyphs, italics and spacing come out in a real one. Before calling a terminal
+look done, run it in a real pty:
+
+- `tmux -L <name> new-session -d -s <s> -x 120 -y 70 "claude --settings '{\"env\":{\"CLAUDE_CODE_PLUGIN_DIRS\":\"<worktree>/plugins\"}}'"`
+  (the `--settings` env replaces a user-level `CLAUDE_CODE_PLUGIN_DIRS`, so only
+  your build loads), then send `/overview` with `send-keys`.
+- The pane docks beside the transcript from 110 columns. Set its width by
+  dragging the divider with SGR mouse escapes: `send-keys Escape "[<0;80;10M"
+  Escape "[<32;60;10M" Escape "[<0;60;10m"` moves it from column 80 to 60.
+  Clicks the same way pick a pane tab or focus the composer.
+- `/theme` previews each theme live while its picker is open (Esc restores
+  yours): capture light that way rather than changing the setting.
+- After `bun build.ts`, `/reload-plugins` then `/overview` again redraws with
+  the new code.
+- `tmux capture-pane -e -p` gives the ANSI; render it to PNG with a real
+  monospace font (ansi2html via `uvx`, then headless Chrome, Menlo 14px on
+  16px lines so block glyphs touch) and look at it. Kill the tmux server and
+  check `ps` when done.
 
 ## Checks, in order
 

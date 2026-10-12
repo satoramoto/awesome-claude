@@ -1208,7 +1208,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   const share = (key: string, glyph: string, ours: string, whole: string, hot?: string) => (
     // The glyph in its own box: the desktop drops a space at the start of a Text.
     <Box key={key} flexDirection="row" gap={space.pair} flexShrink={1}>
-      <Text {...tone('mid')}>{glyph}</Text>
+      {/* The glyph (or word) never breaks: too narrow, the figure after it is cut. */}
+      <Box flexShrink={0}>
+        <Text {...tone('mid')}>{glyph}</Text>
+      </Box>
       <Text wrap="truncate">
         <Text {...ink(hot)}>{ours}</Text>
         {whole ? <Text {...tone('dark')}>{`/${whole}`}</Text> : null}

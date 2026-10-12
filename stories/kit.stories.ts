@@ -3,7 +3,7 @@ import type { Meta, StoryObj } from '@storybook/html'
 import { tokens } from '@kit/format'
 import { TERM_GLYPH } from '@kit/icons'
 import type { PerfRow } from '@kit/perf'
-import { C, GLYPH, INK, RAMP, STATUS, levelColor } from '@kit/tokens'
+import { C, GLYPH, INK, RAMP, STATUS, TRACK, levelColor } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { kit } from '@kit/ui'
 import type { KitOptions } from '@kit/ui'
@@ -284,22 +284,31 @@ export const TerminalInspector = sheet(k =>
       collapsed: folded.has('context'),
       onToggle: toggle('context'),
       children: [
+        // One row: the parts as the heavy line, the free room and the buffer as the light rail.
         k.bar(
           [
             { value: 5_300, color: RAMP.slate[0] },
             { value: 29_700, color: RAMP.slate[1] },
             { value: 20_500, color: RAMP.slate[2] },
             { value: 207_000, color: C.blue },
+            { value: 704_500, color: TRACK, room: true },
+            { value: 33_000, color: C.warn, room: true },
           ],
           1_000_000,
         ),
-        k.scale(0.8),
-        k.legend('ctx', [
-          { label: 'System', color: RAMP.slate[0], figure: tokens(5_300) },
-          { label: 'Tools', color: RAMP.slate[1], figure: tokens(29_700) },
-          { label: 'MCP', color: RAMP.slate[2], figure: tokens(20_500) },
-          { label: 'Messages', color: C.blue, figure: tokens(207_000) },
-        ]),
+        k.legend(
+          'ctx',
+          [
+            { label: 'System', color: RAMP.slate[0], figure: tokens(5_300) },
+            { label: 'Tools', color: RAMP.slate[1], figure: tokens(29_700) },
+            { label: 'MCP', color: RAMP.slate[2], figure: tokens(20_500) },
+            { label: 'Messages', color: C.blue, figure: tokens(207_000) },
+            { label: 'Free', color: TRACK, figure: tokens(704_500), room: true },
+            { label: 'Buffer', color: C.warn, figure: tokens(33_000), room: true },
+          ],
+          undefined,
+          { bar: true },
+        ),
       ],
     }),
     k.section({
@@ -375,15 +384,16 @@ export const TerminalBars = sheet(k =>
     { flexDirection: 'column' },
     k.caption('gauge, by halves'),
     ...[0.5, 1, 1.5, 2, 2.5, 50, 99].map(v => k.gauge(v, 100, INK)),
-    k.caption('bar, by eighths'),
+    k.caption('bar, by halves'),
     ...[0.4, 1, 2, 3, 12.5, 50].map(v => k.bar([{ value: v, color: INK }], 100)),
-    k.caption('stacked'),
+    k.caption('stacked, with room'),
     k.bar(
       [
         { value: 12, color: RAMP.slate[0] },
         { value: 9, color: RAMP.slate[1] },
         { value: 30, color: C.blue },
-        { value: 7, color: C.warn },
+        { value: 35, color: TRACK, room: true },
+        { value: 7, color: C.warn, room: true },
       ],
       100,
     ),
@@ -649,8 +659,9 @@ export const TerminalSpark = sheet(k =>
 )
 
 /**
- * Where a fixed colour can't reach the terminal: a multi-part bar in `█`/`▓`
- * with a `bar: true` legend keyed in the same glyphs; GitHub label hexes as
+ * Where a fixed colour can't reach the terminal: a multi-part line bar whose
+ * parts differ by tone (default foreground, dim, theme key), with a `bar: true`
+ * legend keyed in the same `━`; GitHub label hexes as
  * swatches with the name in the default foreground; a raw hex text colour. At
  * 24 columns (under MIN_COLUMNS) each section draws its header only.
  */
@@ -737,9 +748,9 @@ const LOOK_DEFAULT = ['overview', 'issues', 'launcher']
 
 /**
  * The terminal's look (TERM_ROLES in kit/ui.tsx): overview, issues and launcher,
- * busy, at 40 and 60 columns on the toolbar's terminal theme, so the orange
- * titles can be checked against the status colours (amber above all) on each
- * ground. The controls pick another theme or `all` four, one width, or one mod
+ * busy, at 40 and 60 columns on the toolbar's terminal theme, so the bold
+ * titles, dim labels and the one bold figure per section can be checked
+ * against the status colours on each ground. The controls pick another theme or `all` four, one width, or one mod
  * (filetree too), as the screenshots take it.
  */
 export const TerminalLook: Story = {

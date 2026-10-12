@@ -50,11 +50,15 @@ export const Busy = scenario('busy')
 export const Fresh = scenario('fresh')
 export const NearLimit = scenario('nearLimit')
 
-/** The widths the terminal sheet draws the pane at, in cells: 26 is under the kit's floor (headers and figures only). */
-const WIDTHS = [26, 30, 40, 60, 100]
+/**
+ * The widths the terminal sheet draws the pane at, in cells: 26 is under the kit's
+ * floor (headers and figures only); 70 is a docked pane on a 110-column terminal;
+ * 100 is past the overview's measure (72), so its sections keep that width.
+ */
+const WIDTHS = [26, 30, 40, 60, 70, 100]
 
 /**
- * A scenario on the terminal at 30, 40, 60 and 100 columns side by side, whatever
+ * A scenario on the terminal at 26 to 100 columns side by side, whatever
  * the toolbar says: the point is that nothing overflows or wraps at any of them.
  */
 const terminalSheet = (name: keyof typeof scenes): StoryObj => ({

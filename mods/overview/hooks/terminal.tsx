@@ -275,7 +275,6 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
           text: b.branch,
           note: pr ? `#${pr.number}` : undefined,
           dim: !b.exists,
-          bold: b.checkedOut,
           // The actions sit beside the branch they act on, not alone on the far edge.
           after: k.actions(`branch-${b.branch}-actions`, [main, { key: `hide-${b.branch}`, label: 'hide', quiet: true, onPress: () => d.hideBranch(b.branch) }]),
           right: [d.creating === b.branch ? { part: 'creating PR…', drop: 1 } : null],
