@@ -134,7 +134,8 @@ The look is an instrument inspector (think Premiere's Effect Controls):
 - Colours come only from `kit/tokens.ts`, each meaning one thing: grey labels and
   icons, slate quantity, blue live/in progress, amber near a limit (75%+), red
   failed (90%+), green done well, purple merged. Colour only where it carries meaning.
-- Text: values plain, labels and units dim, bold only titles, uppercase only captions.
+- Text: values plain, labels and units dim, bold only titles, uppercase only captions
+  (the desktop; the terminal draws its own text roles, under Terminal).
 - Spacing only from `SPACE` and `EDGE` (`@kit/ui`), never raw numbers.
 - Use the kit's components rather than raw boxes and colours.
 - Text never wraps on the desktop; let it truncate: `wrap="truncate"` on the
@@ -186,9 +187,65 @@ gives the Text props; the kit's components apply it themselves.
 | `MUTED`, `GRAY.*`, `TRACK` | labels, units, quiet marks | `dimColor` (the terminal's own dim) |
 | `INK`/slate, `RAMP`, cyan, orchid | quantity, shades within one chart | their hex |
 
-Text: values plain, labels and units dim, bold only titles (and a folder or
-current item in a list), uppercase only captions. Never a grey hex on the
-terminal: use dim.
+Structure has one colour of its own: `claude`, the brand orange Claude Code's
+chrome is drawn in, which no status uses. It marks section titles and nothing
+else. Everything that says how something is (done, failed, near a limit, live,
+merged) is a status colour from the table above. Text steps down by the five
+roles under "The look", not by more colours. Uppercase only captions. Never a
+grey hex on the terminal: use dim.
+
+### The look (rules)
+
+The terminal draws one look, "rules" (after lazygit and gh-dash). The kit applies
+it; a mod never picks colours for a header or a reading's text itself.
+
+```
+▾ ◔ Context ─────────────────────────── 31% of 200k
+  System        ━━━━━━━━━━━──────────   17.3k
+▸ ⌘ Activity ──────────────── 10 peak  4 failed
+```
+
+Header anatomy, left to right: the fold arrow (dim, a Button when the section
+folds), the icon (dim), the title (bold orange), one cell, a dim `─` rule that
+fills whatever room is left, one cell, the figures. The rule grows from no width
+and is cut at its box, so it always ends right where the figures start, at
+every width; it never pushes them.
+
+The five text roles are `TERM_ROLES` in `kit/ui.tsx`, the one place to tune the
+hierarchy:
+
+| Role | What it is | Drawn |
+| --- | --- | --- |
+| title | a section's name | bold, `claude` orange |
+| label | what a value is: a reading's, a prop's, a legend entry's label | plain |
+| value | the figure or word that answers: a reading's figure, a header's figures, a prop's value | bold |
+| secondary | text still read, after the main text: a list row's note | dim |
+| meta | text scanned past: units, ages, counts on a row's right, captions | dim italic |
+
+A value in a status colour keeps its role's weight (bold) and takes the status's
+colour (`4 failed`: bold red figure, dim italic unit).
+
+Do:
+- Let the kit draw headers, readings, props, legends and list rows; they apply
+  the roles.
+- Keep orange to the title word. The header icon is dim on purpose: a one-cell
+  orange glyph reads too close to an amber status glyph (`▲`, `↑`) in the row
+  beneath, and the two colours sit near each other in some themes.
+- Say a state with its status colour and glyph (`k.status`, `STATUS`).
+
+Don't:
+- Colour anything else `claude`: not a figure, a glyph, a selected row or a
+  link. Orange means "a section starts here".
+- Use a status colour (amber above all) for structure, or orange for a status.
+- Bold labels or notes, dim values, or add a sixth tone; change `TERM_ROLES`
+  instead if the hierarchy needs tuning.
+- Draw your own rule, leader dots or band in a header.
+
+The alternatives it was picked from (`inspector`, today's former default;
+`panel`, teal title bands; `ledger`, dot leaders and dim capital labels) are in
+commit ab3a37a, with the `Kit/Terminal Directions` story that compared them.
+Storybook's `Kit/Terminal Look` draws the look on a dark and a light terminal at
+40 and 60 columns.
 
 ### Glyphs
 
@@ -213,27 +270,28 @@ terminal drawing passes; tools is `⌘`, fold `⇕`, and the perf footer's uptim
 
 ### Each primitive on the terminal
 
-- `section`: `▾ ◔ Title ……… figures`. Dim arrow (a Button when `onToggle`, key
-  `toggle-<id>`), dim icon, bold title; the title keeps up to 12 cells, then it
-  and the figures truncate together. No band, rule or box. With `keepRight: true`
+- `section`: `▾ ◔ Title ──── figures`, as under "The look". Dim arrow (a Button
+  when `onToggle`, key `toggle-<id>`), dim icon, bold orange title, the rule (key
+  `rule`); the title keeps up to 12 cells, then it and the figures truncate
+  together. No band or box. With `keepRight: true`
   the right side (figures, buttons) keeps its natural width and only the title is
   cut, with an ellipsis: use it when the right side is controls that must all
   show (filetree's header buttons, a launcher row), and size that side to fit the
   row yourself (the launcher drops its least telling parts first). Don't cut a
   title by hand. The desktop draws the same with or without it.
-- `summary`: figures plain (or in their status colour), units dim, 2 apart, as
+- `summary`: figures bold values (in their status colour if any), units dim italic meta, 2 apart, as
   one line of text: too narrow, it's cut wherever that falls and ends in `…`
   (`4 fa…`), never a figure clipped without one.
 - `reading`: as the grid above. Under 6 cells of gauge the label narrows to 6,
   then the gauge is left out and the figures stay.
 - `gauge`, `bar`, `scale`, `axis`, `columns`: drawn to the exact width as above.
 - `legend`: as many columns as fit at 18 cells (one at 30 columns, two at 40+).
-- `prop`: dim label in the reading's label column, value left-aligned after it
+- `prop`: plain label in the reading's label column, bold value left-aligned after it
   and cut at the edge (the desktop puts the value on the right edge).
 - `item` (new): the list row every list uses: `[tree][lead] text  note ……… right`.
-  `lead` is a status kind, an icon key or an element; `right` holds dim figures
-  and elements (a status, `actions`). Use it for issues, tasks, PRs, files.
-  The `note` is always plain dim, whatever `textColor` or `bold` the text has.
+  `lead` is a status kind, an icon key or an element; `right` holds meta figures
+  (dim italic) and elements (a status, `actions`). Use it for issues, tasks, PRs, files.
+  The `note` is always secondary (plain dim), whatever `textColor` or `bold` the text has.
   When the row runs out of room the text gives way first, down to its first 6
   cells (with `…`); then the right cluster is cut from its end, the last
   element first (a string with `…`), so nothing runs past the edge.

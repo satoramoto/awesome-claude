@@ -152,6 +152,46 @@ test('the terminal lists the same sections as the desktop, in its order, each a 
   await desk.unmount()
 })
 
+/** An element description's key and children, as the drawn tree carries them. */
+type Drawn = { type?: string; key?: string; props?: Record<string, any>; children?: unknown[] }
+const keyOf = (d: Drawn) => d.key ?? d.props?.key
+const kids = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).filter((c): c is Drawn => !!c && typeof c === 'object')
+/** Every Text under an element, depth first. */
+const texts = (d: Drawn): Drawn[] => (d.type === 'Text' ? [d] : []).concat(kids(d).flatMap(texts))
+const shown = (d: Drawn): string => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).map(c => (typeof c === 'string' || typeof c === 'number' ? String(c) : c && typeof c === 'object' ? shown(c as Drawn) : '')).join('')
+
+test('a section header is the rules look: a bold orange title, a dim ─ rule out to the figures', async ($, on) => {
+  await session($, on)
+  for (const columns of [40, 60]) {
+    const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
+    // The title: bold, in Claude orange (the `claude` theme key, which no status uses).
+    const title = await ui.find({ type: 'Text', text: 'Agents' })
+    expect(title?.props, `title at ${columns}`).toMatchObject({ bold: true, color: 'claude', wrap: 'truncate' })
+    // The header row: the title, then the rule, then the figures, in that order.
+    const section = (await ui.find({ key: 'section-agents' })) as Drawn | undefined
+    const row = kids(section ?? {})[0] ?? {}
+    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'rule', 'right'])
+    const [head, rule, right] = kids(row)
+    // The arrow and icon before the title are dim: orange is the title's alone, so no orange glyph sits by an amber one.
+    const marks = texts(head!).filter(t => shown(t) !== 'Agents')
+    expect(marks.length, `icon at ${columns}`).toBeGreaterThan(0)
+    expect(marks.every(t => t.props?.dimColor === true && t.props?.color !== 'claude'), `icon at ${columns}`).toBe(true)
+    // The rule takes all the room between them (it grows from no width) and is long enough to reach.
+    expect(rule!.props, `rule box at ${columns}`).toMatchObject({ flexGrow: 1, width: 0, overflow: 'hidden' })
+    const line = texts(rule!)[0]
+    expect(line?.props?.dimColor, `rule at ${columns}`).toBe(true)
+    expect(shown(line!), `rule at ${columns}`).toMatch(/^─+$/)
+    expect([...shown(line!)].length, `rule at ${columns}`).toBeGreaterThanOrEqual(columns)
+    // The figures: values bold, units dim italic.
+    expect(shown(right!)).toMatch(/\d+ started {2}\d+ running/)
+    const figure = texts(right!).find(t => /^\d+$/.test(shown(t)))
+    const unit = texts(right!).find(t => shown(t) === ' started')
+    expect(figure?.props?.bold, `figure at ${columns}`).toBe(true)
+    expect(unit?.props, `unit at ${columns}`).toMatchObject({ dimColor: true, italic: true })
+    await ui.unmount()
+  }
+})
+
 test('the context bar and its scale span the section body at every width, the compaction mark amber', async ($, on) => {
   await session($, on)
   for (const columns of WIDTHS) {

@@ -77,10 +77,10 @@ test('the terminal draws the report with the kit inside the warning border, and 
   expect(await ui.find({ type: 'Text', text: '▲' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'rm -rf' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Blast Radius|⚠/ })).toBeUndefined()
-  // Command and Would as property rows: dim label, then the value; what it would delete in the failed colour.
-  expect((await ui.find({ type: 'Text', text: 'Command' }))?.props).toMatchObject({ dimColor: true })
-  expect(await ui.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
-  expect((await ui.find({ type: 'Text', text: 'Would' }))?.props).toMatchObject({ dimColor: true })
+  // Command and Would as property rows: a plain label, then the bold value; what it would delete in the failed colour.
+  expect((await ui.find({ type: 'Text', text: 'Command' }))?.props.dimColor).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'rm -rf build' }))?.props).toMatchObject({ bold: true })
+  expect((await ui.find({ type: 'Text', text: 'Would' }))?.props.dimColor).toBeUndefined()
   expect((await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' }))?.props).toMatchObject({ color: 'error', wrap: 'truncate' })
   // The list as items: the file glyph, then the path, cut at the edge.
   expect(await ui.findAll({ type: 'Text', text: '□' })).toHaveLength(2)

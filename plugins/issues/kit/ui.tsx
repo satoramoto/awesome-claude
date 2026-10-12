@@ -165,113 +165,46 @@ const TILE_SELECTED = '#232a3c'
 const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
 
 /*
- * The terminal's design language. The terminal can't draw the desktop's bands and
- * greys, so how a header stands out and how text steps down is a choice of its own.
- * `inspector` is today's look and the default; the other three are directions to
- * pick from, each drawn from the same mod code (`setTermLook`, or `kit(…, { look })`).
- * The desktop is the same in all four.
+ * The terminal's look ("rules", after lazygit and gh-dash). The terminal can't draw
+ * the desktop's bands and greys, so a header stands out by its own means: the
+ * section's title in bold Claude orange (the `claude` theme key, which no status
+ * uses) after a dim arrow and icon, then a dim `─` rule out to the figures. Status colours keep their
+ * one meaning; orange only ever marks structure.
  *
- * Each names five text roles, so a row says what matters without more colours:
- * - title: a section's name;
- * - label: what a value is (a reading's, a prop's, a legend entry's label);
- * - value: the figure or word that answers (a reading's figure, a header's figures);
- * - secondary: text a reader still reads, after the main text (a list row's note);
- * - meta: what's scanned past (units, ages, counts in a list row).
+ * Five text roles carry the hierarchy, so a row says what matters without more
+ * colours. Tune the look here, in one place:
+ * - title: a section's name: bold orange;
+ * - label: what a value is (a reading's, a prop's, a legend entry's label): plain;
+ * - value: the figure or word that answers (a reading's figure, a header's figures): bold;
+ * - secondary: text a reader still reads, after the main text (a list row's note): dim;
+ * - meta: what's scanned past (units, ages, counts in a list row): dim italic.
  *
- * Status colours keep their one meaning in every look. A structure accent, where a
- * look has one, is a theme key no status uses: `planMode` (teal) or `claude` (the
- * brand orange that Claude Code's own chrome is drawn in).
+ * The alternatives it was picked from (inspector, panel, ledger) are in commit ab3a37a.
  */
-export type TermLook = 'inspector' | 'panel' | 'rules' | 'ledger'
 
 /** Text props a terminal role is drawn with. */
-type Role = { color?: string; backgroundColor?: string; dimColor?: boolean; bold?: boolean; italic?: boolean }
+type Role = { color?: string; dimColor?: boolean; bold?: boolean; italic?: boolean }
 
-type LookSpec = {
-  /** One line on what it is, for the stories. */
-  about: string
-  /** How a header stands out: as today (`plain`), a band behind the title, a rule out to the figures, dot leaders. */
-  header: 'plain' | 'band' | 'rule' | 'leader'
-  /** The fold arrow's props: dim, or a strong gutter mark. */
-  arrow: Role
-  /** The header icon's colour (a token or theme key), or null to leave icons out of headers. */
-  icon: string | null
-  /** Labels in capitals. */
-  upper: boolean
-  roles: Record<'title' | 'label' | 'value' | 'secondary' | 'meta', Role>
+export const TERM_ROLES: Readonly<Record<'title' | 'label' | 'value' | 'secondary' | 'meta', Role>> = {
+  title: { bold: true, color: 'claude' },
+  label: {},
+  value: { bold: true },
+  secondary: { dimColor: true },
+  meta: { dimColor: true, italic: true },
 }
 
-export const TERM_LOOKS: Record<TermLook, LookSpec> = {
-  inspector: {
-    about: 'Today: bold title, dim arrow and icon; labels, notes and units dim, values plain.',
-    header: 'plain',
-    arrow: { dimColor: true },
-    icon: MUTED,
-    upper: false,
-    roles: { title: { bold: true }, label: { dimColor: true }, value: {}, secondary: { dimColor: true }, meta: { dimColor: true } },
-  },
-  panel: {
-    about: 'Panel bands (k9s, btop, htop): the title on a teal band; labels teal, values bold, notes italic, units dim.',
-    header: 'band',
-    arrow: { dimColor: true },
-    icon: 'inverseText',
-    upper: false,
-    roles: {
-      title: { bold: true, color: 'inverseText', backgroundColor: 'planMode' },
-      label: { color: 'planMode' },
-      value: { bold: true },
-      secondary: { italic: true },
-      meta: { dimColor: true },
-    },
-  },
-  rules: {
-    about: 'Accent rules (lazygit, gh-dash): an orange title and icon, a dim rule out to the figures; labels plain, values bold, units dim italic.',
-    header: 'rule',
-    arrow: { dimColor: true },
-    icon: 'claude',
-    upper: false,
-    roles: {
-      title: { bold: true, color: 'claude' },
-      label: {},
-      value: { bold: true },
-      secondary: { dimColor: true },
-      meta: { dimColor: true, italic: true },
-    },
-  },
-  ledger: {
-    about: 'Ledger (gh, kubectl describe, systemctl status): no hue for structure; a bold arrow in the gutter, dot leaders, labels in dim capitals, values bold.',
-    header: 'leader',
-    arrow: { bold: true },
-    icon: null,
-    upper: true,
-    roles: {
-      title: { bold: true },
-      label: { dimColor: true },
-      value: { bold: true },
-      secondary: { italic: true },
-      meta: { dimColor: true },
-    },
-  },
-}
+/**
+ * The header icon's colour on the terminal: dim, as the fold arrow. Orange is kept
+ * to the bold title word: a one-cell orange glyph reads too close to an amber
+ * status glyph (warn `▲`, ahead `↑`) in the row under it.
+ */
+const TERM_HEADER_ICON = MUTED
 
-let currentLook: TermLook = 'inspector'
-
-/** Picks the terminal look every later `kit()` call draws in (unless it names one). The default is `inspector`. */
-export const setTermLook = (look: TermLook) => {
-  currentLook = look
-}
-
-/** The terminal look `kit()` draws in when it isn't given one. */
-export const termLook = () => currentLook
-
-export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: { look?: TermLook } = {}) => {
+export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
-  const look = TERM_LOOKS[opts.look ?? currentLook] ?? TERM_LOOKS.inspector
-  /** A text role's props on the terminal (see TERM_LOOKS). */
-  const R = look.roles
-  /** A label as the look writes it. */
-  const labelText = (text: string) => (terminal && look.upper ? text.toUpperCase() : text)
+  /** A text role's props on the terminal (see TERM_ROLES). */
+  const R = TERM_ROLES
   /** Text a step below the main text: one of the three greys on the app surfaces; plain dim in the terminal, whose greys are its own. */
   const tone = (level: keyof typeof GRAY) => (terminal ? { dimColor: true } : { color: GRAY[level] })
   /** A token colour as Text props for this surface: on the terminal a status's theme key, a grey as dim. */
@@ -523,7 +456,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: { look
                 {swatch(t.color)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text {...(terminal ? R.label : tone('light'))} wrap="truncate">
-                    {labelText(t.label)}
+                    {t.label}
                   </Text>
                 </Box>
                 {t.note ? <Text {...ink(t.noteColor)}>{t.note}</Text> : null}
@@ -683,55 +616,44 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: { look
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
     if (terminal) {
-      // ▾ ◔ Title ………………… figures
+      // ▾ ◔ Title ──────────── figures
       //   body, two cells in, under the icon column
-      // No band and no rule: bold, the dim arrow and the indent make the hierarchy.
+      // A dim arrow and icon, the title bold orange (TERM_ROLES.title), a dim rule
+      // out to the figures, which are values (bold) with meta units. No band or box.
       // Sections stack without blank rows; an open one leaves one under its body.
-      // The other looks (TERM_LOOKS) put the title on a band (`▾  ◔ Title  …… figures`),
-      // run a dim rule (`▾ ◔ Title ──── figures`) or dot leaders (`▾ Title ···· figures`)
-      // out to the figures, and draw the arrow, icon and title in their own roles.
       const arrow = s.collapsed ? FOLD.closed : FOLD.open
       const toggle =
         s.onToggle && Button ? (
-          <Button key={`toggle-${s.id}`} plain {...look.arrow} label={arrow} onPress={() => s.onToggle?.()} />
+          <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
         ) : (
-          <Text {...look.arrow}>{arrow}</Text>
+          <Text dimColor>{arrow}</Text>
         )
-      const band = look.header === 'band'
-      const iconKey = s.icon && look.icon ? s.icon : null
-      // On a band the icon is part of the band's text, padded a cell each side; with
-      // `keepRight` unpadded, so the title has the room the mod sized the row for.
-      const pad = band && !s.keepRight ? ' ' : ''
-      const title = band ? `${pad}${iconKey ? `${glyphOf(iconKey)} ` : ''}${s.title}${pad}` : s.title
-      const lead = GUTTER + (iconKey && !band ? 2 : 0)
-      const keeps = Math.min([...title].length, band ? 14 : 12)
-      const fill = look.header === 'rule' ? METER.rail : look.header === 'leader' ? '·' : null
+      const lead = GUTTER + (s.icon ? 2 : 0)
+      const keeps = Math.min([...s.title].length, 12)
       return (
         <Box key={`section-${s.id}`} flexDirection="column" marginBottom={s.collapsed ? 0 : 1}>
-          <Box flexDirection="row" justifyContent="space-between" gap={fill ? CELLS.item : CELLS.group}>
+          <Box flexDirection="row" justifyContent="space-between" gap={CELLS.item}>
             {/* The title keeps up to 12 cells of itself; past that, it and the figures give way
                 together. With `keepRight` only the title gives way: the arrow and icon stay. */}
             <Box key="title" flexDirection="row" flexShrink={1} minWidth={s.keepRight ? lead : lead + keeps}>
               <Box width={GUTTER} flexShrink={0}>
                 {toggle}
               </Box>
-              {iconKey && !band ? (
+              {s.icon ? (
                 <Box width={2} flexShrink={0}>
-                  {icon(iconKey, look.icon!)}
+                  {icon(s.icon, TERM_HEADER_ICON)}
                 </Box>
               ) : null}
               <Box flexShrink={1} minWidth={0}>
                 <Text wrap="truncate" {...R.title}>
-                  {title}
+                  {s.title}
                 </Text>
               </Box>
             </Box>
-            {/* The rule or leaders take only the room left: from no width, cut at their box's edge. */}
-            {fill ? (
-              <Box key="fill" flexGrow={1} flexShrink={1} width={0} minWidth={0} height={1} overflow="hidden">
-                <Text dimColor>{fill.repeat(Math.max(1, Math.floor(columns)))}</Text>
-              </Box>
-            ) : null}
+            {/* The rule takes only the room left: from no width, cut at its box's edge. */}
+            <Box key="rule" flexGrow={1} flexShrink={1} width={0} minWidth={0} height={1} overflow="hidden">
+              <Text dimColor>{METER.rail.repeat(Math.max(1, Math.floor(columns)))}</Text>
+            </Box>
             {s.right ? (
               <Box key="right" flexDirection="row" minWidth={0} flexShrink={s.keepRight ? 0 : 1} overflow="hidden">
                 {s.right}
@@ -811,7 +733,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: { look
       <Box key={key} flexDirection="row" gap={CELLS.item}>
         <Box width={Math.min(Math.max(LABEL, [...label].length), 16)} flexShrink={0}>
           <Text {...R.label} wrap="truncate">
-            {labelText(label)}
+            {label}
           </Text>
         </Box>
         <Box minWidth={0} flexShrink={1} flexGrow={1}>
@@ -863,7 +785,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: { look
         <Box key={key} flexDirection="row" gap={CELLS.item}>
           <Box width={label} flexShrink={0}>
             <Text {...R.label} wrap="truncate">
-              {labelText(r.label)}
+              {r.label}
             </Text>
           </Box>
           {shown ? lineMeter(r.value / Math.max(r.max, 1e-9), r.color, room) : null}
