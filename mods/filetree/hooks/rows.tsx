@@ -1,19 +1,26 @@
 // Changed in this fork (awesome-claude) for the kit's terminal look: colours are the
 // kit's terminal inks (theme keys or dim), and the shimmer is a bold band sweeping
-// through a row drawn in its activity's colour, not a hex gradient.
+// through a row drawn in its activity's colour, not a hex gradient. The cursor row is
+// the kit's selected list row: a `▌` gutter mark in `suggestion` (dim while the pane
+// doesn't have the keyboard), never a background, which no fixed hex reads on every theme.
 import type { ClientModule } from 'claude-code'
 
 /**
- * One run of a row: `c` a colour (an engine theme key or a hex), `dc` the
- * terminal's dim, `sh` a shimmer tone (a key of `tones`), `dim` the faint flash.
+ * One run of a row: `c` a colour (an engine theme key, never a hex: the kit's
+ * `termInk` gives it), `dc` the terminal's dim, `sh` a shimmer tone (a key of
+ * `tones`), `dim` the faint flash.
  */
-export type Seg = { t: string; c?: string; dc?: boolean; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
+export type Seg = { t: string; c?: string; dc?: boolean; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; tab?: string }
 export type RowSpec = { id: string; left: Seg[]; right: Seg[] }
 export type RowsProps = {
   rows: RowSpec[]
+  /** The cursor row's id: its one-cell gutter holds `mark`. */
   active: string
-  activeBg: string
-  hoverBg: string
+  /** The kit's selected-row mark (`MARK.selected`) and its colour (a theme key). */
+  mark: string
+  markColor?: string
+  /** Whether the pane has the keyboard: the mark is dim while it hasn't. */
+  focused: boolean
   /** Each shimmer tone's colour on the terminal (a theme key, from the kit's `termInk`). */
   tones: Record<string, string>
   spinner?: string[]
@@ -22,7 +29,7 @@ export type RowsProps = {
   bar?: { pos: number; size: number }
   preview?: { text: string; path: string; startLine: number; markdown: boolean }
 }
-type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
+type Local = { phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
 const TICK_MS = 90
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
@@ -37,7 +44,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   const { Box, Text } = surface.elements
   let state = surface.state
   if (state === undefined) {
-    state = { hover: -1, phase: 0, drag: false, ref: {} }
+    state = { phase: 0, drag: false, ref: {} }
     surface.setState(state)
   }
   const lit = props.rows.some(r => r.left.some(s => s.sh || s.spin) || r.right.some(s => s.sh || s.spin))
@@ -63,23 +70,20 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
         return
       }
       if (e.type === 'down' || e.type === 'move') {
-        if (!cur.drag) surface.setState({ ...cur, drag: true, hover: -1 })
+        if (!cur.drag) surface.setState({ ...cur, drag: true })
         surface.post({ scrollTo: Math.max(0, Math.min(1, e.y / span)) })
         return
       }
     }
-    if (e.type === 'leave' || e.y < 0 || e.y >= props.rows.length) {
-      if (cur.hover !== -1) surface.setState({ ...cur, hover: -1 })
-      return
-    }
-    if (e.type === 'move' && !e.button && cur.hover !== e.y) surface.setState({ ...cur, hover: e.y })
+    if (e.type === 'leave' || e.y < 0 || e.y >= props.rows.length) return
     const row = props.rows[e.y]
     if (e.type === 'down' && e.button === 'right' && row?.id) {
       surface.post({ copy: row.id, shift: Boolean(e.shift) })
       return
     }
     if (e.type !== 'down' || (e.button ?? 'left') !== 'left' || !row) return
-    let x = 0
+    // After the one-cell gutter.
+    let x = 1
     for (const seg of row.left) {
       const w = [...seg.t].length
       if (seg.tab && e.x >= x && e.x < x + w) {
@@ -109,7 +113,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
     const tone = s.sh ? props.tones[s.sh] : undefined
     if (!tone) {
       return (
-        <Text color={s.c} dimColor={s.dc} backgroundColor={s.bg} bold={s.b} strikethrough={s.s} italic={s.i}>
+        <Text color={s.c} dimColor={s.dc} bold={s.b} strikethrough={s.s} italic={s.i}>
           {s.t}
         </Text>
       )
@@ -134,12 +138,16 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   return (
     <Box flexDirection="column">
       {props.rows.map((r, i) => (
-        <Box
-          flexDirection="row"
-          height={1}
-          overflow="hidden"
-          backgroundColor={r.id && r.id === props.active ? props.activeBg : r.id && i === state.hover ? props.hoverBg : undefined}
-        >
+        <Box flexDirection="row" height={1} overflow="hidden">
+          <Box width={1} flexShrink={0}>
+            {r.id && r.id === props.active ? (
+              <Text color={props.markColor} dimColor={!props.focused || undefined}>
+                {props.mark}
+              </Text>
+            ) : (
+              <Text> </Text>
+            )}
+          </Box>
           <Box flexShrink={1} overflow="hidden">
             {r.left.map(draw)}
           </Box>

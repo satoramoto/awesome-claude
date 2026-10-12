@@ -55,20 +55,10 @@ export type FileTree = {
   previewTop: number
 }
 
-export type Theme = {
-  fg: string
-  accent: string
-  muted: string
-  urgent: string
-  selection: string
-  bg: string
-}
-
 declare module 'claude-code' {
   interface PluginState {
     filetree: {
       tree: FileTree
-      theme: Theme
       activity: Activity[]
     }
   }

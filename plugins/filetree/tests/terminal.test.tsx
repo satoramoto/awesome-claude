@@ -59,13 +59,13 @@ function world(on: any, opts: { dirs?: Dirs; top?: string } = {}) {
   return clock
 }
 
-const pane = (bodyColumns: number) => ({ component: 'Pane', requestId: 'filetree', props: { title: 'Files', isFocused: false, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } }) as const
+const pane = (bodyColumns: number, isFocused = false) => ({ component: 'Pane', requestId: 'filetree', props: { title: 'Files', isFocused, bodyColumns, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} } }) as const
 
-async function terminal($: any, on: any, columns = 60, opts: Parameters<typeof world>[1] = {}) {
+async function terminal($: any, on: any, columns = 60, opts: Parameters<typeof world>[1] & { focused?: boolean } = {}) {
   const clock = world(on, opts)
   await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
   await clock.settle()
-  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(columns) })
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(columns, opts.focused) })
   await clock.settle()
   return { clock, ui }
 }
@@ -158,9 +158,109 @@ test('terminal: every row fits the section body at 30, 40, 60 and 100 columns', 
     const at = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(columns) })
     await clock.settle()
     const { rows, bar } = await rowsProps(at)
-    for (const r of rows) expect(cells(r.left) + cells(r.right) + (bar ? 1 : 0)).toBeLessThanOrEqual(columns - 2)
+    // The one-cell gutter the cursor's mark sits in, the runs, and the scrollbar.
+    for (const r of rows) expect(1 + cells(r.left) + cells(r.right) + (bar ? 1 : 0)).toBeLessThanOrEqual(columns - 2)
     // The long name is cut with an ellipsis rather than pushed past the edge.
     expect(rows.find(r => r.id === `${ROOT}/${LONG}`)?.left.at(-1)?.t.endsWith('…')).toBe(columns < 100)
     await at.unmount()
   }
+})
+
+/** Where the cursor sits: the row the Client marks, its name run, and the mark it drew. */
+async function cursorOf(ui: any) {
+  const props = (await rowsProps(ui)) as Awaited<ReturnType<typeof rowsProps>> & { active: string; mark: string; markColor?: string; focused: boolean }
+  const row = props.rows.find(r => r.id === props.active)!
+  const mark = await ui.find({ type: 'Text', text: '▌', in: 'rows' })
+  return { props, row, name: row.left.at(-1)!, mark }
+}
+
+test("terminal: the cursor row is the kit's selected row, ▌ in suggestion and the name bold, never a background", async ($, on) => {
+  const { ui, clock } = await terminal($, on, 60, { focused: true })
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  const on1 = await cursorOf(ui)
+  expect(on1.props.focused).toBe(true)
+  expect(on1.mark?.props.color).toBe('suggestion')
+  expect(on1.mark?.props.dimColor).toBeFalsy()
+  expect(on1.name.b).toBe(true)
+  // Only the cursor row is marked and bold.
+  expect((await ui.findAll({ type: 'Text', text: '▌', in: 'rows' })).length).toBe(1)
+  expect(on1.props.rows.filter(r => r.id !== on1.props.active).some(r => r.left.at(-1)?.b)).toBe(false)
+  expect(JSON.stringify(await ui.drawn({ in: 'rows' }))).not.toMatch(/"backgroundColor"/)
+  // A move carries the mark to the next row.
+  await ui.post({ key: 'down' }, { in: 'rows' })
+  await clock.settle()
+  expect((await cursorOf(ui)).props.active).not.toBe(on1.props.active)
+  await ui.unmount()
+  // Without the keyboard: the same row, its mark dim and its name's weight plain.
+  const off = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(60, false) })
+  await clock.settle()
+  const blurred = await cursorOf(off)
+  expect(blurred.props.focused).toBe(false)
+  expect(blurred.mark?.props.color).toBe('suggestion')
+  expect(blurred.mark?.props.dimColor).toBe(true)
+  expect(blurred.name.b).toBeUndefined()
+  await off.unmount()
+})
+
+test('terminal: key hints show at the foot while the pane has the keyboard, and only then', async ($, on) => {
+  const { ui, clock } = await terminal($, on, 60, { focused: true })
+  const hint = await ui.find({ type: 'Text', text: /^↑↓ move · ⏎ open · ←→ fold · y copy path$/ })
+  expect(hint).toBeDefined()
+  // At 30 columns the pairs that don't fit give way to a dim ellipsis.
+  await ui.unmount()
+  const narrow = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(30, true) })
+  await clock.settle()
+  const cut = await narrow.find({ type: 'Text', text: /^↑↓ move/ })
+  expect(cut?.text).toMatch(/…$/)
+  await narrow.unmount()
+  const blurred = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(60, false) })
+  await clock.settle()
+  expect(await blurred.find({ type: 'Text', text: /move/ })).toBeUndefined()
+  await blurred.unmount()
+})
+
+const DEEP: Dirs = {
+  [ROOT]: [['packages', 'dir']],
+  [`${ROOT}/packages`]: [['web', 'dir']],
+  [`${ROOT}/packages/web`]: [['src', 'dir']],
+  [`${ROOT}/packages/web/src`]: [['components', 'dir']],
+  [`${ROOT}/packages/web/src/components`]: [['NavigationSidebarPanel.tsx', 'file']],
+}
+const DEEP_FILE = `${ROOT}/packages/web/src/components/NavigationSidebarPanel.tsx`
+
+/** Opens each folder down to the deep file and selects it. */
+async function selectDeep(ui: any, clock: any) {
+  for (const dir of ['packages', 'packages/web', 'packages/web/src', 'packages/web/src/components']) {
+    await ui.post({ press: `${ROOT}/${dir}` }, { in: 'rows' })
+    await clock.settle()
+  }
+  await ui.post({ press: DEEP_FILE }, { in: 'rows' })
+  await clock.settle()
+}
+
+test('terminal: the selected path in the footer is cut in the middle, keeping its first folder and its name', async ($, on) => {
+  const { ui, clock } = await terminal($, on, 60, { dirs: DEEP })
+  await selectDeep(ui, clock)
+  const foot = await ui.find({ type: 'Text', text: /^selected: / })
+  expect(foot?.text).toBe('selected: packages/…/NavigationSidebarPanel.tsx')
+  await ui.unmount()
+  // Wide enough, the whole path.
+  const wide = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(100) })
+  await clock.settle()
+  expect((await wide.find({ type: 'Text', text: /^selected: / }))?.text).toBe('selected: packages/web/src/components/NavigationSidebarPanel.tsx')
+  await wide.unmount()
+})
+
+test('terminal: the preview header cuts a long path in the middle, and its key hints show while focused', { options: { open: 'preview' } }, async ($, on) => {
+  const { ui, clock } = await terminal($, on, 48, { dirs: DEEP, focused: true })
+  await selectDeep(ui, clock)
+  await ui.post({ press: DEEP_FILE }, { in: 'rows' })
+  await clock.settle()
+  const title = (await ui.findAll({ type: 'Text', text: /NavigationSidebarPanel\.tsx$/ })).find((t: any) => t.props.bold)
+  // 48 columns less `← files`, its gap and ↗: the first folder, an ellipsis, the name.
+  expect(title?.text).toBe('packages/…/NavigationSidebarPanel.tsx')
+  expect(await ui.find({ type: 'Text', text: /^↑↓ scroll · ← back$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /move/ })).toBeUndefined()
+  await ui.unmount()
 })

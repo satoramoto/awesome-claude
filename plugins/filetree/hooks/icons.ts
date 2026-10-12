@@ -114,14 +114,9 @@ export function fileIcon(n: FileNode, open: boolean, isRepo: boolean): string {
   return cp(EXTS[ext] ?? 0xf0214)
 }
 
-export const GIT_COLOR: Record<string, string> = {
-  A: '#98c379',
-  '?': '#98c379',
-  R: '#61afef',
-  C: '#61afef',
-  M: '#e5c07b',
-  T: '#e5c07b',
-}
+// Changed in this fork (awesome-claude): no git status hex palette here. A status
+// draws in the kit's colour for it (`statusColor` in desktop.tsx), a theme key on
+// the terminal through the kit's `termInk`.
 
 const PRIORITY = ['U', 'D', 'M', 'T', 'R', 'C', 'A', '?']
 

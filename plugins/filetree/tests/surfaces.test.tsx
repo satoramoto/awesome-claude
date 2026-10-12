@@ -896,22 +896,25 @@ test('a written file whose name holds a newline still shimmers', { timeoutMs: 20
   await ui.unmount()
 })
 
-test('the pane takes its background from the Omarchy theme and follows a theme switch', { timeoutMs: 20_000 }, async ($, on) => {
+// Changed in this fork (awesome-claude): the Omarchy background and selection are fixed
+// hexes that don't read on every terminal theme (light, ANSI-only), so the pane draws on
+// the terminal's own background in theme keys, as the kit does, and reads no theme file.
+test('with an Omarchy theme the pane still draws no hex on the terminal and reads no theme file', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
-  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', theme: { toml: 'background = "#1e1e2e"\ndark_background = "#161622"\n', mtimeMs: 1 } }
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', theme: { toml: 'foreground = "#cdd6f4"\nbackground = "#1e1e2e"\nselection = "#585b70"\n', mtimeMs: 1 } }
   const clock = world(on, w, ran)
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  expect(await texts(ui)).toContain('"backgroundColor":"#161622"')
-  w.theme = { toml: 'background = "#fafafa"\n', mtimeMs: 2 }
-  await clock.advance(2_000)
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
   await clock.settle()
   const shown = await texts(ui)
-  expect(shown).toContain('"backgroundColor":"#fafafa"')
-  expect(shown).not.toContain('#161622')
+  expect(shown).not.toMatch(/"backgroundColor":"#/)
+  expect(shown).not.toMatch(/"color":"#/)
+  expect(shown).not.toMatch(/"c":"#/)
+  expect(ran.filter(a => a[0] === 'theme-stat')).toHaveLength(0)
   await ui.unmount()
 })
 
