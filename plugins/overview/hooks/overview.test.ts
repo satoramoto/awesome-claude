@@ -121,7 +121,8 @@ const answer = (argv: readonly string[]) => {
   if (cmd === 'git --no-optional-locks diff --shortstat HEAD') return ok(' 1 file changed, 12 insertions(+), 3 deletions(-)\n')
   if (cmd === 'git rev-parse --abbrev-ref origin/HEAD') return ok('origin/main\n')
   if (cmd.startsWith('gh ') && world.down.has('gh')) return { ...fail, stderr: 'error connecting to api.github.com' }
-  if (cmd.startsWith('gh pr list --author @me')) return ok(JSON.stringify(GH_PRS))
+  // On the workspace's branch, its PR is one of mine too.
+  if (cmd.startsWith('gh pr list --author @me')) return ok(JSON.stringify(world.head === 'lane' ? [LANE_PR, ...GH_PRS] : GH_PRS))
   if (cmd.startsWith('gh pr list --state all')) return ok(JSON.stringify([LANE_PR]))
   // The workspace on `lane`: it exists, and its lines changed against main.
   if (cmd === 'git rev-parse --git-dir') return ok('.git\n')
@@ -198,51 +199,81 @@ const kids = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]
 const texts = (d: Drawn): Drawn[] => (d.type === 'Text' ? [d] : []).concat(kids(d).flatMap(texts))
 const shown = (d: Drawn): string => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).map(c => (typeof c === 'string' || typeof c === 'number' ? String(c) : c && typeof c === 'object' ? shown(c as Drawn) : '')).join('')
 
-test('a section header is the rules look: a bold orange title, a dim ─ rule out to the figures', async ($, on) => {
+/** A section body's cells at a pane's width: the overview's measure (72), less the gutter (2) and the right margin (1). */
+const bodyAt = (columns: number) => Math.min(columns, 72) - 3
+
+test('a section header is the quiet rules look: a bold plain title, its figures on a shared column, a dim ─ rule after', async ($, on) => {
   await session($, on)
   for (const columns of [40, 60]) {
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
-    // The title: bold, in Claude orange (the `claude` theme key, which no status uses).
+    // The title: bold in the default foreground; no orange, no italic anywhere in the header.
     const title = await ui.find({ type: 'Text', text: 'Agents' })
-    expect(title?.props, `title at ${columns}`).toMatchObject({ bold: true, color: 'claude', wrap: 'truncate' })
-    // The header row: the title, then the rule, then the figures, in that order.
+    expect(title?.props, `title at ${columns}`).toMatchObject({ bold: true, wrap: 'truncate' })
+    expect(title?.props.color, `title at ${columns}`).toBeUndefined()
+    // The header row: the title's column, then the figures, then the rule.
     const section = (await ui.find({ key: 'section-agents' })) as Drawn | undefined
     const row = kids(section ?? {})[0] ?? {}
-    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'rule', 'right'])
-    const [head, rule, right] = kids(row)
-    // The arrow and icon before the title are dim: orange is the title's alone, so no orange glyph sits by an amber one.
+    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'right', 'rule'])
+    const [head, right, rule] = kids(row)
+    // The figures start on the shared column: arrow 2, icon 2, title column 10, 2 apart.
+    expect(head!.props?.width, `title column at ${columns}`).toBe(16)
     const marks = texts(head!).filter(t => shown(t) !== 'Agents')
     expect(marks.length, `icon at ${columns}`).toBeGreaterThan(0)
-    expect(marks.every(t => t.props?.dimColor === true && t.props?.color !== 'claude'), `icon at ${columns}`).toBe(true)
-    // The rule takes all the room between them (it grows from no width) and is long enough to reach.
+    expect(marks.every(t => t.props?.dimColor === true), `icon at ${columns}`).toBe(true)
+    // The rule takes only the room left (it grows from no width) and is long enough to reach.
     expect(rule!.props, `rule box at ${columns}`).toMatchObject({ flexGrow: 1, width: 0, overflow: 'hidden' })
     const line = texts(rule!)[0]
     expect(line?.props?.dimColor, `rule at ${columns}`).toBe(true)
     expect(shown(line!), `rule at ${columns}`).toMatch(/^─+$/)
-    expect([...shown(line!)].length, `rule at ${columns}`).toBeGreaterThanOrEqual(columns)
-    // The figures: values bold, units dim italic.
+    // The figures: the first bold, the rest plain, units dim and never italic.
     expect(shown(right!)).toMatch(/\d+ started {2}\d+ running/)
-    const figure = texts(right!).find(t => /^\d+$/.test(shown(t)))
+    const [first, second] = texts(right!).filter(t => /^\d+$/.test(shown(t)))
+    expect(first?.props?.bold, `first figure at ${columns}`).toBe(true)
+    expect(second?.props?.bold, `second figure at ${columns}`).toBeFalsy()
     const unit = texts(right!).find(t => shown(t) === ' started')
-    expect(figure?.props?.bold, `figure at ${columns}`).toBe(true)
-    expect(unit?.props, `unit at ${columns}`).toMatchObject({ dimColor: true, italic: true })
+    expect(unit?.props?.dimColor, `unit at ${columns}`).toBe(true)
+    expect(texts(row).some(t => t.props?.italic), `italic at ${columns}`).toBe(false)
     await ui.unmount()
   }
 })
 
-test('the context bar and its scale span the section body at every width, the compaction mark amber', async ($, on) => {
+test('the context bar is one row across the section body: the parts as ━, the free room and the amber buffer as ─', async ($, on) => {
   await session($, on)
-  for (const columns of WIDTHS) {
+  for (const columns of WIDTHS.filter(c => c >= 30)) {
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
-    const bar = await ui.find({ type: 'Text', text: /^[█▓▏▎▍▌▋▊▉░]+$/ })
-    expect([...(bar?.text ?? '')].length).toBe(columns - 2)
-    const scale = await ui.find({ type: 'Text', text: /^[╵ ]*▴[╵ ]*$/ })
-    expect([...(scale?.text ?? '')].length).toBe(columns - 2)
-    expect((await ui.find({ type: 'Text', text: /^▴$/ }))?.props.color).toBe('warning')
-    // The legend names the groups and what's left: the free room and the buffer.
+    const meter = ((await ui.find({ key: 'meter' })) ?? {}) as Drawn
+    const runs = texts(meter).filter(t => !kids(t).length && /^[━╸─]+$/.test(shown(t)))
+    expect(runs.map(shown).join('').length, `at ${columns}`).toBe(bodyAt(columns))
+    // No dithered, shaded or block cells; no scale or axis rows under it.
+    expect(texts(meter).map(shown).join(''), `at ${columns}`).not.toMatch(/[█▓░▒╵▴]/)
+    expect(runs.at(-1)?.props?.color, `buffer at ${columns}`).toBe('warning')
+    expect(await sectionText(ui, 'context'), `at ${columns}`).not.toMatch(/[╵▴]|500k/)
     for (const label of ['System', 'MCP', 'Messages', 'Free', 'Buffer']) expect(await ui.find({ type: 'Text', text: label })).toBeDefined()
     await ui.unmount()
   }
+})
+
+test('Limits says its fullest window in the header only while folded: open, the readings say it', async ($, on) => {
+  await session($, on)
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  expect((await sectionText(ui, 'limits')).match(/96%/g)?.length).toBe(1)
+  await ui.press({ key: 'toggle-limits' })
+  expect(await sectionText(ui, 'limits')).toMatch(/96% weekly/)
+  expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a PR shows once: Workspaces lists its branch, Git leaves it out; its actions sit beside the branch', async ($, on) => {
+  await session($, on, 'lane')
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(60) })
+  expect(await sectionText(ui, 'workspaces')).toMatch(/Overview adopts the kit/)
+  expect(await sectionText(ui, 'git')).not.toMatch(/Overview adopts the kit/)
+  expect(await sectionText(ui, 'git')).toMatch(/Terminal inspector/)
+  // The branch row: the branch, its number, then its actions right after, nothing on the far edge.
+  const head = ((await ui.find({ key: 'branch-lane-head' })) ?? {}) as Drawn
+  expect(kids(head).length).toBe(1)
+  expect(JSON.stringify(kids(head)[0])).toContain('branch-lane-actions')
+  await ui.unmount()
 })
 
 test('limits are readings: label, gauge, percent and reset, red from 90%', async ($, on) => {
@@ -282,7 +313,8 @@ test('git lists the checkout and its pull requests as rows with a status', async
   expect(await ui.find({ type: 'Text', text: /terminal\.tsx/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'Terminal inspector' })).toBeDefined()
   // The number sits on the right as meta, the part that goes first when the row is narrow.
-  expect((await ui.find({ type: 'Text', text: '#7' }))?.props).toMatchObject({ dimColor: true, italic: true })
+  expect((await ui.find({ type: 'Text', text: '#7' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: '#7' }))?.props.italic).toBeFalsy()
   expect((await ui.find({ type: 'Text', text: '✕ 1 failing' }))?.props.color).toBe('error')
   // A pending check is blue, as running is.
   expect((await ui.find({ type: 'Text', text: '◌ 1 pending' }))?.props.color).toBe('suggestion')
@@ -333,14 +365,20 @@ test("before the first reads, Context and Git hold their figures' place with the
   await ui.unmount()
 })
 
-test("the context legend keys the bar's parts with its own █ and ▓ in turn; the free room and buffer with ■", async ($, on) => {
+test("the context legend keys the bar with its own glyphs, ━ for the parts and ─ for the room, each label close to its figure", async ($, on) => {
   await session($, on)
-  for (const columns of [40, 60]) {
+  for (const columns of [40, 60, 100]) {
     const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(columns) })
-    const legend = async (key: string) => texts(((await ui.find({ key })) ?? {}) as Drawn).map(shown)
-    const keys = [...(await legend('ctx')), ...(await legend('ctx-room'))].filter(t => /^[█▓■]$/.test(t))
-    // The bar's parts (System, MCP, Messages): █ ▓ █, as the bar draws them; then Free and Buffer.
-    expect(keys, `at ${columns}`).toEqual(['█', '▓', '█', '■', '■'])
+    const legend = ((await ui.find({ key: 'ctx' })) ?? {}) as Drawn
+    const keys = texts(legend).map(shown).filter(t => /^[━─■█▓]$/.test(t))
+    // The bar's parts (System, MCP, Messages), then Free and Buffer.
+    expect(keys, `at ${columns}`).toEqual(['━', '━', '━', '─', '─'])
+    // Each entry is as wide as its label and figure need, not a share of the pane: 2 + 8 + 1 + 5.
+    const rows = kids(legend)
+    const cells = rows.flatMap(kids)
+    expect(cells.every(c => c.props?.width === 16), `at ${columns}`).toBe(true)
+    // Row by row, as many columns as fit: two at 40, three from 60.
+    expect(kids(rows[0]!).length, `at ${columns}`).toBe(columns < 60 ? 2 : 3)
     await ui.unmount()
   }
 })
@@ -358,7 +396,7 @@ test('the tokens each turn added are a Braille sparkline across Accounting', asy
     expect(await sectionText(ui, 'accounting')).toMatch(/15k last turn/)
     const rows = (await sectionTexts(ui, 'accounting')).map(shown).filter(t => /^[⠀-⣿ ]+$/.test(t) && /[^ ]/.test(t))
     expect(rows.length, `at ${columns}`).toBe(2)
-    for (const row of rows) expect([...row].length, `at ${columns}`).toBe(columns - 2)
+    for (const row of rows) expect([...row].length, `at ${columns}`).toBe(bodyAt(columns))
     // Newest on the right edge: the last cell has dots.
     expect(rows.at(-1)!.at(-1), `at ${columns}`).not.toBe(' ')
     await ui.unmount()
@@ -423,7 +461,7 @@ test('below 30 columns each section draws its header and figures only', async ($
   expect(await sectionText(ui, 'limits')).toMatch(/96% weekly/)
   expect(await sectionText(ui, 'context')).toMatch(/31% of 200k/)
   // No bodies: no bar, no readings, no rows.
-  expect(await ui.find({ type: 'Text', text: /^[█▓▏▎▍▌▋▊▉░]+$/ })).toBeUndefined()
+  expect(await ui.find({ key: 'meter' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Model' })).toBeUndefined()
   await ui.unmount()

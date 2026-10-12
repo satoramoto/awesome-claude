@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { TERM_GLYPH } from '@kit/icons'
-import { C, GLYPH, INK, RAMP, STATUS, TREE } from '@kit/tokens'
+import { C, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '@kit/tokens'
 import { FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, kit } from '@kit/ui'
 import type { Kit } from '@kit/ui'
 
@@ -122,13 +122,29 @@ test('every terminal glyph table holds one-cell text glyphs: no emoji, no variat
     expect(SELECTOR.test(g), `${name} carries a variation selector`).toBe(false)
   }
   // Single glyphs are one code point; TREE connectors are two cells, the separator three.
-  for (const [name, g] of glyphs.filter(([n]) => !/^(TREE|MARK\.sep|METER\.rise\[0\])/.test(n) && !/^METER\.eighths\[0\]/.test(n))) {
+  for (const [name, g] of glyphs.filter(([n]) => !/^(TREE|MARK\.sep|METER\.rise\[0\])/.test(n))) {
     expect([...g].length, `${name} is one cell`).toBe(1)
   }
 })
 
-test('a role is never italic alone: an italic role is also dim or bold', async () => {
-  for (const [name, role] of Object.entries(TERM_ROLES)) if (role.italic) expect(Boolean(role.dimColor || role.bold), `${name}`).toBe(true)
+test('no role is italic, and only the title and the one strong figure are bold', async () => {
+  for (const [name, role] of Object.entries(TERM_ROLES)) expect(Boolean(role.italic), `${name}`).toBe(false)
+  expect(Object.entries(TERM_ROLES).filter(([, r]) => r.bold).map(([n]) => n)).toEqual(['title', 'strong'])
+})
+
+test('a bar is one row of the heavy line to the half cell; room and the rest are the light rail', async ($, on) => {
+  const draw = kitPane($, on)
+  const used = await draw(k => k.bar([{ value: 25, color: INK }], 100, { width: 10 }) as never)
+  expect(shown(used)).toBe('━━╸───────')
+  const room = await draw(k => k.bar([{ value: 30, color: INK }, { value: 20, color: TRACK, room: true }, { value: 10, color: C.warn, room: true }], 100, { width: 10 }) as never)
+  expect(shown(room)).toBe('━━━───────')
+  const runs = texts(room).filter(t => !kids(t).length)
+  expect(runs.map(t => [shown(t), t.props?.color, Boolean(t.props?.dimColor)])).toEqual([
+    ['━━━', undefined, false],
+    ['──', undefined, true],
+    ['─', 'warning', false],
+    ['────', undefined, true],
+  ])
 })
 
 test('the terminal gets no fixed hex colour and no variation selector from any primitive', async ($, on) => {
@@ -153,11 +169,12 @@ test('quantity and chart shades draw in the default foreground or dim on the ter
   const draw = kitPane($, on)
   const tree = await draw(k => k.bar([{ value: 25, color: INK }, { value: 25, color: RAMP.slate[1] }, { value: 25, color: C.cyan }, { value: 25, color: C.orchid }], 100, { width: 8 }) as never)
   const runs = texts(tree).filter(t => !kids(t).length)
+  // Solid colours only, no shades or dithers: neighbours differ by tone.
   expect(runs.map(t => [shown(t), t.props?.color, Boolean(t.props?.dimColor)])).toEqual([
-    ['██', undefined, false],
-    ['▓▓', undefined, true],
-    ['██', undefined, false],
-    ['▓▓', undefined, true],
+    ['━━', undefined, false],
+    ['━━', undefined, true],
+    ['━━', undefined, false],
+    ['━━', undefined, true],
   ])
 })
 

@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import { ago, basename, money, short, tokens } from '../kit/format'
 import { C, GLYPH, MUTED, TRACK, levelColor } from '../kit/tokens'
 import type { StatusKind } from '../kit/tokens'
-import { kit } from '../kit/ui'
+import { MEASURE, kit } from '../kit/ui'
 import type { Kit } from '../kit/ui'
 
 import type { Agent, BranchView, GitFile, GitInfo, GitPr, TreeRow } from '../types'
@@ -82,14 +82,20 @@ const turnTokens = (p: { input: number; output: number; cacheWrite: number }) =>
 
 export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelpers): RenderElement => {
   const { Box } = els
-  const k = kit(els, 'terminal', d.columns, { focused: d.focused })
+  // A dashboard of readings: drawn to the kit's measure, so a wide pane doesn't spread them apart.
+  const k = kit(els, 'terminal', d.columns, { focused: d.focused, measure: MEASURE })
   const a = d.activity
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
   const running = d.agents.filter(x => x.status === 'running' || x.status === 'pending').length
 
-  // ---- context: the used groups on a block bar, the compaction mark on the scale under it ----
+  // ---- context: one row: the used groups as the heavy line, then the free room and the
+  // buffer past the compaction point as the light rail (dim, then amber); the legend under it ----
   const { parts, free, buffer } = contextParts(snap)
+  const room = [
+    ...(free > 0 ? [{ value: free, color: TRACK, label: 'Free', room: true }] : []),
+    ...(buffer > 0 ? [{ value: buffer, color: C.warn, label: 'Buffer', room: true }] : []),
+  ]
   const context = k.section({
     id: 'context',
     icon: GLYPH.context,
@@ -99,35 +105,14 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
     ...fold('context'),
     children: snap
       ? [
-          <Box key="meter" flexDirection="column">
-            {k.bar(parts, snap.max)}
-            {k.scale(snap.compactAt ? snap.compactAt / Math.max(snap.max, 1) : undefined)}
-            {k.axis(
-              'ctx-axis',
-              [0, 0.5, 1].map(f => ({ at: f, text: f === 0 ? '0' : tokens(snap.max * f) })),
-            )}
-          </Box>,
-          <Box key="legend" flexDirection="column" marginTop={k.space.block}>
-            {/* The bar's parts, keyed with the bar's own █ and ▓ in turn, so they read apart without colour. */}
-            {k.legend(
-              'ctx',
-              parts.map(p => ({ label: p.label, color: p.color, figure: tokens(p.value) })),
-              // Two columns at most, as the room legend under it, so their columns line up.
-              2,
-              { bar: true },
-            )}
-            {/* What isn't a part: the free room is the bar's track; the buffer starts at the scale's mark, in its amber. */}
-            {free > 0 || buffer > 0
-              ? k.legend(
-                  'ctx-room',
-                  [
-                    ...(free > 0 ? [{ label: 'Free', color: TRACK, figure: tokens(free) }] : []),
-                    ...(buffer > 0 ? [{ label: 'Buffer', color: C.warn, figure: tokens(buffer) }] : []),
-                  ],
-                  2,
-                )
-              : null}
-          </Box>,
+          <Box key="meter">{k.bar([...parts, ...room], snap.max)}</Box>,
+          // Keyed with the bar's own glyphs: ━ for what's used, ─ for the room.
+          k.legend(
+            'ctx',
+            [...parts, ...room].map(p => ({ label: p.label, color: p.color, figure: tokens(p.value), room: 'room' in p })),
+            undefined,
+            { bar: true },
+          ),
         ]
       : [k.note('ctx-reading', 'Reading context…', 'loading')],
   })
@@ -142,6 +127,8 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
         icon: GLYPH.limits,
         title: 'Limits',
         right: fullest ? k.summary([[`${Math.round(fullest.percent)}%`, fx.limitLabel(fullest.kind).toLowerCase(), levelColor(fullest.percent)]]) : undefined,
+        // The readings say it while the section is open.
+        restated: true,
         ...fold('limits'),
         children: windows.map(w =>
           k.reading(`limit-${w.kind}`, {
@@ -182,6 +169,7 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
                 chartWidth,
               )}
             </Box>,
+            // A chart taller than a row is its own block: its legend after one blank row.
             <Box key="legend" marginTop={k.space.block}>
               {k.legend('act', [
                 ...chart.named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n), ...chart.errNote(a.tools[t.name]!.err) })),
@@ -266,7 +254,8 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
   const entries = d.branches.map((b: BranchView, i) => {
     const pr = b.pr
     const open = pr?.state === 'OPEN'
-    const ci = pr ? prChecks(pr, b.conflicted) : b.conflicted ? (['failed', `${b.conflicted} conflicts`] as [StatusKind, string]) : null
+    // A merged or closed PR's state is its icon (and the header's count): no word for it again.
+    const ci = pr ? (open ? prChecks(pr, b.conflicted) : null) : b.conflicted ? (['failed', `${b.conflicted} conflicts`] as [StatusKind, string]) : null
     const main =
       !b.exists
         ? null
@@ -287,11 +276,9 @@ const workspaces = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
           note: pr ? `#${pr.number}` : undefined,
           dim: !b.exists,
           bold: b.checkedOut,
-          // Narrow, the "creating" word goes; the actions stay.
-          right: [
-            d.creating === b.branch ? { part: 'creating PR…', drop: 1 } : null,
-            k.actions(`branch-${b.branch}-actions`, [main, { key: `hide-${b.branch}`, label: 'hide', quiet: true, onPress: () => d.hideBranch(b.branch) }]),
-          ],
+          // The actions sit beside the branch they act on, not alone on the far edge.
+          after: k.actions(`branch-${b.branch}-actions`, [main, { key: `hide-${b.branch}`, label: 'hide', quiet: true, onPress: () => d.hideBranch(b.branch) }]),
+          right: [d.creating === b.branch ? { part: 'creating PR…', drop: 1 } : null],
         })}
         {k.item(`branch-${b.branch}-pr`, {
           indent: k.edge.left,
@@ -393,7 +380,10 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
   else if (hub.note) prs.push(k.note('prs-note', hub.note))
   else if (hub.prs.length === 0) prs.push(k.note('prs-none', 'No open pull requests'))
   else {
-    for (const pr of hub.prs.slice(0, GIT_PRS)) {
+    // A PR Workspaces already lists isn't listed again here.
+    const listed = new Set(d.branches.map(b => b.pr?.number).filter((n): n is number => n !== undefined))
+    const rest = hub.prs.filter(pr => !listed.has(pr.number))
+    for (const pr of rest.slice(0, GIT_PRS)) {
       const ci = prChecks(pr)
       prs.push(
         k.item(`pr-${pr.number}`, {
@@ -424,11 +414,11 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
         )
       }
     }
-    if (hub.prs.length > GIT_PRS) prs.push(k.note('prs-more', `… ${hub.prs.length - GIT_PRS} more`))
+    if (rest.length > GIT_PRS) prs.push(k.note('prs-more', `… ${rest.length - GIT_PRS} more`))
   }
 
   return head(k.summary([[g.repo]], state), [
-    k.item('git-branch', { lead: GLYPH.branch, text: g.branch, bold: true, right: sync }),
+    k.item('git-branch', { lead: GLYPH.branch, text: g.branch, right: sync }),
     k.prop(
       'git-worktree',
       g.worktree.linked ? 'Worktree' : 'Checkout',
@@ -439,7 +429,7 @@ const gitSection = (els: TermElements, k: Kit, d: DesktopData, fold: Fold): Rend
     </Box>,
     ...files,
     g.fileCount > g.files.length ? k.note('git-files-more', `… ${g.fileCount - g.files.length} more`) : null,
-    <Box key="git-gap" height={k.space.block} />,
+    prs.length ? <Box key="git-gap" height={k.space.block} /> : null,
     ...prs,
   ])
 }
