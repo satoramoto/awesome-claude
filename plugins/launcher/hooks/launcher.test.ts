@@ -47,7 +47,7 @@ const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => 
   const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock, opened: [] }
   on('session.cwd', async () => ({ value: '/repo/app' }))
   on('ui.open', async (_$, e) => {
-    world.opened.push({ id: e.id, title: e.title })
+    world.opened.push({ id: e.id, title: e.title ?? '' })
     return { value: { isPlaced: true } }
   })
   on('ui.panes', async () => ({ value: [] }))
@@ -86,7 +86,7 @@ const launcher = ($: Engine, args = '') =>
 
 test('the pane opens on its own when a session starts', async ($, on) => {
   const { opened } = engine(on)
-  on('command.register', async () => ({ value: undefined }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/repo/app', surface: 'terminal', isInteractive: true })
   expect(opened).toEqual([{ id: 'launcher', title: 'Launcher' }])
@@ -110,6 +110,53 @@ test('/launcher opens a pane listing each configuration of launch.json, on the t
     await ui.unmount()
   }
 })
+
+const mountAt = ($: Engine, surface: 'terminal' | 'desktop', bodyColumns: number) =>
+  $.ui.mount({ plugin: 'launcher', surface, ...PANE, props: { ...PANE.props, bodyColumns } })
+
+test('on the terminal, the head line, a blank row, then each row with its kit status and actions, at every width', async ($, on) => {
+  engine(on, { crash: 'app' })
+  await launcher($)
+  for (const columns of [30, 40, 60, 100]) {
+    const ui = await mountAt($, 'terminal', columns)
+    expect(await ui.find({ type: 'Text', text: 'repo/.claude/launch.json' }), `head at ${columns}`).toBeDefined()
+    expect((await ui.find({ key: 'top' }))?.props.marginBottom, `the blank row under the head at ${columns}`).toBe(1)
+    // A stopped server's state is the kit's status: its glyph and word.
+    expect(await ui.find({ type: 'Text', text: '■ stopped' }), `stopped at ${columns}`).toBeDefined()
+    expect(await ui.find({ type: 'Button', text: 'Start' }), `Start at ${columns}`).toBeDefined()
+    // The one running elsewhere keeps its glyph and its address, the word only where it fits.
+    expect(await ui.find({ type: 'Text', text: '✓' }), `running elsewhere at ${columns}`).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: '6006' }), `its address at ${columns}`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '✓ running elsewhere' }), `the word at ${columns}`)[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    await ui.unmount()
+  }
+
+  // A crash unfolds its row: the exit code, then the output's tail, each line a dim note.
+  await launcher($, 'start app')
+  const ui = await mountAt($, 'terminal', 60)
+  expect(await ui.find({ type: 'Text', text: '✕ failed' })).toBeDefined()
+  const line = await ui.find({ type: 'Text', text: 'Error: Cannot find module vite' })
+  expect(line?.props.dimColor).toBe(true)
+  expect(line?.props.wrap).toBe('truncate')
+  await ui.unmount()
+})
+
+for (const columns of [30, 40]) {
+  test(`on the terminal at ${columns} columns, a starting row gives up its word and address before its Stop and Restart`, async ($, on) => {
+    const world = engine(on)
+    await launcher($)
+    const ui = await mountAt($, 'terminal', columns)
+    await ui.press({ key: 'start-app' })
+    expect(world.spawned).toHaveLength(1)
+    expect(await ui.find({ key: 'stop-app' })).toBeDefined()
+    expect(await ui.find({ key: 'restart-app' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '◐' })).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: '◐ starting' }))[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    await ui.press({ key: 'stop-app' })
+    expect(world.killed).toEqual(['app'])
+    await ui.unmount()
+  })
+}
 
 test('Start runs the configuration in the project root with PORT set; it shows running once the port answers, and Stop ends it', async ($, on) => {
   const world = engine(on)
