@@ -71,6 +71,43 @@ const FILLED: Record<string, string> = {
   fold: 'M10.896 2H8.75V.75a.75.75 0 0 0-1.5 0V2H5.104a.25.25 0 0 0-.177.427l2.896 2.896a.25.25 0 0 0 .354 0l2.896-2.896A.25.25 0 0 0 10.896 2ZM8.75 15.25a.75.75 0 0 1-1.5 0V14H5.104a.25.25 0 0 1-.177-.427l2.896-2.896a.25.25 0 0 1 .354 0l2.896 2.896a.25.25 0 0 1-.177.427H8.75v1.25Zm-6.5-6.5a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM6 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 6 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5ZM12 8a.75.75 0 0 1-.75.75h-.5a.75.75 0 0 1 0-1.5h.5A.75.75 0 0 1 12 8Zm2.25.75a.75.75 0 0 0 0-1.5h-.5a.75.75 0 0 0 0 1.5h.5Z',
 }
 
+/**
+ * Each named icon's glyph on the terminal: one cell wide, from Unicode blocks
+ * monospace fonts carry (geometric shapes, arrows, box drawing, a few dingbats),
+ * never one with an emoji presentation (⚠ ⚡ ◼ draw as emoji in some terminals).
+ * A GLYPH key is its own glyph.
+ */
+export const TERM_GLYPH: Readonly<Record<string, string>> = {
+  events: '↯',
+  'issue-opened': '◉',
+  comment: '≡',
+  'pr-open': GLYPH.pr,
+  'pr-merged': '◆',
+  'pr-closed': GLYPH.failed,
+  'pr-draft': GLYPH.pending,
+  file: '□',
+  'file-code': '□',
+  // A tree shows a folder by its fold: closed points right, open points down.
+  folder: '▸',
+  'folder-open': '▾',
+  'git-commit': '○',
+  'repo-push': GLYPH.up,
+  alert: '▲',
+  trash: '⌫',
+  search: '⌕',
+  sync: GLYPH.turns,
+  'arrow-up': GLYPH.up,
+  home: '⌂',
+  eye: '◎',
+  fold: '↕',
+}
+
+/**
+ * The glyph an icon draws as where there's no SVG: its terminal glyph, a
+ * one-character key as itself, else a dot (never the icon's name as text).
+ */
+export const glyphOf = (key: string): string => TERM_GLYPH[key] ?? ([...key].length === 1 ? key : '•')
+
 /** The SVG for an icon (a GLYPH or a name), stroked in `color`; null when the kit has none. */
 export const iconSvg = (key: string, color: string, px = ICON_PX): string | null => {
   const filled = FILLED[key]

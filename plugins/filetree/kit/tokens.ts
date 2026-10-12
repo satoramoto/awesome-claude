@@ -49,6 +49,36 @@ export const GRAY = { light: '#b9b9b6', mid: '#8a8a87', dark: '#62625f' } as con
 /** Slate under 75%, amber from 75%, red from 90%: colour only once it matters. */
 export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : INK)
 
+/*
+ * The terminal's colours. The terminal draws each status in the engine theme key
+ * that means the same thing, so it follows the person's terminal theme (dark,
+ * light, colour-blind, ANSI-only) instead of a fixed hex that may not read on it:
+ *
+ * - green  C.ok     → 'success'
+ * - red    C.bad    → 'error'
+ * - amber  C.warn   → 'warning'
+ * - blue   C.blue   → 'suggestion'
+ * - purple C.purple → 'merged'
+ * - the greys (MUTED, GRAY, TRACK) → the terminal's own dim, never a grey hex
+ * - slate, cyan, orchid and the RAMP shades have no key: drawn as their hex.
+ */
+export const THEME_KEY: Readonly<Record<string, string>> = {
+  [C.ok]: 'success',
+  [C.bad]: 'error',
+  [C.warn]: 'warning',
+  [C.blue]: 'suggestion',
+  [C.purple]: 'merged',
+}
+
+const QUIET = new Set<string>([MUTED, GRAY.light, GRAY.mid, GRAY.dark, TRACK])
+
+/**
+ * A token's Text props on the terminal: a status as its theme key, a grey as
+ * `dimColor`, anything else as given. Nothing for no colour.
+ */
+export const termInk = (color?: string): { color?: string; dimColor?: boolean } =>
+  !color ? {} : QUIET.has(color) ? { dimColor: true } : { color: THEME_KEY[color] ?? color }
+
 /** One glyph per idea, shared so mods read alike (the SVG icons are keyed by these). */
 export const GLYPH = {
   context: '◕',
@@ -70,3 +100,35 @@ export const GLYPH = {
   up: '↑',
   down: '↓',
 } as const
+
+/**
+ * A status's mark: one glyph and the colour that means it, the same on every
+ * surface. Draw it with `k.status(kind)`, never by hand, so a running task, a
+ * running server and a pending check all read alike.
+ */
+export const STATUS = {
+  running: { glyph: GLYPH.running, color: C.blue },
+  pending: { glyph: GLYPH.pending, color: C.blue },
+  done: { glyph: GLYPH.done, color: C.ok },
+  failed: { glyph: GLYPH.failed, color: C.bad },
+  warn: { glyph: '▲', color: C.warn },
+  merged: { glyph: '◆', color: C.purple },
+  stopped: { glyph: GLYPH.stopped, color: MUTED },
+  idle: { glyph: '○', color: MUTED },
+} as const
+
+export type StatusKind = keyof typeof STATUS
+
+/**
+ * Tree connectors for nested rows (agents under the agent that spawned them,
+ * files under folders), each two cells wide so levels indent on the grid.
+ */
+export const TREE = { tee: '├─', last: '└─', pipe: '│ ', blank: '  ' } as const
+
+/**
+ * A nested row's connector: for each level above it, a pipe where that level has
+ * more rows below, else blank; then a tee, or an elbow for the last child.
+ * Empty at the top level.
+ */
+export const treePrefix = (guides: boolean[], last: boolean, depth = guides.length + 1): string =>
+  depth === 0 ? '' : `${guides.map(g => (g ? TREE.pipe : TREE.blank)).join('')}${last ? TREE.last : TREE.tee}`

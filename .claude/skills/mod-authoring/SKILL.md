@@ -106,9 +106,12 @@ Import shared code by alias; the build rewrites it:
   indented), `summary` (a header's figures with dim units), `reading` (label,
   thin gauge, value, unit), `gauge`, `bar`, `legend`, `swatch`, `prop`, `rail`,
   `tile` (rounded fill for a multi-line list item), `icon`, `caption`, `axis`,
-  `scale`, `columns` (stacked chart), `pinned`, `perf`, `share`, `capped`, `rounded`.
-  Read each one's doc comment in `kit/ui.tsx` before using it.
-- `@kit/tokens`: `C` (status colours), `INK`, `RAMP`, `TRACK`, `MUTED`, `levelColor(pct)`, `GLYPH`.
+  `scale`, `columns` (stacked chart), `pinned`, `perf`, `share`, `capped`, `rounded`,
+  and the list pieces `item`, `status`, `tree`, `note`, `action`, `actions`; plus
+  `k.ink`, `k.space`, `k.edge`, `k.width` for the surface's colours and grid
+  (see "Terminal" below). Read each one's doc comment in `kit/ui.tsx` before using it.
+- `@kit/tokens`: `C` (status colours), `INK`, `RAMP`, `TRACK`, `MUTED`, `levelColor(pct)`, `GLYPH`,
+  `STATUS` (each status's glyph and colour), `TREE`/`treePrefix`, `THEME_KEY`/`termInk`.
 - `@kit/format`: `tokens`, `duration`, `short`, `ago`, `bytes`, `money`, `pct` (whole percent, as the desktop needs), `basename`.
 - `@kit/icons`: `iconSvg`, `ICON_PX`; stroked icons keyed by `GLYPH`, plus GitHub
   Octicons (`issue-opened`, `comment`, `pr-open`, `pr-merged`, `pr-closed`,
@@ -140,6 +143,108 @@ The look is an instrument inspector (think Premiere's Effect Controls):
 - Desktop limits (README, "Drawing for the desktop"): whole percentages only
   (`pct()`), `flexGrow` ≤ 10000, no Box `hover`, no `dashed` borders; SVG blurs
   when scaled, so keep it to small fixed-size pieces.
+
+## Terminal
+
+The terminal draws the same instrument inspector as the desktop, in cells. Get
+it by drawing with the kit on the terminal too: `kit(els, 'terminal', e.props.bodyColumns)`
+renders every component below for the terminal. Don't hand-roll rows of
+`█`/`░`, `■ label`, `●` statuses or `├─` trees; the kit has each one. Look at
+the result in Storybook's `Kit/Terminal*` stories, which draw each primitive at
+30, 40, 60 and 100 columns beside the desktop.
+
+### Grid
+
+- Whole cells only. Use `k.space` (`CELLS` on the terminal: pair 1, item 1,
+  group 2, block 1) and `k.edge` (left 2, right 0), never `SPACE` numbers, which
+  are fractions for the desktop and round unevenly in cells.
+- Indent: a section body starts 2 cells in (the fold-arrow gutter), under the
+  header's icon column. Each tree level adds 2 (`TREE` connectors are 2 wide).
+- Columns of a reading: label 10 | gauge (the rest) | figure 5 | unit 6, one cell
+  apart, figures right-aligned so the unit ends on the right edge.
+- Widths are exact: the kit knows the pane's columns, so bars, gauges, scales,
+  axes and chart columns are drawn to `k.width` (the section body's width,
+  columns − 2) by default. A reading or bar that sits deeper or outside a
+  section takes `width` explicitly.
+- Rows: sections stack with no blank row; an open section leaves one blank row
+  under its body. Separate a head line from the sections with one blank row.
+
+### Colour
+
+Each token keeps its one meaning; on the terminal it's drawn as the engine
+theme key with that meaning, so it follows the person's terminal theme (dark,
+light, colour-blind, ANSI-only). `k.ink(color)` (or `termInk` in `@kit/tokens`)
+gives the Text props; the kit's components apply it themselves.
+
+| Token | Means | Terminal |
+| --- | --- | --- |
+| `C.ok` | done well | `success` |
+| `C.bad` | failed, 90%+ | `error` |
+| `C.warn` | near a limit, 75%+ | `warning` |
+| `C.blue` | live, in progress | `suggestion` |
+| `C.purple` | merged | `merged` |
+| `MUTED`, `GRAY.*`, `TRACK` | labels, units, quiet marks | `dimColor` (the terminal's own dim) |
+| `INK`/slate, `RAMP`, cyan, orchid | quantity, shades within one chart | their hex |
+
+Text: values plain, labels and units dim, bold only titles (and a folder or
+current item in a list), uppercase only captions. Never a grey hex on the
+terminal: use dim.
+
+### Glyphs
+
+All one cell wide, from blocks monospace fonts carry; none with an emoji
+presentation (no ⚠ ⚡ ◼ ⬛ ✅).
+
+| Use | Glyphs |
+| --- | --- |
+| Fold | `▾` open, `▸` closed (`FOLD`), dim; the desktop keeps ▼ ▶︎ |
+| Gauge (`k.gauge`, a reading's) | `━` fill to the half cell `╸`, on a dim `─` rail |
+| Bar (`k.bar`) | `█` fill to the eighth cell `▏▎▍▌▋▊▉`, on a dim `░` track; a part ending mid-cell is drawn over the next part's colour |
+| Scale (`k.scale`) | dim `╵` ticks at 0/25/50/75/100%, `▴` marker |
+| Columns (`k.columns`) | `▁▂▃▄▅▆▇█`, rows tall, to the eighth of a row |
+| Legend key (`k.swatch`) | `■` (the bar it keys); `●` on the desktop |
+| Rail (`k.rail`) | `▎` |
+| Status (`STATUS`, `k.status`) | running `◐` blue, pending `◌` blue, done `✓` green, failed `✕` red, warn `▲` amber, merged `◆` purple, stopped `■` dim, idle `○` dim |
+| Tree (`TREE`, `k.tree`) | `├─` `└─` `│ ` |
+| Icons (`k.icon`, `TERM_GLYPH`) | issue `◉`, comment `≡`, PR open `⇡`, merged `◆`, closed `✕`, draft `◌`, file `□`, folder `▸`/`▾`, commit `○`, push/up `↑`, alert `▲`, trash `⌫`, search `⌕`, sync `↻`, home `⌂`, eye `◎`, fold `↕`, events `↯`; a GLYPH is itself; anything else `•` (never the icon's name) |
+
+### Each primitive on the terminal
+
+- `section`: `▾ ◔ Title ……… figures`. Dim arrow (a Button when `onToggle`, key
+  `toggle-<id>`), dim icon, bold title; the title keeps up to 12 cells, then it
+  and the figures truncate together. No band, rule or box.
+- `summary`: figures plain (or in their status colour), units dim, 2 apart; the
+  last truncates.
+- `reading`: as the grid above. Under 6 cells of gauge the label narrows to 6,
+  then the gauge is left out and the figures stay.
+- `gauge`, `bar`, `scale`, `axis`, `columns`: drawn to the exact width as above.
+- `legend`: as many columns as fit at 18 cells (one at 30 columns, two at 40+).
+- `prop`: dim label in the reading's label column, value left-aligned after it
+  and cut at the edge (the desktop puts the value on the right edge).
+- `item` (new): the list row every list uses: `[tree][lead] text  note ……… right`.
+  `lead` is a status kind, an icon key or an element; `right` holds dim figures
+  and elements (a status, `actions`). Use it for issues, tasks, PRs, files.
+- `status` (new): a status's glyph and word in its colour.
+- `note` (new): `empty` and `loading` lines dim; `error` a red `✕` and the message plain.
+- `action`/`actions` (new): plain Buttons; `quiet` ones dim at rest; `hotkey`
+  draws `1: Proceed`. Actions are a cluster on the right edge, 2 apart.
+- `pill`: the label's name in its colour; `tile`: a blank row above, no fill.
+- `perf`, `share`: a dim glyph and the figure; slow figures amber or red.
+
+### Do and don't
+
+- Do draw the terminal with the kit's components; a `renderTerminal` that only
+  calls `Text` with glyph strings is a sign something's missing from the kit:
+  add it there.
+- Do pass `bodyColumns` to `kit()`; everything sizes from it.
+- Do put `wrap="truncate"` and `minWidth={0}` on every text that can be long:
+  a terminal line never wraps.
+- Don't draw boxes, borders or backgrounds around content (the one exception is
+  a band that must stop the person, like blast-radius's hold: one round border
+  in the status colour).
+- Don't use hex greys or the desktop's `GRAY` tones on the terminal; use dim.
+- Don't mix glyph sets: one failed mark (`✕`, not `✗`), one running mark (`◐`).
+- Don't size bars from a guess (`columns - 20`); let the kit fill the width.
 
 ## Checks, in order
 

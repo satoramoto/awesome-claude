@@ -1,10 +1,14 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
 import { tokens } from '@kit/format'
+import { TERM_GLYPH } from '@kit/icons'
 import type { PerfRow } from '@kit/perf'
-import { C, GLYPH, INK, RAMP, levelColor } from '@kit/tokens'
+import { C, GLYPH, INK, RAMP, STATUS, levelColor } from '@kit/tokens'
+import type { StatusKind } from '@kit/tokens'
+import { kit } from '@kit/ui'
 
-import { h } from '../playground/render'
+import { CELL, draw, h } from '../playground/render'
+import type { Node, Surface } from '../playground/render'
 import { kitFor, show } from './show'
 
 type Args = Record<string, any>
@@ -140,6 +144,260 @@ const row = (name: string, avgMs: number, perMin: number): PerfRow => ({
   maxMs: avgMs * 2,
   busyMs: avgMs * perMin,
 })
+
+// ---- The terminal beside the desktop, at several widths ----
+
+/** The widths each sheet draws the terminal at, in cells. */
+const WIDTHS = [30, 40, 60, 100]
+
+type K = ReturnType<typeof kit>
+
+/**
+ * A sheet: what `build` draws, on the terminal at 30, 40, 60 and 100 columns,
+ * each beside the desktop (dark) at the same width. Whatever the toolbar says:
+ * the point is the comparison. Buttons redraw every copy.
+ */
+const sheet = (build: (k: K, surface: Surface, columns: number) => unknown): Story => ({
+  globals: { frame: 'pane', surface: 'terminal', columns: '110' },
+  render: (_, ctx) => {
+    const host = document.createElement('div')
+    host.style.cssText = 'display:flex;flex-direction:column;gap:18px;font:12px/1.4 -apple-system,system-ui,sans-serif;color:#8e8e93'
+    const paint = () => {
+      host.replaceChildren(
+        ...WIDTHS.map(w => {
+          const row = document.createElement('div')
+          row.style.cssText = 'display:flex;flex-wrap:wrap;gap:18px;align-items:flex-start'
+          for (const surface of ['terminal', 'desktop'] as const) {
+            const cell = document.createElement('div')
+            const label = Object.assign(document.createElement('div'), { textContent: `${surface} · ${w} columns` })
+            label.style.marginBottom = '4px'
+            const pane = document.createElement('div')
+            pane.className = `pane ${surface === 'terminal' ? 'terminal' : 'dark'}`
+            const body = document.createElement('div')
+            body.className = 'body'
+            body.style.width = surface === 'terminal' ? `${w}ch` : `${w * CELL.col}px`
+            body.style.overflow = 'hidden'
+            const Svg = surface === 'terminal' ? undefined : ('Svg' as any)
+            const k = kit({ Box: 'Box' as any, Text: 'Text' as any, Button: 'Button' as any, Svg }, surface, w)
+            const drawn = draw(build(k, surface, w) as Node, surface, fn => (fn(), paint()), { client: { site: `${ctx.id}-${surface}-${w}` } })
+            if (drawn) body.append(drawn)
+            pane.append(body)
+            cell.append(label, pane)
+            row.append(cell)
+          }
+          return row
+        }),
+      )
+    }
+    paint()
+    // The sheet draws its own panes: the toolbar's frame around it steps aside.
+    setTimeout(() => {
+      const frame = host.closest('.pane') as HTMLElement | null
+      const body = host.closest('.body') as HTMLElement | null
+      if (frame) frame.style.cssText = 'background:none;padding:0;display:block'
+      if (body) body.style.width = 'auto'
+    })
+    return host
+  },
+})
+
+/** Folds kept across redraws, per sheet. */
+const folded = new Set<string>(['servers'])
+const toggle = (id: string) => () => (folded.has(id) ? folded.delete(id) : folded.add(id))
+
+const AT = Date.UTC(2026, 9, 11, 12)
+
+/** Every primitive in one pane, as a mod would put them together. */
+export const TerminalInspector = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.item('head', { text: 'awesome-claude', dim: true, right: [k.summary([['2', 'running', C.ok], ['1', 'failed', C.bad]])] }),
+    h('Box', { height: 1 }),
+    k.section({
+      id: 'limits',
+      icon: GLYPH.limits,
+      title: 'Limits',
+      right: k.summary([['3', 'windows']]),
+      collapsed: folded.has('limits'),
+      onToggle: toggle('limits'),
+      children: [
+        k.reading('5h', { label: '5-hour', value: 42, max: 100, color: levelColor(42), figure: '42%', unit: '2h18' }),
+        k.reading('wk', { label: 'Weekly', value: 81, max: 100, color: levelColor(81), figure: '81%', unit: '3d4h' }),
+        k.reading('sp', { label: 'Spend', value: 93, max: 100, color: levelColor(93), figure: '93%', unit: '$46' }),
+      ],
+    }),
+    k.section({
+      id: 'context',
+      icon: GLYPH.context,
+      title: 'Context',
+      right: k.summary([['28%', 'of 1M']]),
+      collapsed: folded.has('context'),
+      onToggle: toggle('context'),
+      children: [
+        k.bar(
+          [
+            { value: 5_300, color: RAMP.slate[0] },
+            { value: 29_700, color: RAMP.slate[1] },
+            { value: 20_500, color: RAMP.slate[2] },
+            { value: 207_000, color: C.blue },
+          ],
+          1_000_000,
+        ),
+        k.scale(0.8),
+        k.legend('ctx', [
+          { label: 'System', color: RAMP.slate[0], figure: tokens(5_300) },
+          { label: 'Tools', color: RAMP.slate[1], figure: tokens(29_700) },
+          { label: 'MCP', color: RAMP.slate[2], figure: tokens(20_500) },
+          { label: 'Messages', color: C.blue, figure: tokens(207_000) },
+        ]),
+      ],
+    }),
+    k.section({
+      id: 'tasks',
+      icon: GLYPH.agents,
+      title: 'Tasks',
+      right: k.summary([['1', 'running', C.blue], ['2', 'done']]),
+      collapsed: folded.has('tasks'),
+      onToggle: toggle('tasks'),
+      children: [
+        k.item('t1', { lead: 'running', text: 'Restyle the terminal kit', note: '4m · 38k', right: ['2 sub'] }),
+        k.item('t2', { tree: k.tree([], false), lead: 'done', text: 'Survey the mods’ terminal code', note: '1m' }),
+        k.item('t3', { tree: k.tree([], true), lead: 'failed', text: 'Screenshot the stories at every width', note: '12s' }),
+        k.item('t4', { lead: 'pending', text: 'Write the Terminal section of mod-authoring', dim: true }),
+      ],
+    }),
+    k.section({
+      id: 'servers',
+      icon: GLYPH.layers,
+      title: 'storybook',
+      right: h(
+        'Box',
+        { flexDirection: 'row', gap: k.space.item, minWidth: 0, flexShrink: 1 },
+        k.status('running', 'running'),
+        k.actions('acts', [
+          { key: 'stop', label: 'Stop', onPress: () => undefined },
+          { key: 'restart', label: 'Restart', onPress: () => undefined, quiet: true },
+        ]),
+      ),
+      collapsed: folded.has('servers'),
+      onToggle: toggle('servers'),
+      children: [k.prop('cmd', 'command', 'bun run storybook --port 6006 --no-open --ci'), k.prop('cwd', 'cwd', '.'), k.prop('exit', 'exit', h('Text', k.ink(C.bad), '1'))],
+    }),
+    k.section({
+      id: 'activity',
+      icon: GLYPH.time,
+      title: 'Activity',
+      right: k.summary([['11', 'turns']]),
+      collapsed: folded.has('activity'),
+      onToggle: toggle('activity'),
+      children: [
+        k.columns(
+          Array.from({ length: 11 }, (_, i) => [
+            { value: 1 + (i % 3), color: RAMP.slate[1] },
+            { value: 3 + ((i * 3) % 9), color: C.blue },
+          ]),
+          { slots: 16, height: 2.5 },
+        ),
+      ],
+    }),
+    k.note('none', 'No open pull requests.'),
+    k.note('err', 'gh: could not reach api.github.com (HTTP 502)', 'error'),
+  ),
+)
+
+/** Readings: label, gauge, figure, unit, in fixed columns; the gauge gives way first. */
+export const TerminalReadings = sheet(k =>
+  k.section({
+    id: 'r',
+    icon: GLYPH.limits,
+    title: 'Readings',
+    right: k.summary([['0–100', '%']]),
+    children: [0, 3, 42, 74, 75, 89, 90, 100].map(v =>
+      k.reading(`r${v}`, { label: `at ${v}%`, value: v, max: 100, color: levelColor(v), figure: `${v}%`, unit: v >= 90 ? 'full' : 'ok', unitColor: v >= 90 ? C.bad : undefined }),
+    ),
+  }),
+)
+
+/** Bars and gauges at sub-cell precision, and a scale with its marker. */
+export const TerminalBars = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('gauge, by halves'),
+    ...[0.5, 1, 1.5, 2, 2.5, 50, 99].map(v => k.gauge(v, 100, INK)),
+    k.caption('bar, by eighths'),
+    ...[0.4, 1, 2, 3, 12.5, 50].map(v => k.bar([{ value: v, color: INK }], 100)),
+    k.caption('stacked'),
+    k.bar(
+      [
+        { value: 12, color: RAMP.slate[0] },
+        { value: 9, color: RAMP.slate[1] },
+        { value: 30, color: C.blue },
+        { value: 7, color: C.warn },
+      ],
+      100,
+    ),
+    k.scale(0.83),
+  ),
+)
+
+/** Lists: rows with a lead mark, tree connectors, notes, figures on the right; rails. */
+export const TerminalLists = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.item('a', { lead: 'issue-opened', leadColor: C.ok, text: 'The terminal versions of all our mods need love', right: ['#31', '2d'] }),
+    k.item('b', { lead: 'pr-open', leadColor: C.blue, text: 'kit: a terminal design system', note: 'dev', right: [k.status('pending', '2 pending')] }),
+    k.item('c', { lead: 'pr-merged', leadColor: C.purple, text: 'launcher: manage the dev servers', right: ['#27'] }),
+    k.item('d', { lead: 'folder-open', text: 'kit', bold: true }),
+    k.item('e', { tree: k.tree([], false), lead: 'file', text: 'tokens.ts', right: ['+48'] }),
+    k.item('f', { tree: k.tree([], false), lead: 'file', text: 'ui.tsx', right: ['+310'] }),
+    k.item('g', { tree: k.tree([], true), lead: 'folder', text: 'stories' }),
+    k.rail('rail', { color: C.blue, text: 'feat/terminal-kit', note: '3 ahead', figures: ['+412', '−96'] }),
+  ),
+)
+
+/** Every status mark and every icon's terminal glyph. */
+export const TerminalGlyphs = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.caption('statuses'),
+    ...(Object.keys(STATUS) as StatusKind[]).map(s => k.item(s, { lead: s, text: s })),
+    k.caption('icons'),
+    ...[...Object.values(GLYPH), ...Object.keys(TERM_GLYPH)].map(key => k.item(`i-${key}`, { lead: key, text: key })),
+  ),
+)
+
+/** Actions, empty, loading and error lines, a pill, a summary that runs out of room. */
+export const TerminalStates = sheet(k =>
+  h(
+    'Box',
+    { flexDirection: 'column' },
+    k.item('srv', {
+      lead: 'failed',
+      text: 'api',
+      right: [
+        h('Text', k.ink(C.bad), 'failed'),
+        k.actions('a', [
+          { key: 'start', label: 'Start', onPress: () => undefined },
+          { key: 'logs', label: 'Logs', onPress: () => undefined, quiet: true },
+        ]),
+      ],
+    }),
+    k.actions('answer', [
+      { key: 'proceed', label: 'Proceed', hotkey: '1', onPress: () => undefined },
+      { key: 'cancel', label: 'Cancel', hotkey: '2', onPress: () => undefined, quiet: true },
+    ]),
+    k.note('loading', 'Reading pull requests…', 'loading'),
+    k.note('empty', 'No subagents yet.'),
+    k.note('error', 'gh is not signed in: run gh auth login, then /issues again', 'error'),
+    h('Box', { flexDirection: 'row', gap: k.space.pair }, k.pill('p1', 'bug', '#d73a4a'), k.pill('p2', 'refined', C.ok)),
+    k.summary([['207k', 'tokens'], ['28%', 'of 1M'], ['3', 'failed', C.bad], ['12', 'agents']]),
+    k.perf({ sinceMs: 12 * 60_000, rows: [row('git', 38, 4), row('render', 2.1, 9), row('gh', 900, 3)] }),
+  ),
+)
 
 export const PerfFooter: Story = {
   args: { gitMs: 38, gitPerMin: 4, renderMs: 2.1, rendersPerMin: 9, ghMs: 900, ghPerMin: 3 },

@@ -1,10 +1,11 @@
 import type { RenderElement, RenderSurface } from 'claude-code'
 
 import { pct, short } from './format'
-import { ICON_PX, iconSvg } from './icons'
+import { ICON_PX, glyphOf, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, GRAY, MUTED, TRACK } from './tokens'
+import { C, GRAY, MUTED, STATUS, TRACK, termInk, treePrefix } from './tokens'
+import type { StatusKind } from './tokens'
 
 /**
  * The shared components. Each draws for the surface it is given: on the app
@@ -62,6 +63,43 @@ const FIG = 5
 const FIG2 = 6
 /** The terminal's fold-arrow gutter. */
 const GUTTER = 2
+
+/*
+ * The terminal's grid. A terminal lays out in whole cells, so it has its own
+ * spacing (a fraction would round differently row to row) and draws to an exact
+ * width in cells. `k.space` and `k.edge` give the grid for the kit's surface.
+ *
+ * - CELLS: pair 1 (glyph and figure), item 1 (columns of a reading), group 2
+ *   (figures in a summary, actions in a row), block 1 (a blank row).
+ * - Indent: a section body starts GUTTER (2) in, under the header's icon column;
+ *   each tree level indents 2 more.
+ * - Reading columns: LABEL (10) | gauge (the rest) | FIG (5) | FIG2 (6), one cell
+ *   apart; under MIN_GAUGE cells of gauge the label narrows, then the gauge goes.
+ */
+export const CELLS = { pair: 1, item: 1, group: 2, block: 1 } as const
+/** The fewest cells a terminal gauge is drawn in; narrower, the reading drops it and keeps its figures. */
+const MIN_GAUGE = 6
+/** The narrowest a terminal reading's label gets before its gauge is dropped. */
+const MIN_LABEL = 6
+
+/**
+ * The terminal's meter glyphs. A gauge is a heavy line on a light one, to half a
+ * cell (╸); a bar is solid blocks on a shaded track, to an eighth of a cell.
+ */
+export const METER = {
+  line: '━',
+  half: '╸',
+  rail: '─',
+  block: '█',
+  shade: '░',
+  /** Left eighths, 0 to 8: an index of n is n/8 of a cell filled from the left. */
+  eighths: ['', '▏', '▎', '▍', '▌', '▋', '▊', '▉', '█'],
+  /** Lower eighths, 0 to 8: for columns that rise. */
+  rise: [' ', '▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'],
+} as const
+
+/** The terminal's fold arrows: the small triangles, a cell each. */
+export const FOLD = { open: '▾', closed: '▸' } as const
 /** A band's height: one text row plus this above and below. */
 const BAND_PAD_Y = 0.3
 /** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
@@ -109,6 +147,85 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const terminal = surface === 'terminal'
   /** Text a step below the main text: one of the three greys on the app surfaces; plain dim in the terminal, whose greys are its own. */
   const tone = (level: keyof typeof GRAY) => (terminal ? { dimColor: true } : { color: GRAY[level] })
+  /** A token colour as Text props for this surface: on the terminal a status's theme key, a grey as dim. */
+  const ink = (color?: string): { color?: string; dimColor?: boolean } => (terminal ? termInk(color) : color ? { color } : {})
+  /** The grid for this surface: CELLS on the terminal, SPACE elsewhere. */
+  const space = terminal ? CELLS : SPACE
+  const edge = terminal ? { left: GUTTER, right: 0 } : EDGE
+  /** A section body's width in terminal cells: the pane's less the gutter. */
+  const body = Math.max(1, Math.floor(columns) - GUTTER)
+  const clamp01 = (x: number) => (Number.isFinite(x) ? Math.max(0, Math.min(1, x)) : 0)
+
+  /** A run of one glyph in one colour, as one Text. */
+  const run = (key: string, glyph: string, n: number, props: Record<string, unknown>) =>
+    n > 0 ? <Text key={key} {...props}>{glyph.repeat(n)}</Text> : null
+
+  /**
+   * A terminal gauge `width` cells wide: a heavy line to the half cell over a
+   * dim light rail. Anything above zero shows at least half a cell.
+   */
+  const lineMeter = (fraction: number, color: string, width: number): RenderElement => {
+    const w = Math.max(1, Math.floor(width))
+    let halves = Math.round(clamp01(fraction) * w * 2)
+    if (fraction > 0 && halves === 0) halves = 1
+    const full = Math.floor(halves / 2)
+    const half = halves % 2
+    return (
+      <Text>
+        {run('fill', METER.line, full, ink(color))}
+        {half ? <Text key="half" {...ink(color)}>{METER.half}</Text> : null}
+        {run('rail', METER.rail, w - full - half, { dimColor: true })}
+      </Text>
+    )
+  }
+
+  /**
+   * A terminal bar `width` cells wide: its parts in solid blocks to the eighth of
+   * a cell, the rest shaded track. Where a part ends inside a cell, the cell
+   * holds that part's eighths over the next part's colour.
+   */
+  const blockMeter = (parts: Part[], total: number, width: number): RenderElement => {
+    const w = Math.max(1, Math.floor(width))
+    const eighths = w * 8
+    // Each part's end in eighths, cumulative; anything above zero gets at least an eighth.
+    const ends: { end: number; color: string }[] = []
+    let at = 0
+    for (const p of parts) {
+      if (!(p.value > 0)) continue
+      at = Math.min(eighths, at + Math.max(1, Math.round((p.value / total) * eighths)))
+      ends.push({ end: at, color: p.color })
+    }
+    const partAt = (e: number) => ends.find(x => e < x.end)
+    const cells: { glyph: string; props: Record<string, unknown> }[] = []
+    for (let c = 0; c < w; c++) {
+      const from = c * 8
+      const here = partAt(from)
+      if (!here) {
+        cells.push({ glyph: METER.shade, props: { dimColor: true } })
+        continue
+      }
+      if (here.end >= from + 8) {
+        cells.push({ glyph: METER.block, props: ink(here.color) })
+        continue
+      }
+      const next = partAt(here.end)
+      const nextInk = next ? ink(next.color) : {}
+      cells.push({
+        glyph: METER.eighths[here.end - from]!,
+        props: { ...ink(here.color), ...(next && nextInk.color ? { backgroundColor: nextInk.color } : {}) },
+      })
+    }
+    // Runs of the same glyph and colour, as one Text each.
+    const runs: RenderElement[] = []
+    let i = 0
+    while (i < cells.length) {
+      let j = i + 1
+      while (j < cells.length && cells[j]!.glyph === cells[i]!.glyph && JSON.stringify(cells[j]!.props) === JSON.stringify(cells[i]!.props)) j++
+      runs.push(<Text key={`r${i}`} {...cells[i]!.props}>{cells[i]!.glyph.repeat(j - i)}</Text>)
+      i = j
+    }
+    return <Text>{runs}</Text>
+  }
 
   /*
    * Rounding on the desktop. Boxes have no corner radius; what rounds is:
@@ -128,11 +245,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * An icon at the kit's one size (ICON_PX square): the SVG drawing where the
-   * surface has SVG and the kit has one for `key`, else the glyph as text.
+   * surface has SVG and the kit has one for `key`, else its glyph as text
+   * (`glyphOf`: the terminal glyph for a named icon, never the name itself).
    */
   const icon = (key: string, color: string, px = ICON_PX): RenderElement => {
-    const source = Svg ? iconSvg(key, color, px) : null
-    if (!Svg || !source) return <Text color={color}>{key}</Text>
+    const source = Svg && !terminal ? iconSvg(key, color, px) : null
+    if (!Svg || !source) return <Text {...ink(color)}>{glyphOf(key)}</Text>
     return <Svg source={source} alt="icon" width={px} height={px} />
   }
 
@@ -203,23 +321,17 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' }, children)
     )
 
-  /** A thin bar: parts left to right out of `max`, the rest as track. */
+  /**
+   * A thin bar: parts left to right out of `max`, the rest as track. On the
+   * terminal `width` cells wide (a section body's width by default): solid blocks
+   * to the eighth of a cell; with `height` under 0.4, the gauge's heavy line instead.
+   */
   const bar = (parts: Part[], max: number, opts: { height?: number; width?: number } = {}): RenderElement => {
     const total = Math.max(max, parts.reduce((n, p) => n + Math.max(0, p.value), 0), 1)
     if (terminal) {
-      const w = opts.width ?? Math.max(4, columns - 20)
-      let used = 0
-      const cells = parts.map(p => {
-        const n = p.value > 0 ? Math.min(Math.max(1, Math.round((p.value / total) * w)), w - used) : 0
-        used += n
-        return <Text color={p.color}>{'█'.repeat(Math.max(0, n))}</Text>
-      })
-      return (
-        <Text>
-          {cells}
-          <Text dimColor>{'░'.repeat(Math.max(0, w - used))}</Text>
-        </Text>
-      )
+      const w = opts.width ?? body
+      if ((opts.height ?? BAR) < 0.4 && parts.length <= 1) return lineMeter((parts[0]?.value ?? 0) / total, parts[0]?.color ?? MUTED, w)
+      return blockMeter(parts, total, w)
     }
     // Grow factors out of 1000 (the desktop caps them at 10000): finer than a pixel at any width.
     // Rounded by SVG end caps around a flat middle. Borders can't round it: on the desktop a
@@ -251,40 +363,43 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    * terminal, the name in the label's colour.
    */
   const pill = (key: string, text: string, color: string) => {
-    if (terminal) return <Text key={key} color={color}>{text}</Text>
+    if (terminal) return <Text key={key} {...ink(color)}>{text}</Text>
     return rounded(mix(color, TILE, 0.22), { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t" color={mix(color, '#ffffff', 0.45)}>{text}</Text>])
   }
 
-  /** A small round dot of colour, a legend's key. */
-  const swatch = (color: string) => <Text color={color}>●</Text>
+  /** A small dot of colour, a legend's key: round on the app surfaces, a square block on the terminal (as the bar it keys). */
+  const swatch = (color: string) => <Text {...ink(color)}>{terminal ? '■' : '●'}</Text>
 
   /**
    * A legend in columns (two by default): each cell a dot, a dim label that
    * truncates, and its figure right-aligned at the cell's end. `note` is an
-   * optional coloured figure before it (a failure count).
+   * optional coloured figure before it (a failure count). On the terminal, as
+   * many columns as fit at 18 cells each (one at 30 columns).
    */
   const legend = (key: string, items: { label: string; color: string; figure: string; note?: string; noteColor?: string }[], maxCols?: number) => {
     // Few rows: two columns for up to four entries, three beyond. (The pane's reported
     // width in columns runs smaller than what the desktop draws, so it can't decide this.)
-    const cols = Math.min(maxCols ?? 3, items.length <= 4 ? 2 : 3, Math.max(1, items.length))
+    // The terminal's width is exact, so there it does.
+    const fit = terminal ? Math.max(1, Math.floor((body + CELLS.group) / (18 + CELLS.group))) : 3
+    const cols = Math.min(maxCols ?? 3, fit, items.length <= 4 ? 2 : 3, Math.max(1, items.length))
     const per = Math.ceil(items.length / cols)
     const groups = Array.from({ length: cols }, (_, c) => items.slice(c * per, c * per + per))
     return (
       // The legend spans the body (the desktop doesn't stretch a nested box), and its
       // columns share that width equally, as a bar's parts do: grow from zero width.
-      <Box key={key} flexDirection="row" width="100%" gap={SPACE.group}>
+      <Box key={key} flexDirection="row" width="100%" gap={space.group}>
         {groups.map((col, c) => (
           <Box key={`${key}-col-${c}`} flexGrow={1} width={0} flexDirection="column">
             {col.map(t => (
               // The full column's width (the desktop doesn't stretch it); the label gives way first.
-              <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%">
+              <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={space.pair} width="100%">
                 {swatch(t.color)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
                   <Text {...tone('light')} wrap="truncate">
                     {t.label}
                   </Text>
                 </Box>
-                {t.note ? <Text color={t.noteColor}>{t.note}</Text> : null}
+                {t.note ? <Text {...ink(t.noteColor)}>{t.note}</Text> : null}
                 <Text>{t.figure}</Text>
               </Box>
             ))}
@@ -306,10 +421,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     const shown = items.filter((x): x is [string, string?, string?] => Boolean(x))
     // Too wide for the band, the last item ends in an ellipsis and what's past it is cut.
     return (
-      <Box flexDirection="row" gap={SPACE.group} minWidth={0} flexShrink={1} overflow="hidden">
+      <Box flexDirection="row" gap={space.group} minWidth={0} flexShrink={1} overflow="hidden">
         {shown.map(([figure, unit, color], i) => (
           <Text key={`${figure}-${unit ?? ''}`} wrap={i === shown.length - 1 ? 'truncate' : undefined}>
-            <Text color={color}>{figure}</Text>
+            <Text {...ink(color)}>{figure}</Text>
             {unit ? <Text {...tone('mid')}>{` ${unit}`}</Text> : null}
           </Text>
         ))}
@@ -319,11 +434,30 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * Labels under a chart, each centred under its place: `at` from 0 to 1 across
-   * the chart's width (the first and last flush with its ends).
+   * the chart's width (the first and last flush with its ends). On the terminal
+   * one dim line `width` cells wide (a section body's by default; pass the
+   * chart's): a label that would touch the one before it is left out.
    */
-  const axis = (key: string, labels: { at: number; text: string }[]) => {
+  const axis = (key: string, labels: { at: number; text: string }[], width?: number) => {
     const row: RenderElement[] = []
     const sorted = [...labels].sort((a, b) => a.at - b.at)
+    if (terminal) {
+      const w = Math.max(1, Math.floor(width ?? body))
+      const line = Array.from({ length: w }, () => ' ')
+      let free = 0
+      for (const l of sorted) {
+        const text = [...l.text]
+        const start = Math.max(0, Math.min(w - text.length, Math.round(clamp01(l.at) * w - text.length / 2)))
+        if (start < free || start + text.length > w) continue
+        text.forEach((ch, i) => (line[start + i] = ch))
+        free = start + text.length + 1
+      }
+      return (
+        <Text key={key} dimColor>
+          {line.join('').trimEnd()}
+        </Text>
+      )
+    }
     sorted.forEach((l, i) => {
       // Each label owns the span halfway to its neighbours; the ends own up to the edge.
       const from = i === 0 ? 0 : (sorted[i - 1]!.at + l.at) / 2
@@ -344,10 +478,25 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * An instrument's scale under a bar: ticks at 0, 25, 50, 75 and 100%, and a
-   * marker where `mark` falls (a fraction of the scale), in `markColor`.
+   * marker where `mark` falls (a fraction of the scale), in `markColor`. On the
+   * terminal a row `width` cells wide (a section body's by default, as `bar`):
+   * dim ticks (╵) and the marker as ▴.
    */
-  const scale = (mark?: number, markColor: string = C.warn) => {
-    if (terminal) return null
+  const scale = (mark?: number, markColor: string = C.warn, width?: number) => {
+    if (terminal) {
+      const w = Math.max(2, Math.floor(width ?? body))
+      const row = Array.from({ length: w }, () => ' ')
+      for (const at of [0, 0.25, 0.5, 0.75, 1]) row[Math.round(at * (w - 1))] = '╵'
+      const m = mark === undefined ? -1 : Math.round(clamp01(mark) * (w - 1))
+      if (m < 0) return <Text dimColor>{row.join('')}</Text>
+      return (
+        <Text>
+          <Text dimColor>{row.slice(0, m).join('')}</Text>
+          <Text {...ink(markColor)}>▴</Text>
+          <Text dimColor>{row.slice(m + 1).join('')}</Text>
+        </Text>
+      )
+    }
     // Every tick at its place on the scale, the marker among them, gaps between sized by flex-grow.
     const marks: Array<{ at: number; color: string; height: number }> = [0, 0.25, 0.5, 0.75, 1].map(at => ({ at, color: TRACK, height: 0.3 }))
     if (mark !== undefined) marks.push({ at: Math.max(0, Math.min(1, mark)), color: markColor, height: 0.45 })
@@ -381,6 +530,52 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     onToggle?: () => void
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
+    if (terminal) {
+      // ▾ ◔ Title ………………… figures
+      //   body, two cells in, under the icon column
+      // No band and no rule: bold, the dim arrow and the indent make the hierarchy.
+      // Sections stack without blank rows; an open one leaves one under its body.
+      const arrow = s.collapsed ? FOLD.closed : FOLD.open
+      const toggle =
+        s.onToggle && Button ? (
+          <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
+        ) : (
+          <Text dimColor>{arrow}</Text>
+        )
+      const lead = GUTTER + (s.icon ? 2 : 0)
+      return (
+        <Box key={`section-${s.id}`} flexDirection="column" marginBottom={s.collapsed ? 0 : 1}>
+          <Box flexDirection="row" justifyContent="space-between" gap={CELLS.group}>
+            {/* The title keeps up to 12 cells of itself; past that, it and the figures give way together. */}
+            <Box key="title" flexDirection="row" flexShrink={1} minWidth={Math.min(lead + [...s.title].length, lead + 12)}>
+              <Box width={GUTTER} flexShrink={0}>
+                {toggle}
+              </Box>
+              {s.icon ? (
+                <Box width={2} flexShrink={0}>
+                  {icon(s.icon, MUTED)}
+                </Box>
+              ) : null}
+              <Box flexShrink={1} minWidth={0}>
+                <Text wrap="truncate" bold>
+                  {s.title}
+                </Text>
+              </Box>
+            </Box>
+            {s.right ? (
+              <Box key="right" flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
+                {s.right}
+              </Box>
+            ) : null}
+          </Box>
+          {s.collapsed ? null : (
+            <Box flexDirection="column" paddingLeft={GUTTER}>
+              {s.children}
+            </Box>
+          )}
+        </Box>
+      )
+    }
     const arrow = fold(Boolean(s.collapsed))
     const toggle =
       s.onToggle && Button ? (
@@ -435,8 +630,25 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     )
   }
 
-  /** A property row: the dim label on the left edge, the value right-aligned on the right edge. */
-  const prop = (key: string, label: string, value: RenderElement | string) => (
+  /**
+   * A property row: the dim label on the left edge, the value right-aligned on the
+   * right edge. On the terminal, as an inspector lists them: the label in the
+   * reading's label column (LABEL cells, wider labels keep their length), the
+   * value after it, left-aligned and cut at the edge.
+   */
+  const prop = (key: string, label: string, value: RenderElement | string) =>
+    terminal ? (
+      <Box key={key} flexDirection="row" gap={CELLS.item}>
+        <Box width={Math.min(Math.max(LABEL, [...label].length), 16)} flexShrink={0}>
+          <Text dimColor wrap="truncate">
+            {label}
+          </Text>
+        </Box>
+        <Box minWidth={0} flexShrink={1} flexGrow={1}>
+          {typeof value === 'string' ? <Text wrap="truncate">{value}</Text> : value}
+        </Box>
+      </Box>
+    ) : (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
       <Box minWidth={0} flexShrink={1}>
         <Text {...tone('mid')} wrap="truncate">
@@ -450,16 +662,53 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   )
 
   /**
-   * A thin rounded gauge, `value` of `max`: a one-part bar.
+   * A thin rounded gauge, `value` of `max`: a one-part bar. On the terminal a
+   * heavy line on a light rail, `width` cells (a section body's by default).
    */
-  const gauge = (value: number, max: number, color: string) => (terminal ? bar([{ value, color }], max) : bar([{ value, color }], max, { height: 0.3 }))
+  const gauge = (value: number, max: number, color: string, opts: { width?: number } = {}) =>
+    terminal ? lineMeter(value / Math.max(max, 1e-9), color, opts.width ?? body) : bar([{ value, color }], max, { height: 0.3 })
 
   /**
    * A reading, as an instrument shows one: a dim label, a thin gauge, the value
    * and a dim unit or note, in fixed columns (LABEL | gauge | FIG | FIG2), both
    * figures right-aligned so the last ends on the inset like the header's.
+   *
+   * On the terminal the row is `width` cells (a section body's by default; pass it
+   * when the reading sits deeper or outside a section): the gauge takes what the
+   * columns leave; under 6 cells the label narrows, then the gauge is left out.
    */
-  const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
+  const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number; width?: number }) => {
+    if (terminal) {
+      const w = Math.floor(r.width ?? body)
+      const fixed = FIG + FIG2 + 3 * CELLS.item
+      let label = r.labelWidth ?? LABEL
+      let room = w - label - fixed
+      if (room < MIN_GAUGE) {
+        label = Math.max(MIN_LABEL, label - (MIN_GAUGE - room))
+        room = w - label - fixed
+      }
+      const shown = room >= MIN_GAUGE
+      if (!shown) label = Math.max(1, w - FIG - FIG2 - 2 * CELLS.item)
+      return (
+        <Box key={key} flexDirection="row" gap={CELLS.item}>
+          <Box width={label} flexShrink={0}>
+            <Text dimColor wrap="truncate">
+              {r.label}
+            </Text>
+          </Box>
+          {shown ? lineMeter(r.value / Math.max(r.max, 1e-9), r.color, room) : null}
+          <Box width={FIG} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+            <Text wrap="truncate">{r.figure}</Text>
+          </Box>
+          <Box width={FIG2} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+            <Text {...(r.unitColor ? ink(r.unitColor) : { dimColor: true })} wrap="truncate">
+              {r.unit ?? ''}
+            </Text>
+          </Box>
+        </Box>
+      )
+    }
+    return (
     <Box key={key} flexDirection="row" alignItems="center" gap={SPACE.item}>
       <Box width={r.labelWidth ?? LABEL} flexShrink={0}>
         <Text {...tone('light')} wrap="truncate">
@@ -476,19 +725,22 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         </Text>
       </Box>
     </Box>
-  )
+    )
+  }
 
   /** A row with a slim coloured rail on the left: a name, a dim note, a figure on the right. */
   const rail = (key: string, r: { color: string; text: string; note?: string; figures?: string[]; indent?: number }) => (
-    <Box key={key} flexDirection="row" gap={terminal ? 1 : 0.75} paddingLeft={r.indent ?? 0}>
-      {terminal ? <Text color={r.color}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
-      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} flexShrink={1} minWidth={0} gap={SPACE.item}>
-        <Text wrap="truncate">
-          {r.text}
-          {r.note ? <Text {...tone('mid')}>{`  ${r.note}`}</Text> : null}
-        </Text>
+    <Box key={key} flexDirection="row" gap={terminal ? CELLS.pair : 0.75} paddingLeft={r.indent ?? 0}>
+      {terminal ? <Text {...ink(r.color)}>▎</Text> : <Box width={0.25} backgroundColor={r.color} flexShrink={0} />}
+      <Box flexDirection="row" justifyContent="space-between" flexGrow={1} flexShrink={1} minWidth={0} gap={space.item}>
+        <Box flexShrink={1} minWidth={0}>
+          <Text wrap="truncate">
+            {r.text}
+            {r.note ? <Text {...tone('mid')}>{`  ${r.note}`}</Text> : null}
+          </Text>
+        </Box>
         {/* Figures in fixed right-aligned columns, so they line up row to row. */}
-        <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
+        <Box flexDirection="row" gap={space.item} flexShrink={0}>
           {(r.figures ?? []).map((f, i) => (
             <Box key={`f${i}`} width={FIG} flexDirection="row" justifyContent="flex-end">
               <Text {...tone('mid')}>{f}</Text>
@@ -499,18 +751,50 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  /** Stacked columns, one per item, scaled to the tallest; `slots` keeps a fixed column width. */
-  const columnsChart = (items: Part[][], opts: { height?: number; slots?: number } = {}) => {
+  /**
+   * Stacked columns, one per item, scaled to the tallest; `slots` keeps a fixed
+   * column width. On the terminal `height` rows tall (2.5 rounds to 3), to the
+   * eighth of a row, each slot as wide as `width` (a section body's) allows with a
+   * cell between; each cell takes the colour of the part at its middle.
+   */
+  const columnsChart = (items: Part[][], opts: { height?: number; slots?: number; width?: number } = {}) => {
     const total = (s: Part[]) => s.reduce((n, p) => n + Math.max(0, p.value), 0)
     const max = Math.max(1, ...items.map(total))
     if (terminal) {
-      const ramp = ' ▁▂▃▄▅▆▇█'
+      const rows = Math.max(1, Math.round(opts.height ?? 2.5))
+      const slots = Math.max(items.length, opts.slots ?? 0, 1)
+      const per = Math.max(1, Math.floor((opts.width ?? body) / slots))
+      const wide = per >= 3 ? per - 1 : per
+      const gap = per - wide
+      // Each column's height in eighths of a row, and the part at a given eighth.
+      const tall = items.map(s => (total(s) > 0 ? Math.max(1, Math.round((total(s) / max) * rows * 8)) : 0))
+      const partAt = (s: Part[], i: number, e: number) => {
+        let acc = 0
+        const t = tall[i]!
+        for (const p of s.filter(x => x.value > 0)) {
+          acc += (p.value / total(s)) * t
+          if (e < acc) return p
+        }
+        return s.filter(x => x.value > 0).pop()
+      }
+      const lines: RenderElement[] = []
+      for (let r = rows - 1; r >= 0; r--) {
+        const cells = items.map((s, i) => {
+          const level = Math.max(0, Math.min(8, tall[i]! - r * 8))
+          const part = level > 0 ? partAt(s, i, r * 8 + level / 2) : undefined
+          return (
+            <Text key={`c${i}`} {...ink(part?.color ?? MUTED)}>
+              {(METER.rise[level] ?? ' ').repeat(wide)}
+              {' '.repeat(gap)}
+            </Text>
+          )
+        })
+        lines.push(<Text key={`row${r}`}>{cells}</Text>)
+      }
       return (
-        <Text>
-          {items.map(s => (
-            <Text color={s.find(p => p.value > 0)?.color ?? MUTED}>{ramp[Math.round((total(s) / max) * 8)]}</Text>
-          ))}
-        </Text>
+        <Box flexDirection="column" width={per * slots} flexShrink={0}>
+          {lines}
+        </Box>
       )
     }
     // Columns fill from the left, so column i is centred at (i + 0.5) / slots: where `axis` puts its label.
@@ -576,10 +860,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
    */
   const share = (key: string, glyph: string, ours: string, whole: string, hot?: string) => (
     // The glyph in its own box: the desktop drops a space at the start of a Text.
-    <Box key={key} flexDirection="row" gap={SPACE.pair} flexShrink={1}>
+    <Box key={key} flexDirection="row" gap={space.pair} flexShrink={1}>
       <Text {...tone('mid')}>{glyph}</Text>
       <Text wrap="truncate">
-        <Text color={hot}>{ours}</Text>
+        <Text {...ink(hot)}>{ours}</Text>
         {whole ? <Text {...tone('dark')}>{`/${whole}`}</Text> : null}
       </Text>
     </Box>
@@ -600,7 +884,168 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, pill, section, columns: columnsChart, perf: perfFooter }
+  /**
+   * A status's mark (STATUS in `@kit/tokens`): its glyph in its colour, and the
+   * word after it in the same colour when given (`✓ checks pass`, `◐ running`).
+   */
+  const status = (kind: StatusKind, label?: string, key?: string) => {
+    const s = STATUS[kind]
+    return (
+      <Text key={key} {...ink(s.color)} wrap="truncate">
+        {label ? `${s.glyph} ${label}` : s.glyph}
+      </Text>
+    )
+  }
+
+  /**
+   * One row of a list, the shape every list in the mods takes:
+   *
+   *   [tree][lead] text  note ……………… right figures and actions
+   *
+   * - `tree`: a connector from `treePrefix` (dim), for nested rows;
+   * - `lead`: a status kind, an icon key (drawn in `leadColor`, muted by default)
+   *   or an element, in a two-cell column so the text starts on the grid;
+   * - `text` truncates first, `note` (dim) runs on after it;
+   * - `right`: figures (strings, dim) and elements, one cluster on the right edge.
+   */
+  const item = (
+    key: string,
+    r: {
+      text: string
+      note?: string
+      lead?: StatusKind | string | RenderElement | null
+      leadColor?: string
+      tree?: string
+      textColor?: string
+      bold?: boolean
+      dim?: boolean
+      indent?: number
+      right?: (RenderElement | string | null | false)[]
+    },
+  ) => {
+    const lead =
+      r.lead == null
+        ? null
+        : typeof r.lead === 'string'
+          ? r.lead in STATUS
+            ? status(r.lead as StatusKind)
+            : icon(r.lead, r.leadColor ?? MUTED)
+          : r.lead
+    const right = (r.right ?? []).filter((x): x is RenderElement | string => Boolean(x))
+    return (
+      <Box key={key} flexDirection="row" justifyContent="space-between" gap={space.item} paddingLeft={r.indent ?? 0}>
+        <Box flexDirection="row" flexShrink={1} minWidth={0} alignItems="center">
+          {r.tree ? (
+            <Box flexShrink={0}>
+              <Text dimColor>{r.tree}</Text>
+            </Box>
+          ) : null}
+          {lead ? (
+            <Box width={2} flexShrink={0} flexDirection="row" alignItems="center">
+              {lead}
+            </Box>
+          ) : null}
+          <Box flexShrink={1} minWidth={0}>
+            <Text wrap="truncate" bold={r.bold} {...(r.dim ? tone('mid') : ink(r.textColor))}>
+              {r.text}
+              {r.note ? <Text {...tone('mid')} bold={false}>{`  ${r.note}`}</Text> : null}
+            </Text>
+          </Box>
+        </Box>
+        {right.length ? (
+          <Box flexDirection="row" gap={space.item} flexShrink={0} alignItems="center">
+            {right.map((x, i) => (typeof x === 'string' ? <Text key={`r${i}`} {...tone('mid')}>{x}</Text> : x))}
+          </Box>
+        ) : null}
+      </Box>
+    )
+  }
+
+  /** A tree connector (`TREE` in `@kit/tokens`) for a row at a depth: see `treePrefix`. */
+  const tree = (guides: boolean[], last: boolean, depth = guides.length + 1) => treePrefix(guides, last, depth)
+
+  /**
+   * A line that stands in for content: `empty` (nothing to list) and `loading`
+   * (reading…) dim, `error` a red ✕ (the alert icon on the app surfaces) and the
+   * message plain. Always one line, cut at the edge.
+   */
+  const note = (key: string, text: string, kind: 'empty' | 'loading' | 'error' = 'empty') => {
+    if (kind !== 'error') {
+      return (
+        <Box key={key} flexDirection="row" minWidth={0}>
+          <Text {...tone('mid')} wrap="truncate">
+            {text}
+          </Text>
+        </Box>
+      )
+    }
+    return (
+      <Box key={key} flexDirection="row" gap={space.pair} minWidth={0} alignItems="center">
+        <Box flexShrink={0}>{terminal ? <Text {...ink(C.bad)}>{STATUS.failed.glyph}</Text> : icon('alert', C.bad)}</Box>
+        <Box flexShrink={1} minWidth={0}>
+          <Text wrap="truncate">{text}</Text>
+        </Box>
+      </Box>
+    )
+  }
+
+  /** One action: a plain button; `quiet` (secondary) dim at rest; `hotkey` a digit or letter that presses it. */
+  type Action = { key: string; label: string; onPress: () => void; quiet?: boolean; hotkey?: string }
+  const action = (a: Action): RenderElement => {
+    if (!Button) return <Text key={a.key} {...(a.quiet ? tone('mid') : {})}>{a.label}</Text>
+    const hot = a.hotkey ? { hotkey: a.hotkey } : {}
+    if (terminal) return <Button key={a.key} plain label={a.label} {...(a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress} />
+    return a.quiet ? (
+      <Button key={a.key} plain {...hot} onPress={a.onPress}>
+        <Text color={GRAY.mid}>{a.label}</Text>
+      </Button>
+    ) : (
+      <Button key={a.key} plain label={a.label} {...hot} onPress={a.onPress} />
+    )
+  }
+
+  /** A row's actions, one cluster: main ones first, quiet ones after, `space.group` apart on the terminal. */
+  const actions = (key: string, list: (Action | null | false)[]) => (
+    <Box key={key} flexDirection="row" gap={terminal ? CELLS.group : SPACE.item} flexShrink={0} alignItems="center">
+      {list.filter((a): a is Action => Boolean(a)).map(action)}
+    </Box>
+  )
+
+  return {
+    icon,
+    pinned,
+    share,
+    tile,
+    bar,
+    capped,
+    rounded,
+    scale,
+    axis,
+    legend,
+    caption,
+    summary,
+    gauge,
+    reading,
+    rail,
+    prop,
+    swatch,
+    pill,
+    section,
+    columns: columnsChart,
+    perf: perfFooter,
+    status,
+    item,
+    tree,
+    note,
+    action,
+    actions,
+    ink,
+    space,
+    edge,
+    /** A section body's width in cells on the terminal: what a bar or gauge spans by default. */
+    width: body,
+    terminal,
+  }
 }
 
 export type Kit = ReturnType<typeof kit>
