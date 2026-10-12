@@ -4,7 +4,7 @@ import { pct, short } from './format'
 import { ICON_PX, iconSvg } from './icons'
 import { ms } from './perf'
 import type { PerfRow, PerfSnapshot } from './perf'
-import { C, MUTED, TRACK } from './tokens'
+import { C, GRAY, MUTED, TRACK } from './tokens'
 
 /**
  * The shared components. Each draws for the surface it is given: on the app
@@ -46,7 +46,7 @@ const ROW_PX = 8.5 / 0.45
  * - BODY_INDENT: a body's left edge, just past the header's fold arrow.
  * - Reading columns: LABEL | gauge (grows) | FIG right-aligned | FIG2 right-aligned.
  */
-export const SPACE = { pair: 0.5, item: 1, group: 2, block: 0.5 } as const
+export const SPACE = { pair: 0.75, item: 1.25, group: 2, block: 0.8 } as const
 const INSET = 1
 const BODY_INDENT = 1.6
 /**
@@ -63,7 +63,10 @@ const FIG2 = 6
 /** The terminal's fold-arrow gutter. */
 const GUTTER = 2
 /** A band's height: one text row plus this above and below. */
-const BAND_PAD_Y = 0.2
+const BAND_PAD_Y = 0.3
+/** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
+const TILE_PAD_Y = 0.6
+const TILE_ROW_GAP = 0.2
 
 /**
  * The fold arrow: full-size triangles, since text can't be sized. U+FE0E keeps
@@ -81,6 +84,22 @@ const HEAD = '#272727'
 /** A tile's fill: between the pane and a header band. Solid, for the same reason as HEAD. */
 const TILE = '#222222'
 
+/** `a` blended with `b`: `share` of `a` (0 to 1) over `b`, as solid #rrggbb. Takes #rgb or #rrggbb; anything else comes back as `a`. */
+const mix = (a: string, b: string, share: number) => {
+  const rgb = (c: string) => {
+    const hex = c.replace('#', '')
+    const full = hex.length === 3 ? [...hex].map(x => x + x).join('') : hex
+    return /^[0-9a-f]{6}$/i.test(full) ? [0, 2, 4].map(i => parseInt(full.slice(i, i + 2), 16)) : null
+  }
+  const x = rgb(a)
+  const y = rgb(b)
+  if (!x || !y) return a
+  return `#${x.map((v, i) => Math.round(v * share + y[i]! * (1 - share)).toString(16).padStart(2, '0')).join('')}`
+}
+
+/** A selected tile's fill: the tile's step, tinted towards the blue that marks what's live. Solid, as TILE. */
+const TILE_SELECTED = '#232a3c'
+
 
 /** The debug footer's glyph for each job the mods time; all muted, a slow job's figure turns amber or red. */
 const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resources: '◎', usage: '◕', git: '⎇', gh: '⇡' }
@@ -88,6 +107,8 @@ const PERF_GLYPH: Record<string, string> = { render: '▣', tick: '↻', resourc
 export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
+  /** Text a step below the main text: one of the three greys on the app surfaces; plain dim in the terminal, whose greys are its own. */
+  const tone = (level: keyof typeof GRAY) => (terminal ? { dimColor: true } : { color: GRAY[level] })
 
   /*
    * Rounding on the desktop. Boxes have no corner radius; what rounds is:
@@ -170,15 +191,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
 
   /**
    * A tile: one item of a list that has several lines (a branch and its PR), in its
-   * own rounded fill a step lighter than the pane, so items read as units.
+   * own rounded fill a step lighter than the pane, so items read as units. A
+   * `selected` tile takes a blue-tinted fill: picked, without an outline.
    */
-  const tile = (key: string, children: (RenderElement | null)[]) =>
+  const tile = (key: string, children: (RenderElement | null)[], opts: { selected?: boolean } = {}) =>
     terminal ? (
       <Box key={key} flexDirection="column" marginTop={1}>
         {children}
       </Box>
     ) : (
-      rounded(TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: 0.3, width: '100%' }, children)
+      rounded(opts.selected ? TILE_SELECTED : TILE, { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' }, children)
     )
 
   /** A thin bar: parts left to right out of `max`, the rest as track. */
@@ -222,6 +244,17 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     return capped(height, first, last, flat)
   }
 
+  /**
+   * A label as GitHub draws one on a dark page: a rounded chip filled with the
+   * label's colour, faint, and its name in a lighter tint of the same colour.
+   * Blended to solid colours over the tile (rounding needs a solid fill). In the
+   * terminal, the name in the label's colour.
+   */
+  const pill = (key: string, text: string, color: string) => {
+    if (terminal) return <Text key={key} color={color}>{text}</Text>
+    return rounded(mix(color, TILE, 0.22), { key, flexDirection: 'row', paddingX: 0.6, flexShrink: 0 }, [<Text key="t" color={mix(color, '#ffffff', 0.45)}>{text}</Text>])
+  }
+
   /** A small round dot of colour, a legend's key. */
   const swatch = (color: string) => <Text color={color}>●</Text>
 
@@ -247,7 +280,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
               <Box key={`${key}-${t.label}`} flexDirection="row" alignItems="center" gap={SPACE.pair} width="100%">
                 {swatch(t.color)}
                 <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                  <Text dimColor wrap="truncate">
+                  <Text {...tone('light')} wrap="truncate">
                     {t.label}
                   </Text>
                 </Box>
@@ -262,7 +295,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   }
 
   /** A caption: dim uppercase, for a chart's or a column's heading. The only uppercase besides a state word. */
-  const caption = (text: string) => <Text dimColor>{text.toUpperCase()}</Text>
+  const caption = (text: string) => <Text {...tone('mid')}>{text.toUpperCase()}</Text>
 
   /**
    * A header's right side, one form for every section: figures, each followed by
@@ -277,7 +310,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         {shown.map(([figure, unit, color], i) => (
           <Text key={`${figure}-${unit ?? ''}`} wrap={i === shown.length - 1 ? 'truncate' : undefined}>
             <Text color={color}>{figure}</Text>
-            {unit ? <Text dimColor>{` ${unit}`}</Text> : null}
+            {unit ? <Text {...tone('mid')}>{` ${unit}`}</Text> : null}
           </Text>
         ))}
       </Box>
@@ -298,7 +331,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       const align = i === 0 && l.at === 0 ? 'flex-start' : i === sorted.length - 1 && l.at === 1 ? 'flex-end' : 'center'
       row.push(
         <Box key={`${key}-${i}`} flexGrow={Math.max(1, Math.round((to - from) * 1000))} width={0} flexDirection="row" justifyContent={align}>
-          <Text dimColor>{l.text}</Text>
+          <Text {...tone('dark')}>{l.text}</Text>
         </Box>,
       )
     })
@@ -406,7 +439,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const prop = (key: string, label: string, value: RenderElement | string) => (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
       <Box minWidth={0} flexShrink={1}>
-        <Text dimColor wrap="truncate">
+        <Text {...tone('mid')} wrap="truncate">
           {label}
         </Text>
       </Box>
@@ -429,7 +462,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const reading = (key: string, r: { label: string; value: number; max: number; color: string; figure: string; unit?: string; unitColor?: string; labelWidth?: number }) => (
     <Box key={key} flexDirection="row" alignItems="center" gap={SPACE.item}>
       <Box width={r.labelWidth ?? LABEL} flexShrink={0}>
-        <Text dimColor wrap="truncate">
+        <Text {...tone('light')} wrap="truncate">
           {r.label}
         </Text>
       </Box>
@@ -438,7 +471,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
         <Text>{r.figure}</Text>
       </Box>
       <Box width={FIG2} flexShrink={0} flexDirection="row" justifyContent="flex-end">
-        <Text color={r.unitColor} dimColor={!r.unitColor}>
+        <Text {...(r.unitColor ? { color: r.unitColor } : tone('mid'))}>
           {r.unit ?? ''}
         </Text>
       </Box>
@@ -452,13 +485,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
       <Box flexDirection="row" justifyContent="space-between" flexGrow={1} flexShrink={1} minWidth={0} gap={SPACE.item}>
         <Text wrap="truncate">
           {r.text}
-          {r.note ? <Text dimColor>{`  ${r.note}`}</Text> : null}
+          {r.note ? <Text {...tone('mid')}>{`  ${r.note}`}</Text> : null}
         </Text>
         {/* Figures in fixed right-aligned columns, so they line up row to row. */}
         <Box flexDirection="row" gap={SPACE.item} flexShrink={0}>
           {(r.figures ?? []).map((f, i) => (
             <Box key={`f${i}`} width={FIG} flexDirection="row" justifyContent="flex-end">
-              <Text dimColor>{f}</Text>
+              <Text {...tone('mid')}>{f}</Text>
             </Box>
           ))}
         </Box>
@@ -544,10 +577,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
   const share = (key: string, glyph: string, ours: string, whole: string, hot?: string) => (
     // The glyph in its own box: the desktop drops a space at the start of a Text.
     <Box key={key} flexDirection="row" gap={SPACE.pair} flexShrink={1}>
-      <Text color={MUTED}>{glyph}</Text>
+      <Text {...tone('mid')}>{glyph}</Text>
       <Text wrap="truncate">
         <Text color={hot}>{ours}</Text>
-        {whole ? <Text dimColor>{`/${whole}`}</Text> : null}
+        {whole ? <Text {...tone('dark')}>{`/${whole}`}</Text> : null}
       </Text>
     </Box>
   )
@@ -567,7 +600,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40) => {
     </Box>
   )
 
-  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, section, columns: columnsChart, perf: perfFooter }
+  return { icon, pinned, share, tile, bar, capped, rounded, scale, axis, legend, caption, summary, gauge, reading, rail, prop, swatch, pill, section, columns: columnsChart, perf: perfFooter }
 }
 
 export type Kit = ReturnType<typeof kit>

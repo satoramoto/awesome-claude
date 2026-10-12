@@ -1,0 +1,7 @@
+{
+  "name": "issues",
+  "version": "0.1.0",
+  "description": "A pane listing the open GitHub issues of the session's repository",
+  "author": { "name": "Ryan Gavin" },
+  "types": "./types/index.d.ts"
+}

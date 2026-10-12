@@ -1,0 +1,6 @@
+{
+  "name": "lab",
+  "version": "0.1.0",
+  "description": "Experiments that probe what the rendering engine accepts: SVG, animation, interaction and every element, each in its own pane",
+  "author": { "name": "Ryan Gavin" }
+}

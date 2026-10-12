@@ -37,6 +37,15 @@ export const TRACK = 'rgba(128,128,128,0.18)'
 /** Text, icons and marks that should recede. */
 export const MUTED = '#8e8e93'
 
+/**
+ * Three greys for text below the main text, each a step quieter, so a row can say
+ * what matters most without colour (tuned for the desktop's dark pane):
+ * - light: secondary text a reader still reads (a linked PR's title, a byline);
+ * - mid: metadata scanned past (ages, counts, secondary actions);
+ * - dark: the quietest marks (an icon beside a count, a heading over a list).
+ */
+export const GRAY = { light: '#b9b9b6', mid: '#8a8a87', dark: '#62625f' } as const
+
 /** Slate under 75%, amber from 75%, red from 90%: colour only once it matters. */
 export const levelColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : INK)
 
