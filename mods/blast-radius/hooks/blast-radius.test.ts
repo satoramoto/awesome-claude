@@ -8,6 +8,8 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine, MockClock } from 'claude-code/testing'
 
+import { C } from '@kit/tokens'
+
 // A risky Bash call is held by the mod's tool.call hook. Beneath it, the test
 // stands for the engine: `process.run` answers the measuring script with a
 // build folder of 13 files, and the hold's `sleep` on the test's clock;
@@ -161,6 +163,12 @@ test('the desktop draws the held command, what it would delete and real buttons;
   // Not the terminal's drawing: no ⚠ title line.
   expect(await ui.find({ type: 'Text', text: /Blast Radius/ })).toBeUndefined()
   expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
+  // The desktop draws a Button's label alone, uncoloured: Proceed's red is a Text under a
+  // blank-labelled Button (the kit's danger action), not a red child the app never shows.
+  expect((await ui.find({ type: 'Text', text: 'Proceed' }))?.props.color).toBe(C.bad)
+  const proceed = ((await ui.findAll({ type: 'Button' })) as { key?: string; props: Record<string, unknown>; children?: unknown[] }[]).find(b => b.key === 'proceed')
+  expect(proceed?.props).toMatchObject({ hotkey: '1', label: '⠀'.repeat('Proceed'.length) })
+  expect((proceed?.children ?? []).length).toBe(0)
   await drive(clock, ui.press({ key: 'cancel' }))
   const result = await drive(clock, call)
   expect(String(result.deny ?? result.text)).toContain(CANCELLED)

@@ -2,6 +2,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { BLANK } from '@kit/ui'
+import { C } from '@kit/tokens'
+
 // The issues pane drawn by the engine's test kit on each surface. The test's
 // own hooks sit beneath the mod and stand for the engine: `process.run`
 // answers `gh` with two open issues (as GitHub's JSON has them), so no real
@@ -236,6 +239,55 @@ test('on the desktop, Refine shows only on an unrefined issue, Start on every on
   expect(await ui.find({ key: 'refine-24' })).toBeDefined()
   expect(await ui.find({ key: 'refine-23' })).toBeUndefined()
   expect(await ui.findAll({ type: 'Button', text: 'Start' })).toHaveLength(2)
+  await ui.unmount()
+})
+
+/**
+ * What the desktop would drop from a Button: it draws the label alone, never the
+ * children, so a child element (a grey or coloured Text, an icon) never shows.
+ */
+const dropped = (b: { children: unknown[] }) => b.children.filter(c => typeof c === 'object' && c !== null)
+
+test('on the desktop, every Button is drawn by its label: quiet ones dim, Selected blue under a blank Button, no outlines', async ($, on) => {
+  engine(on)
+  await open($)
+
+  const ui = await $.ui.mount({ plugin: 'issues', surface: 'desktop', ...PANE })
+  const check = async () => {
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons.length).toBeGreaterThan(0)
+    for (const b of buttons) expect(dropped(b)).toEqual([])
+    // Nothing in the pane draws an outline.
+    for (const b of await ui.findAll({ type: 'Box' })) expect(b.props.borderStyle).toBeUndefined()
+  }
+  await check()
+
+  // Refine and Select are secondary: their labels, dim at rest.
+  for (const key of ['refine-24', 'pick-24', 'pick-23']) {
+    const b = await ui.find({ type: 'Button', key })
+    expect(b?.props.dimColor).toBe(true)
+    expect(b?.props.label).toMatch(/^(Refine|Select)$/)
+  }
+  expect((await ui.find({ type: 'Button', key: 'start-24' }))?.props.dimColor).toBeFalsy()
+
+  // Pressing Select by its key picks the issue: the word turns blue, a Text the
+  // desktop draws, with a blank-labelled Button over it that still answers to the key.
+  await ui.press({ key: 'pick-24' })
+  await ui.redraw()
+  const tint = await ui.find({ key: 'pick-24-tint' })
+  expect(tint?.props.position).toBe('relative')
+  expect((await ui.find({ type: 'Text', text: /^Selected$/ }))?.props.color).toBe(C.blue)
+  expect((await ui.find({ type: 'Button', key: 'pick-24' }))?.props.label).toBe(BLANK.repeat('Selected'.length))
+  expect(await ui.find({ type: 'Button', key: 'clear' })).toBeDefined()
+  expect((await ui.find({ type: 'Button', key: 'clear' }))?.props.dimColor).toBe(true)
+  await check()
+
+  // Pressed again, it's put back.
+  await ui.press({ key: 'pick-24' })
+  await ui.redraw()
+  expect((await ui.find({ type: 'Button', key: 'pick-24' }))?.props.label).toBe('Select')
+  // Each tile still draws its icons (the issue's mark, the linked PR's) as Svgs.
+  expect((await ui.findAll({ type: 'Svg' })).length).toBeGreaterThanOrEqual(3)
   await ui.unmount()
 })
 

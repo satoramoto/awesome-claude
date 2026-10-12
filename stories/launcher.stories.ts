@@ -47,6 +47,7 @@ const measured = (() => {
 
 export const Busy = scenario(fixtures.busy)
 export const Measured = scenario(measured)
+export const SharedPort = scenario(fixtures.shared)
 export const Stopped = scenario(fixtures.stopped)
 export const Long = scenario(fixtures.long)
 export const NoFile = scenario(fixtures.noFile)

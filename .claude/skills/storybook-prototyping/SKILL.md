@@ -71,6 +71,12 @@ It lays out like the desktop app, so problems show here first:
   inside a Button doesn't show there. Draw an icon beside or under the Button.
 - A desktop Input has its submit as a button beside the field, always, labelled
   `submitLabel` or "submit"; the terminal shows `↵ label` only while focused.
+- Desktop units as the app draws them (`unit()` in `playground/render.ts`): a
+  column 7.8px for every horizontal prop, a row 19px for `height`/`minHeight`/
+  `top`/`bottom`, and half a row (9.5px, `SPACING_ROW`) for vertical margin,
+  padding and row gap. `gap` is both: column gap in columns, row gap in half rows.
+- A `transparent` border colour draws in the text's colour, as in the app.
+- The sidebar frame's body starts 12.5px in from the divider, as the app's does.
 
 It doesn't emulate the engine's validator (a prop the desktop refuses still
 draws here), real data, timers or `gh`. Run the build and validate too.

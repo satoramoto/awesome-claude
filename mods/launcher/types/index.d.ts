@@ -25,11 +25,33 @@ export type LaunchFile = {
 /**
  * - `stopped`: nothing answers on its port;
  * - `starting`: started from this session, its port not answering yet;
- * - `running`: started from this session and answering;
- * - `elsewhere`: something this session didn't start answers on its port;
+ * - `running`: started from this session (or taken over) and answering;
+ * - `elsewhere`: something this session didn't start answers on its port, and
+ *   it is this configuration's server (its command line or working directory
+ *   match), or there's no telling whose it is;
+ * - `taken`: the process on its port is another one's (another configuration's
+ *   on the same port, or another program);
  * - `failed`: started from this session and exited on its own with an error.
  */
-export type Status = 'stopped' | 'starting' | 'running' | 'elsewhere' | 'failed'
+export type Status = 'stopped' | 'starting' | 'running' | 'elsewhere' | 'taken' | 'failed'
+
+/** A server this session didn't start but took over: Stop signals its process. */
+export type Adopted = {
+  pid: number
+  port: number
+  /** Its command line, as ps said when it was taken over. */
+  command: string
+  /** When it was taken over (ms since epoch). */
+  at: number
+}
+
+/** A Kill pressed once, waiting for the second press that confirms it. */
+export type KillConfirm = {
+  name: string
+  pid: number
+  /** When the confirm lapses (ms since epoch, the engine's clock). */
+  until: number
+}
 
 /** One configuration's server as the pane draws it. */
 export type Server = {
@@ -50,6 +72,11 @@ export type Server = {
   cpu?: number[]
   /** While it answers: that process's resident memory, in bytes, at the last sample. */
   rss?: number
+  /** The process listening on its port when this session didn't start it (lsof), and its command line (ps). */
+  pid?: number
+  command?: string
+  /** Running because it was taken over: its output isn't the launcher's to show. */
+  adopted?: boolean
 }
 
 declare module 'claude-code' {
@@ -60,6 +87,10 @@ declare module 'claude-code' {
       servers: Record<string, Server>
       /** Configurations whose details and output are unfolded, by name. */
       open: string[]
+      /** Servers taken over from elsewhere, by configuration name. */
+      adopted: Record<string, Adopted>
+      /** The row whose Kill waits for its confirming press, if any. */
+      confirm: KillConfirm | null
     }
   }
 }

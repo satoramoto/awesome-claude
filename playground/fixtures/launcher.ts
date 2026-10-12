@@ -32,6 +32,36 @@ export const busy = {
   open: ['api'],
 }
 
+const root = '/Users/ryan/Code/satoramoto/awesome-claude'
+const wt = `${root}-desktop-views`
+const sharedConfigs = [
+  { name: 'playground', runtimeExecutable: 'bun', runtimeArgs: ['run', 'playground'], port: 5173, autoPort: true },
+  { name: 'storybook', runtimeExecutable: 'bun', runtimeArgs: ['run', 'storybook'], port: 6006, autoPort: true },
+  { name: 'storybook-desktop-views', runtimeExecutable: 'bun', runtimeArgs: ['run', `--cwd=${wt}`, 'storybook'], port: 6006, autoPort: true },
+  { name: 'docs', runtimeExecutable: 'bun', runtimeArgs: ['run', 'docs:dev'], port: 4321 },
+]
+const held = (status: string, port: number, pid: number, command: string) => ({ ...server(status, port), pid, command })
+
+/**
+ * Two configurations on one port, only one of them running: the worktree's
+ * Storybook holds 6006 (started elsewhere: Take over, Kill, unfolded with its
+ * process), so the checkout's reads port taken (Start on the next port, Kill);
+ * docs runs elsewhere with its Kill waiting for the confirming press; the
+ * playground was taken over (Stop, its output not the launcher's).
+ */
+export const shared = {
+  file: { root, configs: sharedConfigs, at: now },
+  servers: {
+    playground: { ...held('running', 5173, 41207, `node ${root}/node_modules/.bin/vite --port 5173`), adopted: true },
+    storybook: held('taken', 6006, 23329, `node ${wt}/node_modules/.bin/storybook dev --port 6006 --no-open --ci`),
+    'storybook-desktop-views': held('elsewhere', 6006, 23329, `node ${wt}/node_modules/.bin/storybook dev --port 6006 --no-open --ci`),
+    docs: held('elsewhere', 4321, 51880, `node ${root}/node_modules/.bin/astro dev --port 4321`),
+  },
+  open: ['storybook-desktop-views', 'playground'],
+  adopted: { playground: { pid: 41207, port: 5173, command: `node ${root}/node_modules/.bin/vite --port 5173`, at: now - 60_000 } },
+  confirm: { name: 'docs', pid: 51880, until: now + 4_000 },
+}
+
 /** Nothing running yet. */
 export const stopped = {
   file,

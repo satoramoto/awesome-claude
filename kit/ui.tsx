@@ -17,6 +17,12 @@ import type { Duo, StatusKind } from './tokens'
  * corners), single, double, bold and classic draw; `dashed` doesn't. SVG is
  * drawn as an image: crisp only at its exact pixel size, so it's kept to small
  * fixed pieces like bar ends.
+ *
+ * Units on the desktop (measured on 2.1.295): a column (widths, paddingX, marginX,
+ * gaps between columns) is ~7.8px; a row of size (`height`, `minHeight`) is ~19px,
+ * one text line; but vertical spacing (marginTop/Bottom/Y, paddingTop/Bottom/Y,
+ * rowGap) is half that, ~9.5px a unit. A `transparent` border colour is drawn in
+ * the text's colour, so the kit draws no border to round a fill.
  */
 
 /** The element constructors the kit draws with. `Button` is needed only for collapsible sections. */
@@ -141,8 +147,21 @@ export const SPARK = {
   left: [0, 0x40, 0x44, 0x46, 0x47],
   right: [0, 0x80, 0xa0, 0xb0, 0xb8],
 } as const
-/** A band's height: one text row plus this above and below. */
-const BAND_PAD_Y = 0.3
+/**
+ * A band's (a section header's, a footer's) height on the app surfaces, in rows of
+ * size: one text row and a little room. Fixed rather than padded, so every band is
+ * as tall as every other whatever it holds: a native Button, a Link or an icon in
+ * a row of the real desktop is taller or shorter than a line of text, and a padded
+ * band grew or shrank with it (the launcher's rows came out uneven).
+ */
+export const BAND_ROWS = 1.3
+
+/**
+ * A Braille blank (U+2800): drawn as nothing, as a space is, but never trimmed or
+ * collapsed. A Button labelled with them lies over what the desktop can't draw in a
+ * Button (an icon, a coloured word), which shows through; its key is its address.
+ */
+export const BLANK = '⠀'
 /** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
 const TILE_PAD_Y = 0.6
 const TILE_ROW_GAP = 0.2
@@ -376,14 +395,15 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   /*
    * Rounding on the desktop. Boxes have no corner radius; what rounds is:
    *
-   * - `rounded`: a box a row or more tall. A transparent `round` border over the fill
-   *   (a border in a see-through fill's own colour paints twice where border and fill
-   *   overlap and draws a ring). Not on thin boxes: the border takes room inside the
-   *   box, so a thin one has nothing left for its content.
    * - `capped`: anything thin (bars, gauges). SVG end caps drawn at an exact pixel
    *   size, so they stay crisp; the middle takes no height and stretches to the caps.
+   * - Nothing else: `rounded` boxes (bands, tiles) are square-cornered fills.
    *
-   * What doesn't work, so nobody tries again: borders on thin bars (empty, or blobs),
+   * What doesn't work, so nobody tries again: a `round` border in `transparent` to
+   * round a fill (the desktop doesn't know `transparent` as a border colour and draws
+   * the border in the text's colour: every band and tile became an outlined bubble),
+   * a border in a see-through fill's own colour (paints twice and draws a ring),
+   * borders on thin bars (empty, or blobs),
    * glyph ends (◖━◗, ╺━╸ don't draw), SVG slivers a few pixels wide (don't draw), an
    * SVG stretched to fit (blurs), a circle drawn over a rect in one SVG (a translucent
    * colour doubles where they overlap).
@@ -448,16 +468,16 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   }
 
   /**
-   * A filled box with rounded corners, a row or more tall. The `round` border that
-   * rounds it is transparent, so the fill shows under it once: a see-through fill
-   * (FILL's) in a border of its own colour would paint twice there and draw a ring.
-   * In the terminal, the box without fill or border.
+   * A filled box, a row or more tall: a band or a tile. Square-cornered and with no
+   * border on the app surfaces, as the design has no outlines and the desktop has no
+   * transparent border to round a fill with (see "Rounding on the desktop" above).
+   * In the terminal, the box without fill.
    */
   const rounded = (color: string, props: Record<string, unknown>, children: RenderElement | (RenderElement | null)[] | null) =>
     terminal ? (
       <Box {...props}>{children}</Box>
     ) : (
-      <Box {...props} backgroundColor={color} borderStyle="round" borderColor="transparent">
+      <Box {...props} backgroundColor={color}>
         {children}
       </Box>
     )
@@ -940,7 +960,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
             alignItems: 'center',
             gap: SPACE.item,
             paddingX: terminal ? 0 : INSET,
-            paddingY: terminal ? 0 : BAND_PAD_Y,
+            ...(terminal ? {} : { height: BAND_ROWS, flexShrink: 0, overflow: 'hidden' }),
           },
           [
             // The title keeps its room; the right side gives way.
@@ -965,7 +985,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
             ) : null,
           ],
         )}
-        {/* A gentle indent: the body starts where the band's rounded corner turns straight. */}
+        {/* A gentle indent: the body starts just past the band's fold arrow. */}
         {s.collapsed ? null : (
           <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : INSET} marginTop={terminal ? 0 : 1} marginBottom={terminal ? 0 : 1}>
             {s.children}
@@ -1010,7 +1030,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     }
     return (
     <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item}>
-      <Box minWidth={0} flexShrink={1}>
+      {/* The label keeps its word (it's short); a long value is what gets cut. */}
+      <Box minWidth={0} flexShrink={0}>
         <Text {...tone('mid')} wrap="truncate">
           {label}
         </Text>
@@ -1208,7 +1229,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       ) : (
         rounded(
           FILL.head,
-          { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, paddingY: BAND_PAD_Y, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
+          { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, height: BAND_ROWS, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
           row,
         )
       )
@@ -1506,7 +1527,21 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     const danger = a.tone === 'danger'
     if (!Button) return <Text key={a.key} {...(danger ? ink(C.bad) : a.quiet ? tone('mid') : {})}>{a.label}</Text>
     const hot = { ...(a.hotkey ? { hotkey: a.hotkey } : {}), ...(a.autoFocus ? { autoFocus: true } : {}) }
-    // A danger action draws a red Text in its label's place, on every surface; the label stays its name.
+    // A danger action on the app surfaces: its label as a red Text, and over it a Button
+    // whose label is as many Braille blanks (drawn as nothing): the desktop draws a
+    // Button's label alone, uncoloured, and never a child Text, so a red child never
+    // showed there. A press anywhere on the word is a press of the Button.
+    if (danger && !terminal) {
+      return (
+        <Box key={`${a.key}-danger`} position="relative" flexShrink={0} flexDirection="row">
+          <Text {...ink(C.bad)}>{a.label}</Text>
+          <Box position="absolute" top={0} left={0}>
+            <Button key={a.key} plain label={BLANK.repeat([...a.label].length)} {...hot} onPress={a.onPress} />
+          </Box>
+        </Box>
+      )
+    }
+    // On the terminal, a red Text in its label's place; the label stays its name.
     if (danger) {
       return (
         <Button key={a.key} plain label={a.label} {...(terminal && a.quiet ? { dimColor: true } : {})} {...hot} onPress={a.onPress}>

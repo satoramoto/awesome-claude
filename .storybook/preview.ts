@@ -11,7 +11,7 @@ import type { TerminalTheme } from '../playground/render'
 /** The canvas's margin around the frame, each side. */
 const GUTTER = 16
 /** What a frame adds around its body, left and right together: the side pane's padding and divider, or the plain pane's padding. */
-const CHROME = { sidebar: 21, pane: 24 }
+const CHROME = { sidebar: 23.5, pane: 24 }
 /** The narrowest the transcript beside the side pane is drawn. */
 const TRANSCRIPT = 120
 
@@ -108,7 +108,8 @@ style.textContent = `
   .app .side-head { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; color: var(--muted); }
   .app .marks { display: flex; gap: 10px; }
   .app .mark.on { color: var(--mark); border: 1px solid var(--mark); border-radius: 5px; padding: 0 3px; }
-  .app .side-body { padding: 4px 10px 10px; overflow: auto; }
+  /* The real side pane's body starts 12.5px in from its divider (measured on 2.1.295). */
+  .app .side-body { padding: 4px 10px 10px 12.5px; overflow: auto; }
   /* The app's thin, rounded scrollbar on a bare track, rather than the browser's own. */
   .app .side-body::-webkit-scrollbar { width: 8px; background: transparent; }
   .app .side-body::-webkit-scrollbar-thumb { background: color-mix(in srgb, currentColor 22%, transparent); border-radius: 4px; border: 2px solid transparent; background-clip: padding-box; }

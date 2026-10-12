@@ -160,6 +160,40 @@ The look is an instrument inspector (think Premiere's Effect Controls):
   (`pct()`), `flexGrow` ≤ 10000, no Box `hover`, no `dashed` borders; SVG blurs
   when scaled, so keep it to small fixed-size pieces.
 
+### Desktop spacing and borders, as the real app draws them
+
+Measured against the real desktop pane (2.1.295); the Storybook bench applies
+the same rules (`unit()` and `borderOf()` in `playground/render.ts`), so what it
+shows is what the app draws. Design within them:
+
+- **Any number is accepted** for margin, padding, gap, width and height, fractions
+  included (the validator refuses only non-numbers, and percentages that aren't
+  whole). There's no spacing scale to snap to, so the kit's `SPACE`/`EDGE` *are*
+  the scale: use them, never raw numbers.
+- **Horizontal units are columns, ~7.8px**: width, minWidth, paddingX/Left/Right,
+  marginX/Left/Right, columnGap, and `gap` between items in a row.
+- **Size units are rows, ~19px (one text line)**: height, minHeight, top, bottom.
+  A `height={3.5}` chart is 66.5px.
+- **Vertical spacing is half a row, ~9.5px a unit**: marginTop/Bottom/Y,
+  paddingTop/Bottom/Y, rowGap (and `gap` between rows). So `marginTop={1}` is
+  half a text line, not a line: a section's body sits 9.5px under its header and
+  sections 19px apart (body marginBottom 1 + section marginTop 1).
+- **Row heights follow their content**: a native Button, a Link or an icon is
+  not exactly a text line tall, so a padded row grows or shrinks with what it
+  holds. Bands (section headers, the perf footer) therefore take a fixed
+  `height: BAND_ROWS` (1.3 rows) instead of vertical padding, so every header is
+  the same height.
+- **Borders**: `round`, `single`, `double`, `bold`, `classic` draw; `dashed`
+  doesn't. A colour the desktop doesn't know, `transparent` included, draws in
+  the text's colour, so a "transparent" border is a visible outline. There's no
+  way to round a fill without an outline: bands and tiles are square-cornered
+  fills (`FILL`), and the only border in the mods is blast-radius's warning hold.
+- **Backgrounds**: hex and `rgba()` fills draw (the kit's `FILL` and `TRACK`).
+- **Buttons draw their `label` alone**, uncoloured (`dimColor` dims it), never
+  their children or the children's styling. A coloured action (`tone: 'danger'`)
+  is a coloured Text with a Button of `BLANK`s (U+2800) laid over it; an icon
+  button is the icon with such a Button over it.
+
 ## Terminal
 
 The terminal draws the same instrument inspector as the desktop, in cells. Get
