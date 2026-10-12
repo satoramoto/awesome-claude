@@ -263,6 +263,25 @@ test('desktop branch row: an untracked branch has no upstream icon, and a short 
   await ui.unmount()
 })
 
+test('desktop branch row: a local upstream (no remote) has no upstream icon', async ($, on) => {
+  const { ui, ran } = await desktop($, on, 60, { status: '## main...main [ahead 1]\0 M src/a.ts\0' })
+  expect(await textOf(ui, 'main')).toBeDefined()
+  expect((await svgs(ui)).some(s => s.source.includes('<title>'))).toBe(false)
+  expect(ran.some(a => a[0] === 'git' && a.includes('get-url'))).toBe(false)
+  await ui.unmount()
+})
+
+test('desktop rows: a file named like an Object prototype key draws as plain text', async ($, on) => {
+  const { ui, clock } = await desktop($, on, 60, {
+    dirs: { [ROOT]: [['foo.constructor', 'file'], ['x.toString', 'file'], ['a.__proto__', 'file']] },
+    status: '## main...origin/main\0',
+  })
+  await clock.settle()
+  for (const name of ['foo.constructor', 'x.toString', 'a.__proto__'])
+    expect(JSON.stringify(await ui.find({ type: 'Box', key: `row-${ROOT}/${name}` }))).toContain(FILE_TYPE.text.dark)
+  await ui.unmount()
+})
+
 test('desktop rows: icons in their file type colour (IntelliJ New UI), an ignored folder in the excluded tone', async ($, on) => {
   const { ui, clock } = await desktop($, on, 60, {
     dirs: { [ROOT]: [['node_modules', 'dir'], ['src', 'dir'], ['package.json', 'file'], ['README.md', 'file'], ['bun.lock', 'file'], ['styles.css', 'file']], [`${ROOT}/src`]: [['a.ts', 'file']] },

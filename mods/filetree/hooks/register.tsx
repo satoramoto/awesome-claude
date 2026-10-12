@@ -271,15 +271,16 @@ async function hostOf($: EngineInterface, top: string, remote: string): Promise<
   const id = `${top}\u0000${remote}`
   const known = hosts.get(id)
   if (known !== undefined) return known
-  let host = ''
   try {
     const run = await git($, top, ['remote', 'get-url', remote], 5_000)
-    host = run.exitCode === 0 ? remoteHost(run.stdout) : ''
+    if (run.exitCode !== 0) return ''
+    // Only a successful lookup is cached: a timeout or failure is retried on a later refresh.
+    const host = remoteHost(run.stdout)
+    hosts.set(id, host)
+    return host
   } catch {
-    host = ''
+    return ''
   }
-  hosts.set(id, host)
-  return host
 }
 
 function refreshGit($: EngineInterface): Promise<void> {

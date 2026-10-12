@@ -7,7 +7,7 @@ import type { FileType } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
 
 import type { Activity, FileTree } from '../types'
-import { dirname, formatSize, HOST_ICON, hostKind, type Row, underAny } from './tree'
+import { dirname, formatSize, HOST_ICON, hostKind, remoteName, type Row, underAny } from './tree'
 
 /*
  * The desktop's file tree, as the other mods' desktop panes draw: a header line
@@ -78,7 +78,7 @@ export const fileIcon = (name: string, kind: string, open: boolean) => {
 }
 
 /** Extensions by the file type IntelliJ's New UI draws them as (its `fileTypes` icons). */
-const TYPE_BY_EXT: Record<string, FileType> = {}
+const TYPE_BY_EXT = new Map<string, FileType>()
 for (const [type, exts] of Object.entries({
   typescript: 'ts tsx mts cts',
   javascript: 'js jsx mjs cjs',
@@ -94,7 +94,7 @@ for (const [type, exts] of Object.entries({
   image: 'png jpg jpeg gif webp ico bmp svg avif',
   archive: 'zip tar gz tgz bz2 xz 7z rar jar',
 } satisfies Partial<Record<FileType, string>>))
-  for (const ext of exts.split(' ')) TYPE_BY_EXT[ext] = type as FileType
+  for (const ext of exts.split(' ')) TYPE_BY_EXT.set(ext, type as FileType)
 
 /** Names IntelliJ draws as config whatever their extension. */
 const CONFIG_NAMES = new Set(['dockerfile', '.editorconfig', '.env', '.npmrc', '.nvmrc'])
@@ -109,7 +109,7 @@ export const fileType = (name: string, kind: string, excluded = false): FileType
   const lower = name.toLowerCase()
   if (CONFIG_NAMES.has(lower) || lower.startsWith('.env.')) return 'config'
   const ext = lower.includes('.') ? (lower.split('.').pop() ?? '') : ''
-  return TYPE_BY_EXT[ext] ?? 'text'
+  return TYPE_BY_EXT.get(ext) ?? 'text'
 }
 
 /**
@@ -270,7 +270,8 @@ export const renderDesktop = (els: DesktopElements, v: DesktopView, act: Desktop
         b.behind > 0 ? <Text key="behind" color={GRAY.mid}>{` ↓${b.behind}`}</Text> : null,
         // The upstream as its host's icon (GitHub, GitLab, Forgejo, else a remote), its
         // name the icon's tooltip; none when the branch tracks nothing.
-        b.upstream ? (
+        // A local upstream (`main...main`, no remote) has no host to show.
+        b.upstream && remoteName(b.upstream) ? (
           <Box key="upstream" flexShrink={0} marginLeft={SPACE.pair} flexDirection="row" alignItems="center">
             {k.icon(HOST_ICON[hostKind(b.host)], GRAY.dark, undefined, { tooltip: b.upstream })}
           </Box>

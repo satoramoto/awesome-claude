@@ -126,6 +126,11 @@ Import shared code by alias; the build rewrites it:
   Octicons (`issue-opened`, `comment`, `pr-open`, `pr-merged`, `pr-closed`,
   `pr-draft`, the branch glyph). Draw them through `k.icon(key, color)`, which
   falls back to the glyph on the terminal. Add a new Octicon to `FILLED` unchanged.
+- An icon button on the desktop (filetree's `iconButton`) is the icon with a
+  Button over it whose label is two Braille blanks (U+2800), which draw nothing
+  and no renderer trims. Known limitation: screen readers hear those buttons as
+  unnamed, because the engine gives a Button no accessible name separate from its
+  label. The icon's `alt` carries the name until the engine adds one.
 - Draw the terminal and the app surfaces separately where they differ
   (`renderTerminal` / `renderApp` in `mods/issues/hooks/view.tsx`); `e.surface`
   is `terminal`, `desktop`, `vscode` or `mobile`. `Input` doesn't exist on mobile.
