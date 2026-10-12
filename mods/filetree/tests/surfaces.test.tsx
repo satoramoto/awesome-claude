@@ -120,7 +120,8 @@ async function texts(ui: any): Promise<string> {
   return JSON.stringify(await ui.drawn()) + rows
 }
 
-const STAMP = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/
+// A file's age on the terminal, as the desktop and the kit's `ago` write it: 5m, 3h, 2d, 3w, 4mo, 2y.
+const STAMP = /"t":" \d+(m|h|d|w|mo|y)"/
 const NERD = /[\u{e000}-\u{f8ff}\u{f0000}-\u{fffff}]/u
 
 test('macOS Claude Code app: desktop pane draws, selects, opens with open', { timeoutMs: 20_000 }, async ($, on) => {
@@ -300,7 +301,7 @@ test('long trees scroll: wheel, scrollbar drag, and a click does not jump the vi
   const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props })
   await clock.settle()
-  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  const rowsOf = async () => ((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props
   let p = await rowsOf()
   expect(p.bar).toBeDefined()
   expect(p.rows[0].id).toBe(`${root}/f00.txt`)
@@ -359,7 +360,7 @@ async function scrolledTree($: any, on: any) {
   await clock.settle()
   await $.ui.scroll({ component: 'Pane', requestId: 'filetree', by: 1 } as any)
   await clock.settle()
-  const ids = async () => (((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props.rows as { id: string }[]).map(r => r.id)
+  const ids = async () => (((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props.rows as { id: string }[]).map(r => r.id)
   expect((await ids())[0]).toBe(`${root}/f02.txt`)
   return { root, clock, ui, ids }
 }
@@ -424,7 +425,7 @@ test('watches only git metadata, copies paths, clears search, Home and End', { t
   expect(await ui.find({ key: 'clear' })).toBeUndefined()
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
-  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  const rowsOf = async () => ((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props
   expect((await rowsOf()).active).toBe(`${root}/c.txt`)
   await ui.post({ key: 'home' }, { in: 'rows' })
   await clock.settle()
@@ -622,7 +623,8 @@ test('open with preview: End shows the last screen, an edit reloads the file, a 
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
   let shown = JSON.stringify(await ui.drawn())
-  expect(shown).toContain('"startLine":42')
+  // 20 rows less the header and the blank row the section leaves under it: lines 42 to 59.
+  expect(shown).toContain('"startLine":43')
   expect(shown).toContain('line 59')
   w.files![`${root}/a.ts`] = 'changed\n'
   await $.tool.call({ tool: 'Edit', file_path: `${root}/a.ts`, old_string: 'a', new_string: 'b' } as any)
@@ -895,22 +897,25 @@ test('a written file whose name holds a newline still shimmers', { timeoutMs: 20
   await ui.unmount()
 })
 
-test('the pane takes its background from the Omarchy theme and follows a theme switch', { timeoutMs: 20_000 }, async ($, on) => {
+// Changed in this fork (awesome-claude): the Omarchy background and selection are fixed
+// hexes that don't read on every terminal theme (light, ANSI-only), so the pane draws on
+// the terminal's own background in theme keys, as the kit does, and reads no theme file.
+test('with an Omarchy theme the pane still draws no hex on the terminal and reads no theme file', { timeoutMs: 20_000 }, async ($, on) => {
   const ran: Ran = []
   const root = '/home/k/proj'
-  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', theme: { toml: 'background = "#1e1e2e"\ndark_background = "#161622"\n', mtimeMs: 1 } }
+  const w: World = { os: 'linux', env: { HOME: '/home/k' }, cwd: root, top: '', dirs: { [root]: [['a.ts', 'file']] }, status: '', numstat: '', theme: { toml: 'foreground = "#cdd6f4"\nbackground = "#1e1e2e"\nselection = "#585b70"\n', mtimeMs: 1 } }
   const clock = world(on, w, ran)
   await $.session.start({ cwd: root, surface: 'terminal', isInteractive: true })
   await clock.settle()
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props: paneProps(60) })
   await clock.settle()
-  expect(await texts(ui)).toContain('"backgroundColor":"#161622"')
-  w.theme = { toml: 'background = "#fafafa"\n', mtimeMs: 2 }
-  await clock.advance(2_000)
+  await ui.post({ press: `${root}/a.ts` }, { in: 'rows' })
   await clock.settle()
   const shown = await texts(ui)
-  expect(shown).toContain('"backgroundColor":"#fafafa"')
-  expect(shown).not.toContain('#161622')
+  expect(shown).not.toMatch(/"backgroundColor":"#/)
+  expect(shown).not.toMatch(/"color":"#/)
+  expect(shown).not.toMatch(/"c":"#/)
+  expect(ran.filter(a => a[0] === 'theme-stat')).toHaveLength(0)
   await ui.unmount()
 })
 

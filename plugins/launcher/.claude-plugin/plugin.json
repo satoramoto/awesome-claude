@@ -1,6 +1,6 @@
 {
   "name": "launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "The project's dev servers from .claude/launch.json in a pane: start, stop and restart each, see which answer and read their output",
   "author": { "name": "Ryan Gavin" },
   "types": "./types/index.d.ts"

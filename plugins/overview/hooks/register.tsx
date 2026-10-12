@@ -5,7 +5,6 @@ import type {
   ModelUsage,
   ProcessRunResult,
   Register,
-  RenderElement,
   SessionContextBreakdown,
   SessionRateLimit,
   Timer,
@@ -28,12 +27,15 @@ import type {
   Tracked,
   TreeRow,
   TurnPoint,
+  WorkspacesGh,
 } from '../types'
 import { parseLeftRight, startedBy } from './branches'
 import { createPerf } from '../kit/perf'
 
 import { renderDesktop } from './desktop'
-import type { AppElements, Helpers } from './desktop'
+import type { AppElements, DesktopData, Helpers } from './desktop'
+import { renderTerminal } from './terminal'
+import type { TermElements, TermHelpers } from './terminal'
 import { NETTOP, NET_PER_PROCESS, resourcesSh, takeNettop, toResources } from './resources'
 
 const PANE = 'overview'
@@ -87,35 +89,6 @@ export const toSnapshot = (b: SessionContextBreakdown): Snapshot => {
   }
 }
 
-/**
- * Cells per segment for a bar `width` wide, by largest remainder. Every
- * non-empty used segment gets at least one cell, taken from free space.
- */
-export const layoutBar = (segments: Segment[], max: number, width: number): number[] => {
-  // A negative count (free space past the window) draws as nothing, never as a negative run.
-  const sum = segments.reduce((n, s) => n + Math.max(0, s.tokens), 0)
-  const scale = Math.max(max, sum, 1)
-  const exact = segments.map(s => (Math.max(0, s.tokens) / scale) * width)
-  const cells = exact.map(Math.floor)
-  let left = width - cells.reduce((n, c) => n + c, 0)
-  const byRemainder = exact.map((x, i) => ({ i, r: x - Math.floor(x) })).sort((a, b) => b.r - a.r)
-  for (const { i } of byRemainder) {
-    if (left <= 0) break
-    cells[i] = (cells[i] ?? 0) + 1
-    left -= 1
-  }
-
-  segments.forEach((s, i) => {
-    if (s.kind !== 'used' || s.tokens <= 0 || (cells[i] ?? 0) > 0) return
-    const donor = segments.findIndex((d, j) => d.kind === 'free' && (cells[j] ?? 0) > 1)
-    if (donor < 0) return
-    cells[donor] = (cells[donor] ?? 0) - 1
-    cells[i] = 1
-  })
-
-  return cells
-}
-
 export const colorOf = (segments: Segment[], i: number): string | undefined => {
   const s = segments[i]
   if (!s || s.kind !== 'used') return undefined
@@ -123,9 +96,7 @@ export const colorOf = (segments: Segment[], i: number): string | undefined => {
   return PALETTE[used % PALETTE.length]
 }
 
-const GLYPH = { used: '█', free: '░', buffer: '▒', deferred: ' ' } as const
-
-/** `$.agent.list()`'s row as plain data, the fields the Tasks tree draws. */
+/** `$.agent.list()`'s row as plain data, the fields the Agents tree draws. */
 export const toAgent = (info: AgentInfo): Agent => {
   const agent: Agent = { id: info.id, description: info.description, type: info.type, status: info.status }
   if (info.parentId) agent.parentId = info.parentId
@@ -216,10 +187,6 @@ export const fitTree = (list: Agent[], budget: number): { rows: TreeRow[]; hidde
   return { rows: shown, hidden: rows.length - shown.length }
 }
 
-/** The connector before a row's status marker: `│ ` guides, then `├─`/`└─`. */
-export const connectorOf = (row: TreeRow): string =>
-  row.depth === 0 ? '' : `${row.guides.map(g => (g ? '│ ' : '  ')).join('')}${row.last ? '└─' : '├─'}`
-
 /** The rolled-up children of a parent row, e.g. `3 sub · 1 running`. */
 export const subSummary = (row: TreeRow): string => {
   if (row.descendants === 0) return ''
@@ -232,56 +199,11 @@ export const subSummary = (row: TreeRow): string => {
 const usageTokens = (u: ModelUsage) =>
   u.input_tokens + u.output_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
 
-export const formatDuration = (ms: number): string => {
-  const s = Math.max(0, Math.floor(ms / 1_000))
-  if (s < 60) return `${s}s`
-  const m = Math.floor(s / 60)
-  if (m < 60) return `${m}m ${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(m / 60)}h ${String(m % 60).padStart(2, '0')}m`
-}
-
-/** The status as a marker and a color. */
-export const statusOf = (status: string): { glyph: string; color: string } => {
-  switch (status) {
-    case 'running':
-    case 'pending':
-      return { glyph: '●', color: 'warning' }
-    case 'completed':
-      return { glyph: '✓', color: 'success' }
-    case 'failed':
-      return { glyph: '✗', color: 'error' }
-    case 'killed':
-      return { glyph: '■', color: 'inactive' }
-    default:
-      return { glyph: '?', color: 'inactive' }
-  }
-}
-
-/** The dim detail after an agent's description: type, tokens, elapsed. */
-export const agentDetail = (agent: Agent, x: AgentExtra | undefined, at: number): string => {
-  const parts = [agent.type]
-  if (x?.tokens !== undefined) parts.push(`${formatTokens(x.tokens)} tok`)
-  if (agent.status === 'running' && x?.startedAt !== undefined) parts.push(formatDuration(at - x.startedAt))
-  else if (x?.durationMs !== undefined) parts.push(formatDuration(x.durationMs))
-  else if (agent.status !== 'running' && agent.status !== 'pending') parts.push(agent.status)
-  return parts.join(' · ')
-}
-
 // ---- Git section ---------------------------------------------------------
 
 const git = atom({ plugin: 'overview', key: 'git' } as const, null)
 const gh = atom({ plugin: 'overview', key: 'gh' } as const, null)
 const GIT_FILES = 4
-const GIT_PRS = 3
-
-export const C = {
-  ok: '#9ece6a',
-  bad: '#f7768e',
-  warn: '#e0af68',
-  blue: '#7aa2f7',
-  purple: '#bb9af7',
-  cyan: '#7dcfff',
-} as const
 
 type Parsed = Omit<GitInfo, 'ok' | 'root' | 'repo' | 'worktree' | 'insertions' | 'deletions'>
 
@@ -401,7 +323,44 @@ export const ghNote = (stderr: string): string => {
 
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b)
 
-const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
+/**
+ * A git read: the repo, or why there's none. `lasting`: the answer itself (not a
+ * repo), not a read that failed. `root`: the repo a failed read was for.
+ */
+type GitRead = GitInfo | (GitNote & { lasting?: boolean; root?: string })
+
+/** When git and gh were last read good: the age a failed refresh shows. */
+const goodAt = { git: 0, gh: 0, workspaces: 0 }
+
+/**
+ * What the git state becomes after a read: a good read as it is; a failed one
+ * keeps the last-good figures of the same repo, marked with why and since when;
+ * anything else is its note.
+ */
+const keepGit =(before: GitInfo | GitNote | null, fresh: GitRead, t: number): GitInfo | GitNote => {
+  if (fresh.ok) {
+    goodAt.git = t
+    return fresh
+  }
+  if (!fresh.lasting && before?.ok && (fresh.root === undefined || fresh.root === before.root)) {
+    return { ...before, failed: fresh.note, at: before.failed ? before.at : goodAt.git || undefined }
+  }
+  return { ok: false, note: fresh.note }
+}
+
+/** The same for gh: a failed read for the same repo keeps the last-good PRs. */
+const keepGh =(before: GhInfo | null, fresh: GhInfo): GhInfo => {
+  if (!fresh.note) {
+    goodAt.gh = fresh.at
+    return fresh
+  }
+  if (before && !before.note && before.root === fresh.root) {
+    return { ...before, failed: fresh.note, at: before.failed ? before.at : goodAt.gh || before.at }
+  }
+  return fresh
+}
+
+const loadGit = async ($: EngineInterface): Promise<GitRead> => {
   const cwd = await $.session.cwd()
   // --no-optional-locks: a read never rewrites the index.
   const run = (args: string[]) => $.process.run(['git', '--no-optional-locks', ...args], { cwd, timeoutMs: 10_000 })
@@ -411,7 +370,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
   } catch {
     return { ok: false, note: 'git not found' }
   }
-  if (top.exitCode !== 0) return { ok: false, note: 'Not a git repository' }
+  if (top.exitCode !== 0) return { ok: false, note: 'Not a git repository', lasting: true }
   const root = top.stdout.trim()
   const [status, wt, diff] = await Promise.all([
     run(['status', '--porcelain=v2', '--branch']).catch(() => null),
@@ -419,7 +378,7 @@ const loadGit = async ($: EngineInterface): Promise<GitInfo | GitNote> => {
     run(['diff', '--shortstat', 'HEAD']).catch(() => null),
   ])
   if (!status || status.exitCode !== 0) {
-    return { ok: false, note: (status?.stderr || 'git status failed').trim().split('\n')[0] ?? 'git status failed' }
+    return { ok: false, note: (status?.stderr || 'git status failed').trim().split('\n')[0] || 'git status failed', root }
   }
   const trees = wt && wt.exitCode === 0 ? parseWorktrees(wt.stdout) : []
   const main = trees[0] ?? root
@@ -477,8 +436,9 @@ const refreshGit = async ($: EngineInterface): Promise<void> => {
   try {
     do {
       gitAgain = false
-      const fresh = await loadGit($)
-      if (!same(await read($, git), fresh)) await update($, git, () => fresh)
+      const before = await read($, git)
+      const fresh = keepGit(before, await loadGit($), Date.now())
+      if (!same(before, fresh)) await update($, git, () => fresh)
       const cached = await read($, gh)
       // A new repo (the session cd'd) shouldn't show the old repo's PRs.
       if (fresh.ok && cached?.root !== fresh.root) stale.gh = true
@@ -494,6 +454,7 @@ const tracked = atom({ plugin: 'overview', key: 'tracked' } as const, [])
 const hidden = atom({ plugin: 'overview', key: 'hidden' } as const, [])
 const branches = atom({ plugin: 'overview', key: 'branches' } as const, [])
 const creating = atom({ plugin: 'overview', key: 'creating' } as const, null)
+const workspacesGh = atom({ plugin: 'overview', key: 'workspacesGh' } as const, null)
 const MAX_BRANCHES = 6
 
 /** Adds a branch to the tracked list once; a path relative to `cwd` is resolved. */
@@ -581,6 +542,7 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
       .reverse()
     if (withGh) {
       const prList = await run(['gh', 'pr', 'list', '--state', 'all', '--limit', '40', '--json', GH_FIELDS])
+      let failed: string | undefined = !prList ? 'gh not installed' : prList.exitCode !== 0 ? ghNote(prList.stderr) : undefined
       if (prList?.exitCode === 0) {
         try {
           // Newest first from gh, so the first PR per branch is its latest.
@@ -588,9 +550,15 @@ const refreshBranches = async ($: EngineInterface, withGh = false): Promise<void
           for (const json of JSON.parse(prList.stdout) as any[]) if (!prs.has(json.headRefName)) prs.set(json.headRefName, toGitPr(json, json.headRefName))
           prCache = prs
         } catch {
-          // Unreadable gh output: keep the last PRs.
+          failed = 'Could not read gh output'
         }
       }
+      // A failed read keeps the last PRs (prCache), marked with why and since when.
+      const before = await read($, workspacesGh)
+      if (!failed) goodAt.workspaces = Date.now()
+      const next: WorkspacesGh = failed ? { failed, at: before?.failed ? before.at : goodAt.workspaces } : { at: goodAt.workspaces }
+      // A good read after a good read changes nothing drawn: no write, no redraw.
+      if (failed ? !same(before, next) : !before || before.failed) await update($, workspacesGh, () => next)
     }
     const loaded = await Promise.all(list.map(t => loadBranch($, t, baseCache!, prCache, info.root)))
     // git and gh took a while: a branch hidden since `off` was read must not come
@@ -648,8 +616,8 @@ const refreshGh = async ($: EngineInterface): Promise<void> => {
   if (!info?.ok) return
   ghBusy = true
   try {
-    const fresh = await loadGh($, info)
     const before = await read($, gh)
+    const fresh = keepGh(before, await loadGh($, info))
     // Keep the old timestamp when nothing changed, so the pane doesn't redraw for nothing.
     if (!before || !same({ ...before, at: 0 }, { ...fresh, at: 0 })) await update($, gh, () => fresh)
   } finally {
@@ -658,31 +626,6 @@ const refreshGh = async ($: EngineInterface): Promise<void> => {
 }
 
 const FILE_TOOLS = ['Bash', 'Edit', 'Write', 'MultiEdit', 'NotebookEdit']
-
-export const fileGlyph = (f: GitFile): { glyph: string; color?: string } => {
-  switch (f.kind) {
-    case 'conflict':
-      return { glyph: '✗', color: C.bad }
-    case 'untracked':
-      return { glyph: '?', color: C.cyan }
-    case 'added':
-      return { glyph: '✚', color: C.ok }
-    case 'deleted':
-      return { glyph: '−', color: C.bad }
-    case 'renamed':
-      return { glyph: '→', color: C.blue }
-    default:
-      return { glyph: '●', color: f.staged ? C.ok : C.warn }
-  }
-}
-
-/** The PR's state as a glyph and color: merged purple, draft dim, open blue. */
-export const prGlyph = (pr: GitPr): { glyph: string; color?: string } => {
-  if (pr.state === 'MERGED') return { glyph: '⚑', color: C.purple }
-  if (pr.state === 'CLOSED') return { glyph: '⚑' }
-  if (pr.isDraft) return { glyph: '◌' }
-  return { glyph: '⚑', color: C.blue }
-}
 
 // ---- Account limits --------------------------------------------------------
 
@@ -707,9 +650,6 @@ export const limitLabel = (kind: string): string => {
 
 export const toLimits = (list: SessionRateLimit[]): Limit[] =>
   list.map(l => ({ kind: l.kind, percent: l.percentUsed, ...(l.resetsAt ? { resetsAt: l.resetsAt } : {}) }))
-
-/** Green under 75%, amber from 75%, red from 90%. */
-export const limitColor = (percent: number): string => (percent >= 90 ? C.bad : percent >= 75 ? C.warn : C.ok)
 
 /** "resets in 2h 14m", "resets in 3d 4h", or "" when the time is unknown. */
 export const resetIn = (resetsAt: string | undefined, at: number): string => {
@@ -901,6 +841,7 @@ const tick = async ($: EngineInterface) => {
 }
 
 const HELPERS: Helpers = { colorOf, limitLabel, resetIn, buildTree }
+const TERM_HELPERS: TermHelpers = { limitLabel, resetIn, fitTree, subSummary }
 
 /** What this mod costs, drawn in the pane's debug footer. */
 export const perf = createPerf()
@@ -1004,341 +945,40 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const snap = await read($, snapshot)
-    const list = await read($, agents)
-    const extras = await read($, agentExtra)
-    const at = (await read($, now)) || Date.now()
-    const repo = await read($, git)
-    const hub = await read($, gh)
-
-    // The app surfaces draw it their own way: no cells to count, real charts.
-    if (e.surface !== 'terminal') {
-      const data = {
-        snap,
-        limits: await read($, limits),
-        agents: list,
-        extras,
-        git: repo,
-        gh: hub,
-        activity: await read($, activity),
-        collapsed: await read($, collapsed),
-        resources: await read($, resources),
-        branches: await read($, branches),
-        creating: await read($, creating),
-        hideBranch: (branch: string) => void hideBranch($, branch).catch(err => $.ui.toast(`Hide ${branch}: ${err?.message ?? err}`)),
-        // Merge, like Create PR: the session does it, and reports back.
-        mergePr: (pr: GitPr) =>
-          void $.prompt
-            .submit({ text: `Merge PR #${pr.number} (${pr.url}) once its checks pass: turn on auto-merge, or merge it now if it's already green.`, asUser: true })
-            .catch(() => $.ui.toast('Merge: could not send the request to the session')),
-        createPr: (branch: string) => void createPr($, branch).catch(() => undefined),
-        toggle: (id: string) =>
-          void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
-        columns: e.props.bodyColumns,
-        rows: e.props.scroll?.bodyRows,
-        at: Date.now(),
-        perf: perf.snapshot(),
-      }
-      return perf.time('render', () => renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS))
+    // Read so the pane redraws as elapsed times move.
+    await read($, now)
+    const data: DesktopData = {
+      snap: await read($, snapshot),
+      limits: await read($, limits),
+      agents: await read($, agents),
+      extras: await read($, agentExtra),
+      git: await read($, git),
+      gh: await read($, gh),
+      activity: await read($, activity),
+      collapsed: await read($, collapsed),
+      resources: await read($, resources),
+      branches: await read($, branches),
+      creating: await read($, creating),
+      workspacesGh: await read($, workspacesGh),
+      focused: e.props.isFocused,
+      hideBranch: (branch: string) => void hideBranch($, branch).catch(err => $.ui.toast(`Hide ${branch}: ${err?.message ?? err}`)),
+      // Merge, like Create PR: the session does it, and reports back.
+      mergePr: (pr: GitPr) =>
+        void $.prompt
+          .submit({ text: `Merge PR #${pr.number} (${pr.url}) once its checks pass: turn on auto-merge, or merge it now if it's already green.`, asUser: true })
+          .catch(() => $.ui.toast('Merge: could not send the request to the session')),
+      createPr: (branch: string) => void createPr($, branch).catch(() => undefined),
+      toggle: (id: string) =>
+        void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
+      columns: e.props.bodyColumns,
+      rows: e.props.scroll?.bodyRows,
+      at: Date.now(),
+      perf: perf.snapshot(),
     }
-    const { Box, Text } = $.ui.resolve(e)
-    const docked = e.props.placement === 'dock'
-    const bodyRows = e.props.scroll?.bodyRows ?? 0
-
-    // ---- the git section, one element per row ----
-    const gitLines: RenderElement[] = []
-    const sep = <Text dimColor>{' · '}</Text>
-    if (repo === null) {
-      gitLines.push(<Text dimColor>Reading git…</Text>)
-    } else if (!repo.ok) {
-      gitLines.push(<Text dimColor wrap="truncate">{`⎇ ${repo.note}`}</Text>)
-    } else {
-      const g = repo
-      gitLines.push(
-        <Text wrap="truncate">
-          <Text color={C.blue} bold>{`⎇ ${g.branch}`}</Text>
-          {g.detached ? <Text color={C.warn}>{' (detached)'}</Text> : null}
-          {g.ahead ? <Text color={C.ok}>{` ↑${g.ahead}`}</Text> : null}
-          {g.behind ? <Text color={C.warn}>{` ↓${g.behind}`}</Text> : null}
-          {!g.upstream && !g.detached ? <Text dimColor>{' ◌ no upstream'}</Text> : null}
-          {g.upstream && !g.ahead && !g.behind ? <Text color={C.ok}>{' ✓'}</Text> : null}
-          {sep}
-          <Text dimColor>{g.repo}</Text>
-        </Text>,
-      )
-      gitLines.push(
-        g.worktree.linked ? (
-          <Text wrap="truncate">
-            <Text color={C.purple}>{`⑂ worktree ${g.worktree.name}`}</Text>
-            <Text dimColor>{` (linked, ${g.worktree.count} total) ${g.worktree.path}`}</Text>
-          </Text>
-        ) : (
-          <Text dimColor wrap="truncate">
-            {`▣ main checkout${g.worktree.count > 1 ? ` (+${g.worktree.count - 1} worktrees)` : ''} ${g.worktree.path}`}
-          </Text>
-        ),
-      )
-      const counts: RenderElement[] = []
-      if (g.conflicted) counts.push(<Text color={C.bad}>{`✗ ${g.conflicted} conflicted  `}</Text>)
-      if (g.staged) counts.push(<Text color={C.ok}>{`✚ ${g.staged} staged  `}</Text>)
-      if (g.modified) counts.push(<Text color={C.warn}>{`● ${g.modified} modified  `}</Text>)
-      if (g.untracked) counts.push(<Text color={C.cyan}>{`? ${g.untracked} untracked  `}</Text>)
-      if (g.insertions) counts.push(<Text color={C.ok}>{`+${g.insertions} `}</Text>)
-      if (g.deletions) counts.push(<Text color={C.bad}>{`−${g.deletions}`}</Text>)
-      gitLines.push(
-        counts.length === 0 ? (
-          <Text color={C.ok}>✓ working tree clean</Text>
-        ) : (
-          <Text wrap="truncate">{counts}</Text>
-        ),
-      )
-      for (const f of g.files) {
-        const s = fileGlyph(f)
-        gitLines.push(
-          <Text wrap="truncate-start">
-            <Text color={s.color}>{`  ${s.glyph} `}</Text>
-            {f.path}
-          </Text>,
-        )
-      }
-      if (g.fileCount > g.files.length) gitLines.push(<Text dimColor>{`  … ${g.fileCount - g.files.length} more`}</Text>)
-
-      // ---- pull requests ----
-      if (hub === null || hub.root !== g.root) {
-        gitLines.push(<Text dimColor>⟳ Reading pull requests…</Text>)
-      } else if (hub.note) {
-        gitLines.push(<Text dimColor wrap="truncate">{`⚑ ${hub.note}`}</Text>)
-      } else if (hub.prs.length === 0) {
-        gitLines.push(<Text dimColor>⚑ No open pull requests</Text>)
-      } else {
-        for (const pr of hub.prs.slice(0, GIT_PRS)) {
-          const p = prGlyph(pr)
-          gitLines.push(
-            <Text wrap="truncate">
-              <Text color={p.color} dimColor={!p.color} bold={pr.current}>{`${p.glyph} #${pr.number} `}</Text>
-              <Text dimColor={pr.state !== 'OPEN' || pr.isDraft}>{pr.title}</Text>
-            </Text>,
-          )
-          const bits: RenderElement[] = []
-          if (pr.state === 'MERGED') bits.push(<Text color={C.purple}>merged</Text>)
-          else if (pr.state === 'CLOSED') bits.push(<Text dimColor>closed</Text>)
-          else {
-            if (pr.isDraft) bits.push(<Text dimColor>◌ draft</Text>)
-            const { passed, failed, pending } = pr.checks
-            if (failed) {
-              bits.push(
-                <Text color={C.bad}>{`✗ ${failed} failing${pr.failing.length ? `: ${pr.failing.slice(0, 3).join(', ')}` : ''}`}</Text>,
-              )
-            }
-            if (pending) bits.push(<Text color={C.warn}>{`⟳ ${pending} pending`}</Text>)
-            if (passed && !failed && !pending) bits.push(<Text color={C.ok}>✓ checks pass</Text>)
-            if (!passed && !failed && !pending) bits.push(<Text dimColor>no checks</Text>)
-            if (pr.review === 'APPROVED') bits.push(<Text color={C.ok}>✓ approved</Text>)
-            else if (pr.review === 'CHANGES_REQUESTED') bits.push(<Text color={C.bad}>✗ changes requested</Text>)
-            else if (pr.review === 'REVIEW_REQUIRED') bits.push(<Text color={C.warn}>◌ review required</Text>)
-          }
-          if (pr.current) bits.push(<Text color={C.blue}>⎇ this branch</Text>)
-          gitLines.push(
-            <Text wrap="truncate">
-              {'  '}
-              {bits.flatMap((b, i) => (i === 0 ? [b] : [sep, b]))}
-            </Text>,
-          )
-        }
-        if (hub.prs.length > GIT_PRS) gitLines.push(<Text dimColor>{`  … ${hub.prs.length - GIT_PRS} more PRs`}</Text>)
-      }
+    // The terminal draws the same inspector in cells; the app surfaces as boxes.
+    if (e.surface === 'terminal') {
+      return perf.time('render', () => renderTerminal($.ui.resolve(e) as TermElements, data, TERM_HELPERS))
     }
-    const gitSection = (
-      <Box flexDirection="column" marginTop={1} flexShrink={0}>
-        {gitLines}
-      </Box>
-    )
-    const gitRows = gitLines.length + 1
-
-    // ---- account limits, between the context rows and the tasks ----
-    const windows = (await read($, limits)) ?? []
-    const paneColumns = Math.max(20, e.props.bodyColumns)
-    const drawnAt = Date.now()
-    const labelWidth = Math.min(16, Math.max(7, ...windows.map(w => limitLabel(w.kind).length)) + 1)
-    const resetTexts = windows.map(w => resetIn(w.resetsAt, drawnAt))
-    const resetWidth = Math.max(0, ...resetTexts.map(t => t.length))
-    // glyph (2), label, bar, percent (5), the reset text
-    const limitBar = Math.max(4, Math.min(30, paneColumns - 2 - labelWidth - 5 - (resetWidth ? resetWidth + 2 : 0)))
-    const limitLines: RenderElement[] =
-      windows.length === 0
-        ? [<Text dimColor>No limits reported yet.</Text>]
-        : windows.map((w, i) => {
-            const color = limitColor(w.percent)
-            const filled = Math.min(limitBar, Math.round((Math.min(100, Math.max(0, w.percent)) / 100) * limitBar))
-            const pct = `${Math.round(w.percent)}%`.padStart(5)
-            return (
-              <Box flexDirection="row">
-                <Text color={color}>■ </Text>
-                <Box width={labelWidth} flexShrink={0}>
-                  <Text wrap="truncate">{limitLabel(w.kind)}</Text>
-                </Box>
-                <Text color={color}>{'█'.repeat(filled)}</Text>
-                <Text dimColor>{'░'.repeat(limitBar - filled)}</Text>
-                <Text color={color} bold>
-                  {pct}
-                </Text>
-                {resetTexts[i] ? (
-                  <Text dimColor wrap="truncate">{`  ${resetTexts[i]}`}</Text>
-                ) : null}
-              </Box>
-            )
-          })
-    const limitsSection = (
-      <Box flexDirection="column" marginTop={1} flexShrink={0}>
-        <Text bold>Account limits</Text>
-        {limitLines}
-      </Box>
-    )
-    const limitRows = limitLines.length + 2
-
-    // ---- tasks, cut to the rows the git section leaves ----
-    const tasksFor = (budget: number) => {
-      // budget: rows for the tree itself, under the margin and the heading.
-      if (budget < 1) return null
-      const { rows: shown, hidden } = fitTree(list, budget)
-      return (
-        <Box flexDirection="column" marginTop={1} flexShrink={1} overflow="hidden">
-          <Text bold>Tasks</Text>
-          {list.length === 0 ? (
-            <Text dimColor>No subagents yet.</Text>
-          ) : (
-            shown.map(row => {
-              const { agent } = row
-              const s = statusOf(agent.status)
-              const connector = connectorOf(row)
-              const sub = subSummary(row)
-              return (
-                <Box key={agent.id} flexDirection="row">
-                  {connector ? <Text dimColor>{connector}</Text> : null}
-                  <Text color={s.color}>{`${s.glyph} `}</Text>
-                  <Text wrap="truncate">
-                    {agent.description || agent.type}
-                    <Text dimColor>{`  ${agentDetail(agent, extras[agent.id], at)}`}</Text>
-                    {sub ? <Text dimColor>{`  ${sub}`}</Text> : null}
-                  </Text>
-                </Box>
-              )
-            })
-          )}
-          {hidden > 0 ? <Text dimColor>{`… ${hidden} more tasks`}</Text> : null}
-        </Box>
-      )
-    }
-
-    /** The context content, the account limits, the tasks, then the git section on the last rows when docked. */
-    const compose = (head: RenderElement, headRows: number, width?: number) => {
-      const budget = docked ? bodyRows - headRows - limitRows - gitRows - 2 : Number.POSITIVE_INFINITY
-      const tasks = tasksFor(budget)
-      return docked ? (
-        <Box flexDirection="column" width={width} height={bodyRows}>
-          <Box flexDirection="column" flexShrink={1} overflow="hidden">
-            {head}
-            {limitsSection}
-            {tasks}
-          </Box>
-          <Box flexGrow={1} flexShrink={1} />
-          {gitSection}
-        </Box>
-      ) : (
-        <Box flexDirection="column" width={width}>
-          {head}
-          {limitsSection}
-          {tasks}
-          {gitSection}
-        </Box>
-      )
-    }
-
-    if (snap === null) {
-      return compose(<Text dimColor>Measuring the context window…</Text>, 1)
-    }
-
-    const columns = Math.max(20, e.props.bodyColumns)
-    const percentColor = snap.percent >= 90 ? 'error' : snap.percent >= 75 ? 'warning' : 'success'
-    const cells = layoutBar(snap.segments, snap.max, columns)
-    const rows = snap.segments.filter(s => s.tokens > 0)
-    const nameWidth = Math.min(22, Math.max(...rows.map(s => s.name.length)) + 2)
-    // name, then tokens (6) and share (5), then a bar of what is left
-    const rowBar = Math.max(0, columns - 2 - nameWidth - 12)
-
-    const details: [string, Item[]][] = [
-      ['Memory', snap.memory],
-      ['MCP', snap.mcp],
-      ['Skills', snap.skills],
-      ['Agents', snap.agents],
-    ]
-
-    const head = (
-      <Box flexDirection="column" flexShrink={0}>
-        <Box flexDirection="row">
-          <Text color={percentColor} bold>
-            {`${snap.percent}%`}
-          </Text>
-          <Text dimColor>{` · ${formatTokens(snap.total)} of ${formatTokens(snap.max)} · ${snap.model}`}</Text>
-        </Box>
-        <Box flexDirection="row">
-          {snap.segments.map((s, i) => {
-            const n = cells[i] ?? 0
-            if (n === 0) return null
-            const color = colorOf(snap.segments, i)
-            const glyph = GLYPH[s.kind].repeat(n)
-
-            return color ? <Text color={color}>{glyph}</Text> : <Text dimColor>{glyph}</Text>
-          })}
-        </Box>
-        <Box flexDirection="column" marginTop={1}>
-          {rows.map(s => {
-            const i = snap.segments.indexOf(s)
-            const color = colorOf(snap.segments, i)
-            const share = (s.tokens / Math.max(snap.max, 1)) * 100
-            const n = s.tokens > 0 ? Math.max(1, Math.round((share / 100) * rowBar)) : 0
-
-            return (
-              <Box flexDirection="row">
-                {color ? <Text color={color}>■ </Text> : <Text dimColor>{`${GLYPH[s.kind]} `}</Text>}
-                <Box width={nameWidth}>
-                  <Text dimColor={!color} wrap="truncate">
-                    {s.name}
-                  </Text>
-                </Box>
-                <Text>{formatTokens(s.tokens).padStart(6)}</Text>
-                <Text dimColor>{`${share < 1 ? '<1' : Math.round(share)}%`.padStart(5)} </Text>
-                {color ? (
-                  <Text color={color}>{'▬'.repeat(Math.min(n, rowBar))}</Text>
-                ) : (
-                  <Text dimColor>{GLYPH[s.kind].repeat(Math.min(n, rowBar))}</Text>
-                )}
-              </Box>
-            )
-          })}
-        </Box>
-        <Box flexDirection="column" marginTop={1}>
-          {details.map(([name, items]) =>
-            items.length === 0 ? null : (
-              <Box flexDirection="row">
-                <Box width={8} flexShrink={0}>
-                  <Text bold>{name}</Text>
-                </Box>
-                <Text wrap="truncate">
-                  {items.map(it => `${it.label} ${formatTokens(it.tokens)}`).join(' · ')}
-                </Text>
-              </Box>
-            ),
-          )}
-          <Text dimColor>
-            {snap.compactAt ? `Auto-compacts at ${formatTokens(snap.compactAt)}` : 'Auto-compact off'}
-          </Text>
-        </Box>
-      </Box>
-    )
-    // percent, bar, margin, a row per category, margin, the details, the compaction line
-    const headRows = 2 + 1 + rows.length + 1 + details.filter(([, items]) => items.length > 0).length + 1
-
-    return compose(head, headRows, columns)
+    return perf.time('render', () => renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS))
   })
 }

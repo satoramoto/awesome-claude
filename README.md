@@ -15,9 +15,9 @@ version CI pins.
 | Mod | What it shows | Opens with | Needs |
 | --- | --- | --- | --- |
 | `overview` | the current session at a glance: context, limits, activity, agents, the branches it started and their pull requests, cost | on its own when a session starts; `/overview` opens it again | `git` for Workspaces; `gh` signed in for pull requests |
-| `issues` | the open GitHub issues of the session's repository, newest change first, with actions on each | `/issues` | a GitHub repository; `gh` signed in |
-| `launcher` | the project's dev servers from `.claude/launch.json` (the desktop app's preview list), each with its state, URL, Start, Stop and Restart, and its output | `/launcher` (or `/preview`); `/launcher start <name>`, `/launcher stop <name>` | a `.claude/launch.json`; `lsof` to tell which ports answer |
-| `lab` | for mod authors: 77 experiments probing what the engine draws (SVG gradients and filters, animation, hover, `Client` modules, every element), with the engine's verdict on each surface in `mods/lab/verdicts.json` | `/lab`, `/lab <id>`, `/lab gallery` | nothing |
+| `issues` | the open GitHub issues of the session's repository, newest change first, with actions on each | on its own when a session starts; `/issues` opens it again | a GitHub repository; `gh` signed in |
+| `launcher` | the project's dev servers from `.claude/launch.json` (the desktop app's preview list), each with its state, URL, Start, Stop and Restart, and its output | on its own when a session starts; `/launcher` (or `/preview`) opens it again; `/launcher start <name>`, `/launcher stop <name>` | a `.claude/launch.json`; `lsof` to tell which ports answer |
+| `lab` | for mod authors: 77 experiments probing what the engine draws (SVG gradients and filters, animation, hover, `Client` modules, every element), with the engine's verdict on each surface in `mods/lab/verdicts.json` | the index on its own when a session starts; `/lab`, `/lab <id>`, `/lab gallery` | nothing |
 
 ### Forked mods
 
@@ -63,7 +63,8 @@ A footer shows the session's share of the machine's cpu, memory and network.
 
 ### `/issues`
 
-Lists the open issues of the session's repository (read with `gh issue list`).
+Opens by itself when a session starts; `/issues` brings it back. Lists the open
+issues of the session's repository (read with `gh issue list`).
 
 - **Quick add** creates an issue from a title alone, with an empty body
   (`gh issue create`).
@@ -86,6 +87,7 @@ exact wording before you rely on them.
 ### `/launcher`
 
 The desktop app's preview launcher, in a pane that works in the terminal too.
+Opens by itself when a session starts; `/launcher` brings it back.
 It lists every configuration in the project's `.claude/launch.json` (the
 session's folder, or the nearest one above it up to the git root), one row each:
 its name, its state, its URL once the port answers, and Start, Stop and Restart.
@@ -133,6 +135,46 @@ satoramoto/awesome-claude`, then `claude plugin install overview@awesome-claude`
 
 Run these from a terminal session; a mod installed at user scope then loads in
 the desktop app too.
+
+### Getting updates
+
+An installed mod updates only when its `version` changes; every release of a mod
+raises it. To fetch the newest versions by hand, at the prompt:
+
+```
+/plugin marketplace update awesome-claude
+/plugin update overview@awesome-claude
+```
+
+or from a shell: `claude plugin marketplace update awesome-claude`, then
+`claude plugin update overview@awesome-claude` (and the same for each mod you
+installed). The new version loads after a restart or `/reload-plugins`.
+
+Auto-update is off by default for marketplaces other than Anthropic's. Turn it
+on in `/plugin` → Marketplaces → awesome-claude → Enable auto-update, or with
+`"autoUpdate": true` next to `source` in `extraKnownMarketplaces` in
+`~/.claude/settings.json`:
+
+```json
+"extraKnownMarketplaces": {
+  "awesome-claude": {
+    "source": { "source": "github", "repo": "satoramoto/awesome-claude" },
+    "autoUpdate": true
+  }
+}
+```
+
+Loading from a clone (`--plugin-dir` or `CLAUDE_CODE_PLUGIN_DIRS`, below) gets
+no marketplace updates: `git pull` the clone instead. To pull at every session
+start, a `SessionStart` hook in `~/.claude/settings.json`:
+
+```json
+"hooks": {
+  "SessionStart": [
+    { "hooks": [{ "type": "command", "command": "git -C ~/Code/satoramoto/awesome-claude pull -q --ff-only" }] }
+  ]
+}
+```
 
 ### Try it from a clone, for one session
 
@@ -188,7 +230,10 @@ Claude Code loads when working in this repository, hold the how-to:
 
 Each mod is versioned on its own in its `plugin.json`. A new mod also gets an
 entry in `.claude-plugin/marketplace.json`; CI fails if a mod is missing there or
-its version differs from its `plugin.json`.
+its version differs from its `plugin.json`. Any change to a mod's compiled output
+in `plugins/<mod>/` (a kit change included) raises its version, in `plugin.json`
+and the marketplace, since installs only update when it changes; CI fails a pull
+request that changes a mod's output without raising its version.
 
 ### The playground
 

@@ -167,8 +167,16 @@ From upstream [`569c528`](https://github.com/anthropics/claude-code-playground/t
   icon, the note in grey, and Proceed (its label red) and Cancel (the main
   button, with the focus, so Enter refuses) as real buttons, hotkeys 1 and 2 kept.
   `hooks/hooks.json` loads `./register.tsx`; `tsconfig.json` is new.
+- The terminal drawing redrawn with the kit's terminal components, to match the
+  desktop's: still one round border in the warning colour, inside it the alert
+  glyph and what's held ("Blast Radius" on the right in the band), Command and
+  Would as property rows (what it would lose in red), each path, commit or
+  migration as a list row with its glyph (status letters and commit hashes dim on
+  the right), the note dim, and Proceed and Cancel as the kit's actions with
+  hotkeys 1 and 2, the hint beside them when it fits. Every line truncates at
+  the edge, so nothing overflows or wraps at any width.
 - Tests: `hooks/blast-radius.test.ts` (new) draws the pane on the terminal and the
-  desktop and the band on the desktop through the engine's test kit, and checks
-  that Cancel refuses the command and Proceed lets it run.
+  desktop, the band on the desktop and on a 30-column terminal, through the
+  engine's test kit, and checks that Cancel refuses the command and Proceed lets it run.
 - This README: the fork notice at the top and this section. The rest still
-  describes upstream's terminal drawing, which is unchanged.
+  describes upstream's terminal drawing.

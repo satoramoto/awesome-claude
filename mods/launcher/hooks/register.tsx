@@ -86,18 +86,81 @@ export const portsFromLsof = (stdout: string): Set<number> => {
   return ports
 }
 
-/** The last probe: every port something listens on. */
+/** The process listening on each TCP port, from `lsof -Fpn`'s `p<pid>` and `n<addr>:<port>` lines. */
+export const pidsFromLsof = (stdout: string): Map<number, number> => {
+  const pids = new Map<number, number>()
+  let pid = 0
+  for (const line of stdout.split('\n')) {
+    const l = line.trim()
+    if (l.startsWith('p')) pid = Number(l.slice(1)) || 0
+    const m = /^n.*:(\d+)$/.exec(l)
+    if (m && pid && !pids.has(Number(m[1]))) pids.set(Number(m[1]), pid)
+  }
+  return pids
+}
+
+/** `ps -o pid=,%cpu=,rss=` lines: each process's CPU percent and resident memory in bytes. */
+export const usageFromPs = (stdout: string): Map<number, { cpu: number; rss: number }> => {
+  const usage = new Map<number, { cpu: number; rss: number }>()
+  for (const line of stdout.split('\n')) {
+    const [pid, cpu, rss] = line.trim().split(/\s+/).map(Number)
+    if (pid && Number.isFinite(cpu) && Number.isFinite(rss)) usage.set(pid, { cpu: cpu!, rss: rss! * 1024 })
+  }
+  return usage
+}
+
+/** The last probe: every port something listens on, and the process on each where lsof said. */
 let listening = new Set<number>()
+let pidOf = new Map<number, number>()
 
 /** Which ports answer: lsof's listening sockets, or, without lsof, an HTTP request to each configuration's port. */
 const probe = async ($: EngineInterface, wanted: number[]) => {
   try {
-    const run = await $.process.run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fn'], { timeoutMs: 5_000 })
+    const run = await $.process.run(['lsof', '-nP', '-iTCP', '-sTCP:LISTEN', '-Fpn'], { timeoutMs: 5_000 })
     // lsof exits 1 when nothing listens at all.
     listening = portsFromLsof(run.stdout)
+    pidOf = pidsFromLsof(run.stdout)
   } catch {
     const answers = await Promise.all(wanted.map(p => $.http.fetch(urlOf(p)).then(() => p, () => null)))
     listening = new Set(answers.filter((p): p is number => p !== null))
+    pidOf = new Map()
+  }
+}
+
+/** How many CPU samples a server keeps: two minutes of ticks. */
+const USAGE_SAMPLES = 60
+/** Each answering server's CPU samples and last memory, by configuration name. */
+const usage = new Map<string, { cpu: number[]; rss: number }>()
+
+/**
+ * One CPU and memory sample of each answering server's listening process: one
+ * `ps` for all of them, after the probe that found their pids. Servers that
+ * stopped answering lose their samples. Without lsof's pids or ps, nothing.
+ */
+const sample = async ($: EngineInterface, configs: LaunchConfig[]) => {
+  const pids = new Map<string, number>()
+  for (const c of configs) {
+    const pid = pidOf.get(children.get(c.name)?.port ?? c.port)
+    if (pid) pids.set(c.name, pid)
+  }
+  for (const name of [...usage.keys()]) if (!pids.has(name)) usage.delete(name)
+  if (!pids.size) return
+  let got: Map<number, { cpu: number; rss: number }>
+  try {
+    got = usageFromPs((await $.process.run(['ps', '-o', 'pid=,%cpu=,rss=', '-p', [...new Set(pids.values())].join(',')], { timeoutMs: 5_000 })).stdout)
+  } catch {
+    return
+  }
+  for (const [name, pid] of pids) {
+    const now = got.get(pid)
+    if (!now) {
+      usage.delete(name)
+      continue
+    }
+    const u = usage.get(name) ?? { cpu: [], rss: 0 }
+    u.cpu = [...u.cpu, now.cpu].slice(-USAGE_SAMPLES)
+    u.rss = now.rss
+    usage.set(name, u)
   }
 }
 
@@ -163,12 +226,14 @@ const reconcile = async ($: EngineInterface) => {
     else if (listening.has(c.port)) status = 'elsewhere'
     else if (prev?.status === 'failed') status = 'failed'
     else status = 'stopped'
+    const used = status === 'running' || status === 'elsewhere' ? usage.get(c.name) : undefined
     next[c.name] = {
       status,
       port: child?.port ?? c.port,
       log: logOf(c.name) ?? prev?.log ?? [],
       code: child ? null : (prev?.code ?? null),
       startedAt: child?.startedAt ?? 0,
+      ...(used ? { cpu: used.cpu, rss: used.rss } : {}),
     }
   }
   // Only a real change redraws.
@@ -300,7 +365,9 @@ const refresh = async ($: EngineInterface, readFile: boolean) => {
       const old = await read($, file)
       if (!old || JSON.stringify({ ...old, at: 0 }) !== JSON.stringify({ ...fresh, at: 0 })) await update($, file, () => fresh)
     }
-    await probe($, ((await read($, file))?.configs ?? []).map(c => c.port))
+    const configs = (await read($, file))?.configs ?? []
+    await probe($, configs.map(c => c.port))
+    await sample($, configs)
     await reconcile($)
   } finally {
     busy = false
@@ -371,6 +438,7 @@ export const register: Register = on => {
     }
     worker?.cancel()
     worker = $.clock.every(TICK, () => void tick($).catch(() => undefined))
+    void $.ui.open({ id: PANE, title: TITLE })
 
     return next(e)
   })
@@ -380,11 +448,20 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const say = (what: Promise<string>) => void what.then(text => (text.startsWith('Starting') || text.startsWith('Stopped') ? undefined : $.ui.toast(text))).catch(() => undefined)
-    return renderPane($.ui.resolve(e) as PaneElements, e.surface, e.props.bodyColumns, await read($, file), await read($, servers), await read($, open), {
-      start: name => say(start($, name)),
-      stop: name => say(stop($, name)),
-      restart: name => say(restart($, name)),
-      toggle: name => void update($, open, o => (o.includes(name) ? o.filter(n => n !== name) : [...o, name])).catch(() => undefined),
-    })
+    return renderPane(
+      $.ui.resolve(e) as PaneElements,
+      e.surface,
+      e.props.bodyColumns,
+      await read($, file),
+      await read($, servers),
+      await read($, open),
+      {
+        start: name => say(start($, name)),
+        stop: name => say(stop($, name)),
+        restart: name => say(restart($, name)),
+        toggle: name => void update($, open, o => (o.includes(name) ? o.filter(n => n !== name) : [...o, name])).catch(() => undefined),
+      },
+      { focused: e.props.isFocused },
+    )
   })
 }

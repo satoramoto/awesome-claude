@@ -111,7 +111,7 @@ export const resolverFrom = (map: Record<string, ModuleLike | (() => Promise<unk
 }
 
 /** Every module under a mod's hooks folder, loaded on demand. */
-export const modsResolver: ClientResolver = resolverFrom(import.meta.glob('../mods/*/hooks/**/*.{tsx,ts,jsx,js,mjs}'))
+export const modsResolver: ClientResolver = resolverFrom(import.meta.glob(['../mods/*/hooks/**/*.{tsx,ts,jsx,js,mjs}', '!**/*.test.{tsx,ts,jsx,js,mjs}']))
 
 const defaults: ClientOptions = {}
 

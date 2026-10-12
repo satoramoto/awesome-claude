@@ -52,6 +52,7 @@ export const register: Register = on => {
       description: 'Open the rendering lab: experiments on what the engine draws (/lab <id> opens one)',
       argumentHint: '[experiment id]',
     })
+    void $.ui.open({ id: INDEX, title: 'Lab' })
     return next(e)
   })
 

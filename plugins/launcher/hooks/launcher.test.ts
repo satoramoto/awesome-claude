@@ -27,12 +27,16 @@ const result = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, s
 type World = {
   /** Ports something listens on, as lsof would list them. */
   listening: Set<number>
+  /** The CPU percent ps reports for every listening process. */
+  cpu: number
   /** Every spawn the mod asked for. */
   spawned: ProcessSpawnRequest[]
   /** Spawns that ended because the mod ended their loop. */
   killed: string[]
   /** The test's clock. */
   clock: ReturnType<typeof mock.clock>
+  /** Every pane the mod opened. */
+  opened: { id: string; title: string }[]
 }
 
 /**
@@ -42,9 +46,12 @@ type World = {
  */
 const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => {
   const clock = mock.clock(on, { now: NOW })
-  const world: World = { listening: new Set([6006]), spawned: [], killed: [], clock }
+  const world: World = { listening: new Set([6006]), cpu: 4, spawned: [], killed: [], clock, opened: [] }
   on('session.cwd', async () => ({ value: '/repo/app' }))
-  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.open', async (_$, e) => {
+    world.opened.push({ id: e.id, title: e.title ?? '' })
+    return { value: { isPlaced: true } }
+  })
   on('ui.panes', async () => ({ value: [] }))
   on('ui.toast', async () => ({ value: undefined }))
   on('command.run', async () => ({ text: '' }))
@@ -53,9 +60,12 @@ const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => 
     if (e.path !== '/repo/.claude/launch.json') throw new Error(`ENOENT ${e.path}`)
     return { value: JSON.stringify(LAUNCH) }
   })
-  on('process.run', async (_$, e) =>
-    e.argv[0] === 'lsof' ? result([...world.listening].map(p => `p100\nf3\nn*:${p}`).join('\n'), world.listening.size ? 0 : 1) : result('', 1),
-  )
+  // Each listening port's process has the port for its pid; ps reports each at `world.cpu` percent and 200 MB.
+  on('process.run', async (_$, e) => {
+    if (e.argv[0] === 'lsof') return result([...world.listening].map(p => `p${p}\nf3\nn*:${p}`).join('\n'), world.listening.size ? 0 : 1)
+    if (e.argv[0] === 'ps') return result(e.argv[e.argv.length - 1]!.split(',').map(pid => `${pid} ${world.cpu.toFixed(1)} 204800`).join('\n'))
+    return result('', 1)
+  })
   on('process.spawn', async function* (_$, e, next) {
     world.spawned.push(e)
     const name = e.argv.includes('dev') ? 'app' : 'storybook'
@@ -79,6 +89,14 @@ const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => 
 const launcher = ($: Engine, args = '') =>
   $.command.run({ command: 'launcher', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 120 } })
 
+test('the pane opens on its own when a session starts', async ($, on) => {
+  const { opened } = engine(on)
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo/app', surface: 'terminal', isInteractive: true })
+  expect(opened).toEqual([{ id: 'launcher', title: 'Launcher' }])
+})
+
 test('/launcher opens a pane listing each configuration of launch.json, on the terminal and the desktop', async ($, on) => {
   engine(on)
   const { text } = await launcher($)
@@ -89,11 +107,189 @@ test('/launcher opens a pane listing each configuration of launch.json, on the t
     const ui = await $.ui.mount({ plugin: 'launcher', surface, ...PANE })
     expect(await ui.find({ type: 'Text', text: 'app' })).toBeDefined()
     expect(await ui.find({ type: 'Text', text: 'stopped' })).toBeDefined()
-    expect(await ui.find({ type: 'Text', text: 'running elsewhere' })).toBeDefined()
+    // The terminal's word is shorter: its green ✓ already says it answers.
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? /^elsewhere$/ : 'running elsewhere' })).toBeDefined()
     // A server something else runs can't be started twice; the stopped one can.
     expect(await ui.find({ key: 'start-app' })).toBeDefined()
     expect(await ui.find({ key: 'start-storybook' })).toBeUndefined()
     expect(await ui.find({ type: 'Link', text: 'localhost:6006' }), 'the URL of the one running elsewhere').toBeDefined()
+    await ui.unmount()
+  }
+})
+
+const mountAt = ($: Engine, surface: 'terminal' | 'desktop', bodyColumns: number) =>
+  $.ui.mount({ plugin: 'launcher', surface, ...PANE, props: { ...PANE.props, bodyColumns } })
+
+test('on the terminal, the path alone, a blank row, then each row with its kit status and actions, at every width', async ($, on) => {
+  engine(on, { crash: 'app' })
+  await launcher($)
+  for (const columns of [30, 40, 60, 100]) {
+    const ui = await mountAt($, 'terminal', columns)
+    expect(await ui.find({ type: 'Text', text: 'repo/.claude/launch.json' }), `head at ${columns}`).toBeDefined()
+    expect((await ui.find({ key: 'top' }))?.props.marginBottom, `the blank row under the head at ${columns}`).toBe(1)
+    // The head says no counts: every row's header already says its state.
+    expect(await ui.find({ type: 'Text', text: /^running$/ }), `no counts at ${columns}`).toBeUndefined()
+    // A stopped server's state is the kit's status glyph, then its word where it fits.
+    expect(await ui.find({ type: 'Text', text: '■' }), `stopped at ${columns}`).toBeDefined()
+    expect(await ui.find({ key: 'word-app', text: 'stopped' }), `the word stopped at ${columns}`)[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    expect(await ui.find({ type: 'Button', text: 'Start' }), `Start at ${columns}`).toBeDefined()
+    // The one running elsewhere keeps its glyph and its address, the word only where it fits.
+    expect(await ui.find({ type: 'Text', text: '✓' }), `running elsewhere at ${columns}`).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: '6006' }), `its address at ${columns}`).toBeDefined()
+    expect(await ui.find({ key: 'word-storybook', text: 'elsewhere' }), `the word at ${columns}`)[columns >= 40 ? 'toBeDefined' : 'toBeUndefined']()
+    await ui.unmount()
+  }
+
+  // A crash unfolds its row: the exit code, then, a blank row on, the output's tail,
+  // each line a dim note, without the lines the props already say.
+  await launcher($, 'start app')
+  const ui = await mountAt($, 'terminal', 60)
+  expect(await ui.find({ type: 'Text', text: '✕' })).toBeDefined()
+  expect(await ui.find({ key: 'word-app', text: 'failed' })).toBeDefined()
+  const line = await ui.find({ type: 'Text', text: 'Error: Cannot find module vite' })
+  expect(line?.props.dimColor).toBe(true)
+  expect(line?.props.wrap).toBe('truncate')
+  expect((await ui.find({ key: 'log-app' }))?.props.marginTop, 'a blank row above the output').toBe(1)
+  expect(await ui.find({ type: 'Text', text: /exited with code/ }), 'the exit prop says it').toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^\$ npm/ }), 'the command prop says it').toBeUndefined()
+  await ui.unmount()
+
+  // The desktop's output keeps every line.
+  const desk = await mountAt($, 'desktop', 60)
+  expect(await desk.find({ type: 'Text', text: 'exited with code 1' })).toBeDefined()
+  await desk.unmount()
+})
+
+test('on the terminal, every row keeps the same columns: state, address and buttons line up', { timeoutMs: 15_000 }, async ($, on) => {
+  engine(on)
+  await launcher($)
+  await launcher($, 'start app')
+  for (const columns of [40, 60, 80]) {
+    const ui = await mountAt($, 'terminal', columns)
+    // app is starting (Stop, Restart), storybook runs elsewhere (no buttons): their slots are as wide.
+    for (const slot of ['state', 'where', 'do']) {
+      const a = (await ui.find({ key: `${slot}-app` }))?.props.width
+      expect(a, `${slot} at ${columns}`).toBeGreaterThan(0)
+      expect((await ui.find({ key: `${slot}-storybook` }))?.props.width, `${slot} at ${columns}`).toBe(a)
+    }
+    await ui.unmount()
+  }
+  await launcher($, 'stop app')
+})
+
+test('on a wide terminal the rows keep to the measure', async ($, on) => {
+  engine(on)
+  await launcher($)
+  const ui = await mountAt($, 'terminal', 120)
+  expect((await ui.find({ key: 'section-app' }))?.props.width).toBe(72)
+  await ui.unmount()
+})
+
+// app is starting (Stop, Restart) and storybook, the longest title, runs elsewhere.
+const STARTING = [
+  { columns: 40, address: true, restart: true },
+  { columns: 30, address: false, restart: true },
+]
+for (const o of STARTING) {
+  test(`on the terminal at ${o.columns} columns, a starting row gives up its word and address before its Stop and Restart`, async ($, on) => {
+    const world = engine(on)
+    await launcher($)
+    const ui = await mountAt($, 'terminal', o.columns)
+    await ui.press({ key: 'start-app' })
+    expect(world.spawned).toHaveLength(1)
+    expect(await ui.find({ key: 'stop-app' })).toBeDefined()
+    expect(await ui.find({ key: 'restart-app' }))[o.restart ? 'toBeDefined' : 'toBeUndefined']()
+    expect(await ui.find({ type: 'Text', text: '◐' })).toBeDefined()
+    expect(await ui.find({ key: 'word-app', text: 'starting' })).toBeUndefined()
+    expect(await ui.find({ key: 'where-app' }))[o.address ? 'toBeDefined' : 'toBeUndefined']()
+    await ui.press({ key: 'stop-app' })
+    expect(world.killed).toEqual(['app'])
+    await ui.unmount()
+  })
+}
+
+/** A running app (started here, answering) at `columns`, after `samples` reads of the ports. */
+const runningAt = async ($: Engine, on: On, columns: number, samples = 1) => {
+  const world = engine(on)
+  await launcher($)
+  await launcher($, 'start app')
+  world.listening.add(5173)
+  for (let i = 0; i < samples; i++) await launcher($, 'list')
+  return { world, ui: await mountAt($, 'terminal', columns) }
+}
+
+// The rows' right sides give way in one order, together: the address shortens to its
+// port, then the sparkline goes, then the word, then the address, then Restart. Stop
+// never goes. Beside storybook's title and its sparkline's column (it has two
+// samples), the whole row needs 64 columns, the short one 55, without the sparkline
+// 47, without the word 37, without the address 30.
+const ORDER = [
+  { columns: 70, address: 'localhost:5173', word: true, restart: true },
+  { columns: 50, address: ':5173', word: true, restart: true },
+  { columns: 40, address: ':5173', word: false, restart: true },
+  { columns: 32, address: null, word: false, restart: true },
+  { columns: 25, address: null, word: false, restart: false },
+]
+for (const o of ORDER) {
+  test(`on the terminal at ${o.columns} columns, a running row keeps ${[o.address ?? 'no address', o.word ? 'its word' : 'no word', o.restart ? 'Restart' : 'no Restart'].join(', ')}`, { timeoutMs: 15_000 }, async ($, on) => {
+    const { ui } = await runningAt($, on, o.columns)
+    expect(await ui.find({ type: 'Text', text: '✓' }), 'the glyph always').toBeDefined()
+    expect(await ui.find({ key: 'stop-app' }), 'Stop always').toBeDefined()
+    expect(await ui.find({ key: 'word-app', text: 'running' }), 'the word')[o.word ? 'toBeDefined' : 'toBeUndefined']()
+    if (o.address) expect(await ui.find({ type: 'Text', text: new RegExp(`^${o.address}$`) }), 'the address').toBeDefined()
+    else expect(await ui.find({ key: 'where-app' }), 'no address').toBeUndefined()
+    if (o.address === ':5173') expect(await ui.find({ type: 'Text', text: /localhost:5173/ }), 'shortened').toBeUndefined()
+    expect(await ui.find({ key: 'restart-app' }), 'Restart')[o.restart ? 'toBeDefined' : 'toBeUndefined']()
+    await launcher($, 'stop app')
+    await ui.unmount()
+  })
+}
+
+test('on the terminal, a running server draws a CPU sparkline that stays after its address shortens, and its CPU and memory unfolded', { timeoutMs: 15_000 }, async ($, on) => {
+  const { world, ui } = await runningAt($, on, 100, 1)
+  // One sample is no line yet.
+  expect(await ui.find({ key: 'spark-app' }), 'no sparkline from one sample').toBeUndefined()
+  world.cpu = 37
+  await launcher($, 'list')
+  expect(await ui.find({ key: 'spark-app' }), 'a sparkline from two samples').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^[⠀-⣿ ]*[⡀-⣿][⠀-⣿ ]*$/ }), 'drawn in Braille').toBeDefined()
+
+  await ui.press({ key: 'toggle-app' })
+  expect(await ui.find({ type: 'Text', text: '37%' }), 'the last CPU sample').toBeDefined()
+  expect(await ui.find({ type: 'Text', text: '200MB' }), 'its memory').toBeDefined()
+  await ui.unmount()
+
+  // At 60 columns the address has shortened to its port and the sparkline stays; at 50 it has gone.
+  const mid = await mountAt($, 'terminal', 60)
+  expect(await mid.find({ key: 'spark-app' })).toBeDefined()
+  expect(await mid.find({ type: 'Text', text: /^:5173$/ })).toBeDefined()
+  await mid.unmount()
+  const narrow = await mountAt($, 'terminal', 50)
+  expect(await narrow.find({ key: 'spark-app' })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /^:5173$/ })).toBeDefined()
+  await narrow.unmount()
+
+  // The desktop draws as before: no sparkline, no CPU figures.
+  const desk = await mountAt($, 'desktop', 100)
+  expect(await desk.find({ key: 'spark-app' })).toBeUndefined()
+  expect(await desk.find({ type: 'Text', text: '37%' })).toBeUndefined()
+  await desk.unmount()
+
+  // Stopped, it measures nothing.
+  world.listening.delete(5173)
+  await launcher($, 'stop app')
+  const after = await mountAt($, 'terminal', 100)
+  expect(await after.find({ key: 'spark-app' })).toBeUndefined()
+  await after.unmount()
+})
+
+test('focused or not, the terminal pane draws the same rows and no key hints (the launcher binds no keys)', async ($, on) => {
+  engine(on)
+  await launcher($)
+  for (const isFocused of [true, false]) {
+    const ui = await $.ui.mount({ plugin: 'launcher', surface: 'terminal', ...PANE, props: { ...PANE.props, isFocused, bodyColumns: 60 } })
+    expect(await ui.find({ key: 'start-app' }), `Start, focused ${isFocused}`).toBeDefined()
+    expect(await ui.find({ type: 'Text', text: /·/ }), `no hint line, focused ${isFocused}`).toBeUndefined()
     await ui.unmount()
   }
 })

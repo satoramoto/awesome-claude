@@ -1,16 +1,21 @@
 // Changed in this fork (awesome-claude) for the desktop version: the desktop surface draws hooks/desktop.tsx.
+// The terminal draws in the kit's terminal design system: a section header, TREE
+// connectors, the kit's status colours as theme keys, and its note lines.
 import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
-import type { Activity, FileNode, FileTree, Theme } from '../types'
-import { renderDesktop } from './desktop'
+import { ago, middle } from '@kit/format'
+import { C, MUTED, termInk, treePrefix } from '@kit/tokens'
+import { type Hint, kit, MARK } from '@kit/ui'
+
+import type { Activity, FileNode, FileTree } from '../types'
+import { renderDesktop, statusColor, toneColor } from './desktop'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
+import { fileIcon } from './icons'
 import {
   ancestorsOf,
   type Change,
-  DEFAULT_THEME,
   dirname,
   emptyTree,
   formatSize,
@@ -20,7 +25,6 @@ import {
   mapper,
   parseGit,
   parseNumstat,
-  parseTheme,
   posix,
   relative,
   dropBelow,
@@ -28,17 +32,29 @@ import {
   rollCounts,
   replaceChildren,
   rollUp,
-  stamp,
   toNodes,
   underAny,
   visibleRows,
 } from './tree'
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
-const THEME = { plugin: 'filetree', key: 'theme' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const PANE = 'filetree'
-const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
+/** The tab's name. The folder is the section header's title, so the tab doesn't repeat it. */
+const TAB = 'Files'
+/** Each activity tone's terminal colour: the kit's meaning for it (desktop's toneColor), as a theme key. */
+const SHIMMER: Record<string, string> = Object.fromEntries(TONES.map(k => [k, termInk(toneColor(k)).color ?? '']))
+/** The terminal's key hints while the pane has the keyboard, the most used first. */
+const TREE_HINTS: Hint[] = [
+  { key: '↑↓', label: 'move' },
+  { key: '⏎', label: 'open' },
+  { key: '←→', label: 'fold' },
+  { key: 'y', label: 'copy path' },
+]
+const PREVIEW_HINTS: Hint[] = [
+  { key: '↑↓', label: 'scroll' },
+  { key: '←', label: 'back' },
+]
 const BRANCH_ROW = '#branch'
 const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
@@ -48,10 +64,6 @@ const FIND_LIMIT = 200
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
-const ADD_COLOR = '#98c379'
-const DEL_COLOR = '#e06c75'
-const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
-const THEME_POLL_MS = 2000
 const FONT_SCRIPT =
   'if command -v fc-list >/dev/null 2>&1; then f=$(fc-list ":charset=$1" file | head -n1 | cut -d: -f1); ' +
   'else f=$(ls "$HOME"/Library/Fonts/*Nerd* /Library/Fonts/*Nerd* 2>/dev/null | head -n1); fi; ' +
@@ -68,8 +80,6 @@ const SIZE_WALK_LIMIT = 50_000
 const ROW_SCROLL_MS = 100
 
 let blink: Timer | null = null
-let themePoll: Timer | null = null
-let themeMtime: number | null = null
 let generation = 0
 let lastPress = { key: '', at: 0 }
 let noNerd = false
@@ -127,12 +137,6 @@ async function cwdOf($: EngineInterface): Promise<string> {
 function clean(segs: Seg[]): Seg[] {
   for (const seg of segs) for (const k of Object.keys(seg) as (keyof Seg)[]) if (seg[k] === undefined) delete seg[k]
   return segs
-}
-
-function faint(hex: string): string {
-  const v = parseInt(hex.slice(1), 16)
-  const ch = (shift: number) => Math.round(0x26 + (((v >> shift) & 255) - 0x26) * 0.3)
-  return `#${[16, 8, 0].map(x => ch(x).toString(16).padStart(2, '0')).join('')}`
 }
 
 async function get($: EngineInterface): Promise<FileTree> {
@@ -278,9 +282,8 @@ async function reset($: EngineInterface, root: string, focus = false): Promise<v
   sizeEpoch += 1
   sizeQueue = []
   await put($, () => ({ ...emptyTree(root), showHidden: prev.showHidden, showSize: prev.root ? prev.showSize : sizeDefault }))
-  const title = `Files: ${root.split('/').pop() || root}`
-  if (focus) await $.ui.open({ id: PANE, title, focus: true })
-  else if (!noDock) await $.ui.open({ id: PANE, title })
+  if (focus) await $.ui.open({ id: PANE, title: TAB, focus: true })
+  else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
   await loadDirs($, [root])
   await detectRepo($)
   await refreshGit($)
@@ -1028,21 +1031,6 @@ async function openNode($: EngineInterface, n: FileNode): Promise<void> {
   } else await openFile($, n.id)
 }
 
-async function loadTheme($: EngineInterface): Promise<void> {
-  const path = `${(await $.env.get('HOME')) ?? ''}/${THEME_FILE}`
-  try {
-    const stat = await $.fs.stat(path)
-    if (stat.kind !== 'file') throw new Error('no theme file')
-    if (stat.mtimeMs === themeMtime) return
-    await $.state.set(THEME, parseTheme(String(await $.fs.read(path))))
-    themeMtime = stat.mtimeMs
-  } catch {
-    if (themeMtime === 0) return
-    await $.state.set(THEME, DEFAULT_THEME)
-    themeMtime = 0
-  }
-}
-
 function shortPath(path: string): string {
   return home && inside(home, path) ? `~${path.slice(home.length)}` : path
 }
@@ -1069,16 +1057,13 @@ export const register: Register = (on, options) => {
       } catch {
         noNerd = true
       }
-      await loadTheme($)
-      themePoll?.cancel()
-      themePoll = themeMtime ? $.clock.every(THEME_POLL_MS, () => void loadTheme($)) : null
       const t = await get($)
       if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
       if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
       await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
       const cwd = await cwdOf($)
       if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
-      else if (!noDock) await $.ui.open({ id: PANE, title: `Files: ${t.root.split('/').pop() || t.root}` })
+      else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
     })()
     return next(e)
   })
@@ -1212,7 +1197,6 @@ export const register: Register = (on, options) => {
     const result = await next(e)
     if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
       void (async () => {
-        await loadTheme($)
         const root = follow || !lastRoot ? await cwdOf($) : lastRoot
         const t = await get($)
         if (t.root !== root || t.nodes.length === 0) await reset($, root)
@@ -1296,7 +1280,13 @@ export const register: Register = (on, options) => {
     const unicode = glyphSetting === 'plain' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
     const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
-    const theme: Theme = (await $.state.get(THEME)).value ?? DEFAULT_THEME
+    const terminal = e.surface === 'terminal'
+    const width = Math.max(24, e.props.bodyColumns)
+    // The kit, told whether the pane has the keyboard: key hints show only then, and
+    // the cursor row's mark is dim without it. No background or text hex reaches the
+    // terminal: the pane draws on the terminal's own background in theme keys.
+    const k = kit($.ui.resolve(e), terminal ? 'terminal' : 'desktop', width, { focused: e.props.isFocused })
+    const focused = k.focused
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
     nativeScroll = e.surface === 'desktop'
@@ -1305,25 +1295,64 @@ export const register: Register = (on, options) => {
       const p = previewed
       const markdown = /\.(md|markdown|mdx)$/i.test(t.preview)
       const all = (p?.text ?? '').split('\n').length
-      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1))
+      const hints = k.hints('keys', PREVIEW_HINTS)
+      // The header, the note, the blank row the terminal's section leaves under it, and the hints.
+      previewRows = nativeScroll ? all : Math.max(4, (e.props.scroll?.bodyRows ?? 40) - (p?.note ? 2 : 1) - (terminal ? 1 : 0) - (hints ? 1 : 0))
       const win = previewLines(p?.text ?? '', nativeScroll ? 0 : Math.min(t.previewTop, Math.max(0, all - previewRows)), previewRows, markdown)
       const name = t.preview !== t.root && inside(t.root, t.preview) ? relative(t.root, t.preview) : shortPath(t.preview)
+      const back = unicode ? '← files' : '\u{f004d} files'
+      const rows = (
+        <Client
+          key="rows"
+          module="./rows.tsx"
+          props={{ rows: [], active: '', mark: MARK.selected, focused, tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
+        />
+      )
+      if (terminal) {
+        // The file as a section of its own: its path the bold title, cut in the middle to
+        // what the actions leave it, a dim rule, then open-outside and back, both quiet.
+        // The note (binary, too large, the first lines only) is a dim line under it.
+        const external = unicode ? '↗' : '\u{f08e}'
+        const right = k.actions('preview', [
+          { key: 'external', label: external, quiet: true, onPress: () => void openFile($, t.preview, true) },
+          { key: 'back', label: back, quiet: true, onPress: () => void closePreview($) },
+        ])
+        // The arrow column, the gap and the shortest rule before the actions, the actions and their gap.
+        const room = width - k.edge.left - k.edge.right - k.space.item * 2 - 1 - [...external].length - k.space.group - [...back].length
+        return (
+          <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
+            {k.section({
+              id: 'preview',
+              title: middle(name, Math.max(6, room)),
+              right,
+              keepRight: true,
+              children: [p?.note ? k.note('note', p.note) : null, rows],
+            })}
+            {hints ? <Box flexGrow={1} /> : null}
+            {hints ? (
+              <Box key="hints" paddingLeft={k.edge.left}>
+                {hints}
+              </Box>
+            ) : null}
+          </Box>
+        )
+      }
       return (
-        <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
+        <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
           <Box flexDirection="row">
-            <Button key="back" plain label={unicode ? '← files' : '\u{f004d} files'} onPress={() => void closePreview($)} />
+            <Button key="back" plain label={back} onPress={() => void closePreview($)} />
             <Text> </Text>
-            <Box flexShrink={1} flexGrow={1}>
-              <Text bold wrap="truncate-start">{name}</Text>
+            <Box flexShrink={1} flexGrow={1} minWidth={0}>
+              <Text bold wrap="truncate-start">
+                {name}
+              </Text>
             </Box>
             <Button key="external" plain dimColor label={unicode ? '↗' : '\u{f08e}'} onPress={() => void openFile($, t.preview, true)} />
           </Box>
           {p?.note ? <Text dimColor>{p.note}</Text> : null}
-          <Client
-            key="rows"
-            module="./rows.tsx"
-            props={{ rows: [], active: '', activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer: false, preview: { text: win.text, path: t.preview, startLine: win.top + 1, markdown } } satisfies RowsProps}
-          />
+          {rows}
+          {hints ? <Box flexGrow={1} /> : null}
+          {hints}
         </Box>
       )
     }
@@ -1334,9 +1363,13 @@ export const register: Register = (on, options) => {
     const dimmed = new Set(t.flashOn ? t.flashDim : [])
     const ignored = new Set(t.ignored)
     const untracked = new Set(t.untrackedDirs)
-    const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
-    const fixed = 2 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
+    // In the rows' text column, one cell in from the section body.
+    const hints = k.hints('keys', TREE_HINTS, { width: k.width - 1 })
+    // The terminal's rows around the tree: the header, the search line and the blank
+    // row an open section leaves under its body, the branch line (or the no-repo note),
+    // the empty note, the footer and the key hints.
+    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : 1) + (rows.length === 0 ? 1 : 0) + (t.selected || latest ? 1 : 0) + (hints ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1397,29 +1430,59 @@ export const register: Register = (on, options) => {
         },
       )
     }
-    const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
-    const countSegs = (c: [number, number, number] | undefined): Seg[] => {
-      if (!c) return []
-      const out: Seg[] = []
-      if (c[0] > 0) out.push({ t: ` ?:${c[0]}`, c: GIT_COLOR['?'] ?? ADD_COLOR })
-      if (c[1] > 0) out.push({ t: ` M:${c[1]}`, c: GIT_COLOR.M ?? '#e5c07b' })
-      if (c[2] > 0) out.push({ t: ` D:${c[2]}`, c: theme.urgent })
-      return out
+    // The terminal, in the kit's terminal design system: the folder as a section
+    // header with its actions on the right, and in its body (two cells in) the branch
+    // line, the search field and the tree, each row `[gutter][TREE connector][icon]
+    // name … figures status`; icons share one column, names the next. No measure: a
+    // tree wants every cell for its names. Colour is only on what says a state: a
+    // name's git state, the branch line's totals, the context file's icon, Claude's
+    // activity; the figures after a name are dim. The cursor
+    // row is the kit's selected list row: `▌` in the gutter and the name bold (the
+    // mark dim and the weight plain while the pane hasn't the keyboard).
+    /** A kit colour's terminal ink as a row run's fields. */
+    const ink = (color?: string): Pick<Seg, 'c' | 'dc'> => {
+      const i = termInk(color)
+      return { c: i.color, dc: i.dimColor }
     }
-    const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
+    const cells = (segs: Seg[]) => segs.reduce((sum, s) => sum + [...s.t].length, 0)
+    const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
+    /** A folder's file counts: the letter, the figure, its colour (the branch line's). */
+    const countParts = (c: [number, number, number] | undefined): [string, number, string][] =>
+      c
+        ? ([
+            ['?', c[0], C.ok],
+            ['M', c[1], C.warn],
+            ['D', c[2], C.bad],
+          ] as [string, number, string][]).filter(([, n]) => n > 0)
+        : []
+    /** On a folder's row, dim as the rest of a row's meta. */
+    const countSegs = (c: [number, number, number] | undefined): Seg[] => countParts(c).map(([letter, n]) => ({ t: ` ${letter}${n}`, ...ink(MUTED) }))
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
+
+    // Each row's connector, from the whole list so it holds while the view scrolls:
+    // walking up from the bottom, `more[d]` says whether a later row sits at depth d
+    // under the same parent (a pipe above it, a tee rather than an elbow). The top
+    // level has none (the kit's `treePrefix` at depth 0), so its icons stand in the
+    // column of the branch line's and the search line's, and a child's connector
+    // starts under its folder's icon.
+    const prefixes = new Map<string, string>()
+    const more: boolean[] = []
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]!
+      more.length = Math.min(more.length, r.depth + 1)
+      prefixes.set(r.node.id, treePrefix(Array.from({ length: Math.max(0, r.depth - 1) }, (_, j) => Boolean(more[j + 1])), !more[r.depth], r.depth))
+      more[r.depth] = true
+    }
+    const scrolls = !nativeScroll && rows.length > shown.length + pinned.length
 
     const rowSpec = (r: (typeof rows)[number]): RowSpec => {
       const n = r.node
       const own = t.git[n.id]
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
-      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (GIT_COLOR[status] ?? theme.muted) : undefined
       const isBright = bright.has(n.id)
       const isDim = !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
-      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
-      const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const loc = t.diff[n.id]
       const meta = t.showSize
         ? n.kind === 'dir'
@@ -1429,187 +1492,205 @@ export const register: Register = (on, options) => {
           : n.kind === 'file' || (n.kind === 'link' && n.size > 0)
             ? formatSize(n.size)
             : ''
-        : loc
+        : loc || n.kind !== 'file' || !n.mtime
           ? ''
-          : n.kind === 'file'
-            ? stamp(n.mtime)
-            : ''
-      const locText = loc ? `${loc[0] ? ` +${loc[0]}` : ''}${loc[1] ? ` -${loc[1]}` : ''}` : ''
-      const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
-      const badge = dirCounts.length ? '' : status ? ` ${status}` : isIgnored ? (unicode ? ' ⊘' : ' \u{f05e}') : '  '
-      const countsText = dirCounts.map(c => c.t).join('')
-      const cols = Math.max(4, width - r.depth * 2 - 6 - (meta ? meta.length + 1 : 0) - locText.length - badge.length - countsText.length)
-      const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
-      const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : '  '
-      const isRepo = n.kind === 'dir' && n.id === t.top
-      const glyph = unicode ? (n.kind === 'dir' ? '■' : '·') : fileIcon(n, r.open, isRepo)
-      const lit = isBright || isDim
-      const left: Seg[] = [
-        { t: '  '.repeat(r.depth) },
-        { t: caret, c: theme.muted },
-        lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
-        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
-      ]
+          : ago(now - n.mtime)
+      // Everything after the name is meta, dim: the name's colour says the file's git
+      // state, and the letter, the lines changed and a folder's counts say it in words,
+      // without a second and third colour on the row.
       const right: Seg[] = []
-      if (meta) right.push({ t: ` ${meta}`, c: theme.muted })
-      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, c: ADD_COLOR })
-      if (loc && loc[1] > 0) right.push({ t: ` -${loc[1]}`, c: DEL_COLOR })
+      if (meta) right.push({ t: ` ${meta}`, ...ink(MUTED) })
+      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, ...ink(MUTED) })
+      if (loc && loc[1] > 0) right.push({ t: ` −${loc[1]}`, ...ink(MUTED) })
+      const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
       right.push(...dirCounts)
-      if (badge) right.push({ t: badge, c: status ? gitColor : theme.muted, b: true })
+      // The status letter's column, kept when empty so the figures line up.
+      if (!dirCounts.length) {
+        right.push(status ? { t: ` ${status}`, ...ink(MUTED) } : isIgnored ? { t: unicode ? ' ⊘' : ' \u{f05e}', ...ink(MUTED) } : { t: '  ' })
+      }
+      const tree = prefixes.get(n.id) ?? ''
+      // The name gets what the gutter, the connector, the icon, the figures, a cell's gap and the scrollbar (a gap and its thumb) leave.
+      const room = Math.max(4, k.width - 1 - [...tree].length - 2 - cells(right) - 1 - (scrolls ? 2 : 0))
+      const name = [...n.name].length > room ? [...n.name].slice(0, room - 1).join('') + '…' : n.name
+      // Plain glyphs: the kit's folder (its fold arrow, as TERM_GLYPH draws it) and file.
+      const glyph = unicode ? (n.kind === 'dir' ? (r.open ? '▾' : '▸') : '□') : fileIcon(n, r.open, n.kind === 'dir' && n.id === t.top)
+      const lit = isBright || isDim
+      // A folder's git state is only its files' rolled up: its dim counts say it, and its
+      // name stays plain unless the folder itself is new (untracked as a whole).
+      const rolledUp = n.kind === 'dir' && status !== undefined && !untracked.has(n.id) && !underAny(dirname(n.id), untracked, t.root)
+      const nameInk = isIgnored || n.hidden ? ink(MUTED) : status && !rolledUp ? ink(statusColor(status)) : {}
+      // The cursor row's name is bold while the pane has the keyboard (the kit's selected row);
+      // the file selected as Claude's context has its icon in blue, what's live.
+      const bold = n.id === t.cursor && focused ? true : undefined
+      const left: Seg[] = [
+        { t: tree, ...ink(MUTED) },
+        lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', ...ink(n.id === t.selected ? C.blue : MUTED) },
+        lit ? { t: name, sh: tone, dim: isDim, b: isBright || bold } : { t: name, ...nameInk, b: bold, s: status === 'D' && n.kind !== 'dir' },
+      ]
       return { id: n.id, left: clean(left), right: clean(right) }
     }
 
-    const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const specs: RowSpec[] = [
-      ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
-      ...(pinned.length > 0 ? [note('  ⋮')] : []),
+      ...(pinned.length > 0 ? [{ id: '', left: [{ t: '⋮', dc: true }], right: [] }] : []),
       ...shown.map(rowSpec),
     ]
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
-    const bar =
-      !nativeScroll && rows.length > shown.length + pinned.length
-        ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
-        : undefined
+    const bar = scrolls ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize } : undefined
 
-    const branchRow = () => {
-      if (!t.top || !t.branch) return null
+    // The branch: its name, then ahead, behind and the upstream dim (the upstream only
+    // when it isn't the same name on a remote); on the right the lines and files
+    // changed, or "clean". It sits one cell in, as the tree's rows sit after their
+    // cursor gutter, so its icon and name share their columns. The note is left out
+    // when the name wouldn't fit beside it, so the name is cut once, in the middle,
+    // never again at its end; the file counts give way before the lines changed.
+    // Outside a repo, a note says so.
+    const branchLine = () => {
+      if (!t.top)
+        return (
+          <Box key="norepo" paddingLeft={1}>
+            {k.note('norepo', 'no git repo · git status starts after git init', 'empty', { width: k.width - 1 })}
+          </Box>
+        )
+      if (!t.branch) return null
       const b = t.branch
-      const isFlash = bright.has(BRANCH_ROW)
-      const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
-      const label = b.head
-      return (
-        <Box flexDirection="row" height={1} overflow="hidden">
-          <Box flexDirection="row" flexShrink={0}>
-            <Text color={isFlash ? (TONES[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
-            <Text bold color={isFlash ? (TONES[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
-              {label}
-            </Text>
-            {b.ahead > 0 && <Text color={TONES.teal?.solid}>{` ↑${b.ahead}`}</Text>}
-            {b.behind > 0 && <Text color={TONES.blue?.solid}>{` ↓${b.behind}`}</Text>}
-          </Box>
-          {b.upstream && (
-            <Box flexShrink={1} overflow="hidden">
-              <Text color={theme.muted} wrap="truncate-end">
-                {` ${b.upstream}`}
-              </Text>
-            </Box>
-          )}
-          <Box flexGrow={1} />
-          <Box flexDirection="row" flexShrink={0}>
-            {totals[0] > 0 && <Text color={ADD_COLOR}>{` +${totals[0]}`}</Text>}
-            {totals[1] > 0 && <Text color={DEL_COLOR}>{` -${totals[1]}`}</Text>}
-            {rootCounts.map(c => (
-              <Text color={c.c}>{c.t}</Text>
-            ))}
-            {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text color={theme.muted}> clean</Text>}
-          </Box>
-        </Box>
-      )
+      const flash = bright.has(BRANCH_ROW) ? toneColor(t.flashTones[BRANCH_ROW] ?? 'teal', true) : undefined
+      const figure = (key: string, text: string, color: string, drop?: number) => ({ part: <Text key={key} {...termInk(color)}>{text}</Text>, cells: [...text].length, ...(drop ? { drop } : {}) })
+      const changed = [
+        ...(totals[0] > 0 ? [figure('add', `+${totals[0]}`, C.ok, 1)] : []),
+        ...(totals[1] > 0 ? [figure('del', `−${totals[1]}`, C.bad, 1)] : []),
+        ...countParts(t.counts[t.root]).map(([letter, n, color]) => figure(`n-${letter}`, `${letter}${n}`, color, 2)),
+      ]
+      const same = b.upstream.slice(b.upstream.indexOf('/') + 1) === b.head
+      const note = [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', same ? '' : b.upstream].filter(Boolean).join(' ')
+      // What the row leaves the name: the indent, the icon's column, and the figures.
+      const avail = k.width - 1 - 2
+      const cluster = (parts: { cells: number }[]) => parts.reduce((n, p) => n + p.cells + k.space.item, 0)
+      const head = [...b.head].length
+      // The file counts only while the name fits whole beside them; then the note likewise.
+      // (Untracked files alone have no lines to show, so their count stays.)
+      const lines = changed.filter(p => p.drop !== 2)
+      const shown = head + cluster(changed) <= avail || !lines.length ? changed : lines
+      const right = shown.length ? shown : [{ part: 'clean', cells: 5 }]
+      const fits = head + 2 + [...note].length <= avail - cluster(right)
+      return k.item('branch', {
+        lead: <Text {...(flash ? termInk(flash) : { dimColor: true })}>{unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd}</Text>,
+        text: b.head,
+        textColor: flash,
+        path: true,
+        indent: 1,
+        ...(note && fits ? { note } : {}),
+        right,
+      })
     }
 
+    // Git's latest step: its icon and word in the kit's status colour (running blue,
+    // failed red, done green with the word plain), a commit's hash dim.
     const chip = (a: Activity) => {
-      const tone = a.state === 'failed' ? 'red' : a.tone
-      const color = TONES[tone]?.solid ?? theme.accent
-      const icon = unicode ? a.plain : a.nerd
-      const hash = a.state === 'done' && a.kind === 'git commit' ? a.detail.split(' ')[0] ?? '' : ''
+      const color = a.state === 'failed' ? C.bad : a.state === 'running' ? C.blue : C.ok
+      const hash = a.state === 'done' && a.kind === 'git commit' ? (a.detail.split(' ')[0] ?? '') : ''
       return (
-        <Box flexDirection="row" marginLeft={2}>
-          <Text color={color}>{icon + ' '}</Text>
-          <Text bold={a.state === 'running'} color={color}>
-            {a.state === 'running' ? `${a.label}…` : a.label}
-          </Text>
-          {hash && <Text color={theme.muted}>{` ${hash}`}</Text>}
+        <Box key="chip" flexDirection="row" flexShrink={0} gap={k.space.pair}>
+          <Text {...termInk(color)}>{unicode ? a.plain : a.nerd}</Text>
+          <Text {...(a.state === 'done' ? {} : termInk(color))}>{a.state === 'running' ? `${a.label}…` : a.label}</Text>
+          {hash ? <Text dimColor>{hash}</Text> : null}
         </Box>
       )
     }
 
-    return (
-      <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
-        <Box flexDirection="row">
-          <Text bold color={theme.accent} wrap="truncate-start">
-            {header}
-          </Text>
-          <Box flexGrow={1} />
-          <Box flexDirection="row" gap={2}>
-            <Button
-              key="up"
-              plain
-              dimColor
-              label={unicode ? '↑' : '\u{f005d}'}
-              onPress={() => void goUp($)}
-            />
-            <Button
-              key="cwd"
-              plain
-              dimColor={!follow}
-              label={unicode ? '⌂' : '\u{f02dc}'}
-              onPress={() => void goHome($)}
-            />
-            <Button
-              key="refresh"
-              plain
-              dimColor
-              label={unicode ? '↻' : '\u{f0450}'}
-              onPress={() => void refreshAll($)}
-            />
-            <Button
-              key="hidden"
-              plain
-              dimColor={!t.showHidden}
-              label={unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}'}
-              onPress={() => void patch($, cur => ({ showHidden: !cur.showHidden }))}
-            />
-            <Button
-              key="size"
-              plain
-              dimColor={!t.showSize}
-              label={unicode ? 'Σ' : '\u{f02ca}'}
-              onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
-            />
-            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void collapseAll($)} />
-            {t.selected && (
-              <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
-            )}
-            <Text> </Text>
-          </Box>
+    const actions = k.actions('head', [
+      { key: 'up', label: unicode ? '↑' : '\u{f005d}', quiet: true, onPress: () => void goUp($) },
+      { key: 'cwd', label: unicode ? '⌂' : '\u{f02dc}', quiet: !follow, onPress: () => void goHome($) },
+      { key: 'refresh', label: unicode ? '↻' : '\u{f0450}', quiet: true, onPress: () => void refreshAll($) },
+      {
+        key: 'hidden',
+        label: unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}',
+        quiet: !t.showHidden,
+        onPress: () => void patch($, cur => ({ showHidden: !cur.showHidden })),
+      },
+      { key: 'size', label: unicode ? 'Σ' : '\u{f02ca}', quiet: !t.showSize, onPress: () => void patch($, cur => ({ showSize: !cur.showSize })) },
+      { key: 'collapse', label: unicode ? '⊟' : '\u{eac5}', quiet: true, onPress: () => void collapseAll($) },
+    ])
+
+    // The search field, in the branch line's columns: a dim search glyph, then the field.
+    const searchLine = (
+      <Box key="search" flexDirection="row" paddingLeft={1}>
+        <Box width={2} flexShrink={0}>
+          <Text dimColor>{unicode ? '⌕' : '\u{f0349}'}</Text>
         </Box>
-        {branchRow()}
-        {!t.top && <Text color={theme.muted}>{unicode ? '± ' : '\u{e702} '}no git repo · git status starts after git init</Text>}
-        <Box flexDirection="row">
-          <Box flexGrow={1}>
-            <Input
-              key="q"
-              label="/ "
-              placeholder="search"
-              submitLabel="jump"
-              autoFocus
-              value={t.query}
-              onInput={(v: string) => void search($, v)}
-              onSubmit={(v: string) => void jump($, v)}
-            />
-          </Box>
-          {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
+        <Box flexGrow={1} flexShrink={1} minWidth={0} marginRight={t.query ? k.space.item : 0}>
+          <Input
+            key="q"
+            placeholder="search"
+            submitLabel="jump"
+            autoFocus
+            value={t.query}
+            onInput={(v: string) => void search($, v)}
+            onSubmit={(v: string) => void jump($, v)}
+          />
         </Box>
-        <Client
-          key="rows"
-          module="./rows.tsx"
-          props={{ rows: specs, active: t.cursor, activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
-        />
-        <Box flexGrow={1} />
-        {(t.selected || latest) && (
-          <Box flexDirection="row">
-            {t.selected ? (
-              <Box flexShrink={1}>
-                <Text dimColor wrap="truncate-start">
-                  selected: {t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)}
+        {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
+      </Box>
+    )
+
+    // The footer, in the rows' text column: the file selected as Claude's context (its
+    // label dim, the path plain, cut in the middle to what the rest leaves it) with the
+    // button that clears it right after it, then git's latest step on the right.
+    const chipCells = (a: Activity) =>
+      [...(unicode ? a.plain : a.nerd)].length + k.space.pair + [...a.label].length + (a.state === 'running' ? 1 : 0) + (a.state === 'done' && a.kind === 'git commit' ? k.space.pair + (a.detail.split(' ')[0] ?? '').length : 0)
+    const selectedLabel = 'selected'
+    const unselect = unicode ? '×' : '\u{f0156}'
+    const selectedPath = t.selected ? (t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)) : ''
+    const pathRoom = k.width - 1 - selectedLabel.length - k.space.item * 2 - [...unselect].length - (latest ? chipCells(latest) + k.space.group : 0)
+    const footer =
+      t.selected || latest ? (
+        <Box key="foot" flexDirection="row" gap={k.space.group} paddingLeft={k.edge.left + 1} paddingRight={k.edge.right}>
+          {t.selected ? (
+            <Box flexDirection="row" flexShrink={1} minWidth={0} gap={k.space.item}>
+              <Box flexShrink={1} minWidth={0}>
+                <Text wrap="truncate">
+                  <Text dimColor>{selectedLabel} </Text>
+                  {middle(selectedPath, Math.max(1, pathRoom))}
                 </Text>
               </Box>
-            ) : null}
-            <Box flexGrow={1} />
-            {latest && chip(latest)}
+              <Button key="unselect" plain dimColor label={unselect} onPress={() => void patch($, () => ({ selected: '' }))} />
+            </Box>
+          ) : null}
+          <Box flexGrow={1} />
+          {latest ? chip(latest) : null}
+        </Box>
+      ) : null
+
+    return (
+      <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
+        {k.section({
+          id: 'files',
+          title: header,
+          right: actions,
+          // Every action shows at any width; a long folder name is cut instead.
+          keepRight: true,
+          children: [
+            branchLine(),
+            searchLine,
+            rows.length === 0 ? (
+              <Box key="empty" paddingLeft={1}>
+                {k.note('empty', t.query ? 'no match' : 'empty', 'empty', { width: k.width - 1 })}
+              </Box>
+            ) : null,
+            <Client
+              key="rows"
+              module="./rows.tsx"
+              props={{ rows: specs, active: t.cursor, mark: MARK.selected, markColor: termInk(C.blue).color, focused, tones: SHIMMER, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            />,
+          ],
+        })}
+        <Box flexGrow={1} />
+        {footer}
+        {hints ? (
+          <Box key="hints" paddingLeft={k.edge.left + 1}>
+            {hints}
           </Box>
-        )}
+        ) : null}
       </Box>
     )
   })

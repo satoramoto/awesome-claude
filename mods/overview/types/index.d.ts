@@ -89,6 +89,13 @@ export type GitInfo = {
   files: GitFile[]
   /** Changed paths in all, beyond `files` too. */
   fileCount: number
+  /**
+   * Set when the last read failed and these are the last-good figures kept
+   * through it: why it failed. Absent after a good read.
+   */
+  failed?: string
+  /** With `failed`: when the figures were last read good (ms since epoch). */
+  at?: number
 }
 
 /** Why there is no git section: not a repo, git missing. */
@@ -120,8 +127,17 @@ export type GhInfo = {
   prs: GitPr[]
   /** Why there are no PRs to show: gh missing, unauthenticated, no remote. */
   note?: string
+  /**
+   * Set when the last read failed and `prs` are the last-good ones kept through
+   * it: why it failed. Absent after a good read.
+   */
+  failed?: string
+  /** When `prs` were read (ms since epoch); with `failed`, when they were last read good. */
   at: number
 }
+
+/** The workspaces' shared `gh pr list` read: whether the last one failed, and when the PRs were last read good. */
+export type WorkspacesGh = { failed?: string; at: number }
 
 /** One account rate-limit window as the API last reported it. */
 export type Limit = {
@@ -247,6 +263,8 @@ declare module 'claude-code' {
       hidden: string[]
       /** Each shown tracked branch's state, newest first. */
       branches: BranchView[]
+      /** The last `gh pr list` for the workspaces; null until the first. Their PRs are kept through a failed one. */
+      workspacesGh: WorkspacesGh | null
       /** A branch a PR is being created for, while gh runs. */
       creating: string | null
     }

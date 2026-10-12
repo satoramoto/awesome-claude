@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Issue, IssueList } from '../types'
-import { REFINED, renderApp, renderTerminal } from './view'
+import { REFINED, cursorOf, renderApp, renderTerminal } from './view'
 import type { AppElements, TermElements } from './view'
 
 const PANE = 'issues'
@@ -13,6 +13,8 @@ const FIELDS = 'number,title,url,author,labels,assignees,comments,updatedAt,clos
 const list = atom({ plugin: 'issues', key: 'list' } as const, null)
 const selected = atom({ plugin: 'issues', key: 'selected' } as const, [])
 const adding = atom({ plugin: 'issues', key: 'adding' } as const, null)
+const reading = atom({ plugin: 'issues', key: 'reading' } as const, false)
+const cursor = atom({ plugin: 'issues', key: 'cursor' } as const, null)
 /** Bumped after each add, so the quick-add field is drawn afresh, empty. */
 let formKey = 0
 
@@ -147,7 +149,8 @@ export const ghNote = (stderr: string): string => {
 
 /** The session's repository's open issues, newest change first. */
 const loadIssues = async ($: EngineInterface): Promise<IssueList> => {
-  const at = Date.now()
+  // The engine's clock, as the render hook's: the figures' age reads against the same time.
+  const at = await $.clock.now()
   const cwd = await $.session.cwd()
   const gh = (args: string[]) => $.process.run(['gh', ...args], { cwd, timeoutMs: 20_000 })
   let run
@@ -200,12 +203,16 @@ const refresh = async ($: EngineInterface) => {
   try {
     stale = false
     lastRead = Date.now()
+    // The header says a read is under way (and how old the figures it keeps are).
+    await update($, reading, () => true)
     const fresh = await loadIssues($)
     const old = await read($, list)
-    // Only a real change redraws (`at` moves on every read).
-    if (!old || JSON.stringify({ ...old, at: 0 }) !== JSON.stringify({ ...fresh, at: 0 })) await update($, list, () => fresh)
+    // A failed read keeps the last-good issues, marked with why; only the first read's failure is a note.
+    const next = fresh.note && old && !old.note ? { ...old, failed: fresh.note } : fresh
+    await update($, list, () => next)
   } finally {
     busy = false
+    await update($, reading, () => false).catch(() => undefined)
   }
 }
 
@@ -221,6 +228,7 @@ export const register: Register = on => {
     await $.command.register({ name: 'issues', description: "Open a pane with the open GitHub issues of this session's repository" })
     worker?.cancel()
     worker = $.clock.every(5_000, () => void tick($).catch(() => undefined))
+    void $.ui.open({ id: PANE, title: 'Issues' })
 
     return next(e)
   })
@@ -245,10 +253,26 @@ export const register: Register = on => {
     // Only watching: should it fail, the call goes on as if it weren't here.
   }).catch(($, e, next) => next(e))
 
+  // The terminal's cursor is the issue whose row holds the focus ring: the
+  // arrows and Tab walk the rows' marks, and the row under the ring is drawn selected.
+  on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    const result = await next(e)
+    const n = cursorOf(e.element)
+    if (n !== null) await update($, cursor, () => n).catch(() => undefined)
+    return result
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const data = await read($, list)
-    const at = Date.now()
-    if (e.surface === 'terminal') return renderTerminal($.ui.resolve(e) as TermElements, data, at)
+    // The engine's clock, so ages read the same time a test holds still.
+    const at = await $.clock.now()
+    if (e.surface === 'terminal')
+      return renderTerminal($.ui.resolve(e) as TermElements, data, e.props.bodyColumns, at, {
+        focused: e.props.isFocused,
+        reading: await read($, reading),
+        cursor: await read($, cursor),
+        start: issue => ask($, startPrompt(issue), 'Start'),
+      })
     const picked = await read($, selected)
     const pick = (n: number) => update($, selected, s => (s.includes(n) ? s.filter(x => x !== n) : [...s, n]))
     return renderApp($.ui.resolve(e) as AppElements, data, e.props.bodyColumns, at, {

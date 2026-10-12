@@ -38,10 +38,12 @@ export type IssueList = {
   issues: Issue[]
   /** Whether there are more open issues than were read. */
   more: boolean
-  /** When it was read (ms since epoch). */
+  /** When it was last read well (ms since epoch). */
   at: number
-  /** Why there's nothing to show, when gh failed. */
+  /** Why there's nothing to show, when gh failed on the first read. */
   note?: string
+  /** Why the last refresh failed, when these are the last-good issues kept through it. */
+  failed?: string
 }
 
 declare module 'claude-code' {
@@ -52,6 +54,10 @@ declare module 'claude-code' {
       selected: number[]
       /** The title of the issue being added, while gh runs. */
       adding: string | null
+      /** Whether gh is being read right now. */
+      reading: boolean
+      /** The issue the terminal's cursor is on (the one whose row holds the focus), by number. */
+      cursor: number | null
     }
   }
 }

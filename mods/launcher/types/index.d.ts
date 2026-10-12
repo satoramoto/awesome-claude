@@ -42,6 +42,14 @@ export type Server = {
   code: number | null
   /** When this session started it (ms since epoch); 0 when it didn't. */
   startedAt: number
+  /**
+   * While it answers: the CPU (percent of one core) of the process listening on
+   * its port, one sample a tick while the pane is shown, oldest first (at most 60).
+   * Absent when it can't be measured (no lsof or ps).
+   */
+  cpu?: number[]
+  /** While it answers: that process's resident memory, in bytes, at the last sample. */
+  rss?: number
 }
 
 declare module 'claude-code' {

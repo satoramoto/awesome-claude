@@ -1,7 +1,8 @@
 import { addons } from '@storybook/preview-api'
 import type { Decorator, Preview } from '@storybook/html'
 
-import { CELL, Fragment, h } from '../playground/render'
+import { CELL, Fragment, TERMINAL_THEMES, h } from '../playground/render'
+import type { TerminalTheme } from '../playground/render'
 
 // The kit, the mods and their surface modules compile against a global `h` and `Fragment`, as in the engine.
 ;(globalThis as any).h = h
@@ -38,7 +39,9 @@ new ResizeObserver(() => {
  */
 const pane: Decorator = (story, ctx) => {
   const surface = ctx.globals.surface as string
-  const theme = surface === 'terminal' ? 'terminal' : (ctx.globals.theme as string)
+  const chosen = String(ctx.globals.theme ?? 'dark') as TerminalTheme
+  // The desktop has two looks; an ANSI theme draws it in the look it's named after.
+  const theme = surface === 'terminal' ? `terminal term-${TERMINAL_THEMES.includes(chosen) ? chosen : 'dark'}` : chosen.replace(/-ansi$/, '')
   const sidebar = ctx.globals.frame === 'sidebar' && surface !== 'terminal'
   drawnAt = canvas()
   const room = drawnAt - 2 * GUTTER - (sidebar ? CHROME.sidebar : CHROME.pane)
@@ -122,8 +125,8 @@ const preview: Preview = {
       toolbar: { title: 'Surface', icon: 'browser', items: ['desktop', 'terminal'], dynamicTitle: true },
     },
     theme: {
-      description: 'Desktop theme',
-      toolbar: { title: 'Theme', icon: 'mirror', items: ['light', 'dark'], dynamicTitle: true },
+      description: 'Theme (the desktop draws an ANSI theme in its light or dark look)',
+      toolbar: { title: 'Theme', icon: 'mirror', items: ['light', 'dark', 'light-ansi', 'dark-ansi'], dynamicTitle: true },
     },
     frame: {
       description: 'Around the story',

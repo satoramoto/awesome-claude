@@ -179,6 +179,18 @@ test('every experiment on every surface', { timeoutMs: 120_000 }, async $ => {
   for (const surface of SURFACES) expect(verdicts['text-styles']?.[surface]?.accepted).toBe(true)
 })
 
+test('the index opens on its own when a session starts', async ($, on) => {
+  const opened: { id: string; title?: string }[] = []
+  on('ui.open', async (_$, e) => {
+    opened.push({ id: e.id, title: e.title })
+    return { value: { isPlaced: true } }
+  })
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  expect(opened).toEqual([{ id: 'lab', title: 'Lab' }])
+})
+
 test('the index lists every experiment and a row opens its pane', async ($, on) => {
   const opened: string[] = []
   on('ui.open', async (_$, e) => {

@@ -30,7 +30,7 @@ const BAND = {
 } as const
 
 /** The engine beneath the mod, with a clock that moves only when the test moves it. */
-const engine = (on: On, placed = true): MockClock => {
+const engine = (on: On, placed = true, measured = RM_OUT): MockClock => {
   const clock = mock.clock(on, { now: Date.UTC(2026, 9, 11, 12) })
   on('session.cwd', async () => ({ value: '/repo' }))
   on('ui.open', async () => ({ value: placed ? { isPlaced: true as const } : { isPlaced: false as const, reason: 'the terminal is too narrow' } }))
@@ -42,7 +42,7 @@ const engine = (on: On, placed = true): MockClock => {
       await clock.sleep(Number(e.argv[1]) * 1000)
       return run('')
     }
-    return e.argv[0] === 'bash' ? run(RM_OUT) : run('', 1)
+    return e.argv[0] === 'bash' ? run(measured) : run('', 1)
   })
   // The Bash tool itself, reached only when the mod lets the call through.
   on('tool.call', async () => ({ result: { stdout: '', stderr: '' }, text: 'ran' }) as any)
@@ -58,7 +58,7 @@ const drive = async <T,>(clock: MockClock, work: Promise<T>): Promise<T> => {
 }
 
 /** Holds `rm -rf build`, then draws the component once the mod measured it and opened its pane. */
-const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop', where: typeof PANE | typeof BAND = PANE) => {
+const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop', where: { component: string; props: object } = PANE) => {
   const call = $.tool.call({ tool: 'Bash', command: 'rm -rf build' } as any) as Promise<any>
   await clock.settle()
   const ui = await drive(clock, $.ui.mount({ plugin: 'blast-radius', surface, ...where } as any))
@@ -67,18 +67,84 @@ const hold = async ($: Engine, clock: MockClock, surface: 'terminal' | 'desktop'
 
 const CANCELLED = 'the user pressed Cancel'
 
-test('the terminal draws the report as upstream did, and Cancel refuses the command', async ($, on) => {
+test('the terminal draws the report with the kit inside the warning border, and Cancel refuses the command', async ($, on) => {
   const clock = engine(on)
   const { call, ui } = await hold($, clock, 'terminal')
-  expect(await ui.find({ type: 'Text', text: '⚠ Blast Radius · rm -rf' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  build/index.html' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '  + 11 more' })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: 'Paths: build' })).toBeDefined()
+  // The one round border, in the warning colour's theme key.
+  const tree = (await ui.drawn()) as any
+  expect(tree.props).toMatchObject({ borderStyle: 'round', borderColor: 'warning' })
+  // The head is the command itself, the one bold thing, after the alert glyph; no ⚠ title line (that's the pane's title).
+  expect(await ui.find({ type: 'Text', text: '▲' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: 'rm -rf build' }))?.props).toMatchObject({ bold: true })
+  expect(await ui.find({ type: 'Text', text: /Blast Radius|⚠/ })).toBeUndefined()
+  // Each fact once: no label that restates the command, no Command row, no "Paths:" note that restates its paths.
+  expect(await ui.findAll({ type: 'Text', text: /rm -rf/ })).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: 'Command' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^Paths:/ })).toBeUndefined()
+  // Would is quiet: a dim label, then the plain summary, neither bold nor red.
+  expect((await ui.find({ type: 'Text', text: 'Would' }))?.props.dimColor).toBe(true)
+  const sum = (await ui.find({ type: 'Text', text: 'delete 13 files (about 48 KB)' }))?.props
+  expect(sum).toMatchObject({ wrap: 'truncate' })
+  expect(sum?.color).toBeUndefined()
+  expect(sum?.bold).toBeFalsy()
+  // The list as quiet items: the file glyph, then the dim path, cut in the middle.
+  expect(await ui.findAll({ type: 'Text', text: '□' })).toHaveLength(2)
+  expect((await ui.find({ type: 'Text', text: 'build/assets/index.js' }))?.props).toMatchObject({ wrap: 'truncate-middle', dimColor: true })
+  expect(await ui.find({ type: 'Text', text: '+ 11 more' })).toBeDefined()
+  // At 60 columns the hint fits beside the actions; they carry hotkeys 1 and 2.
   expect(await ui.find({ type: 'Text', text: 'Claude is waiting on your answer' })).toBeDefined()
+  const buttons: { key?: string; props: Record<string, unknown> }[] = await ui.findAll({ type: 'Button' })
+  expect(buttons.map(b => [b.key, b.props.label, b.props.hotkey])).toEqual([
+    ['proceed', 'Proceed', '1'],
+    ['cancel', 'Cancel', '2'],
+  ])
+  // Cancel holds the focus, so Enter refuses, as upstream; Proceed doesn't, and it's red (it destroys).
+  expect(buttons.find(b => b.key === 'cancel')?.props).toMatchObject({ autoFocus: true })
+  expect(buttons.find(b => b.key === 'proceed')?.props.autoFocus).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: 'Proceed' }))?.props).toMatchObject({ color: 'error' })
+  expect((await ui.find({ type: 'Text', text: 'Cancel' }))?.props?.color).toBeUndefined()
   await drive(clock, ui.press({ key: 'cancel' }))
   const result = await drive(clock, call)
   expect(String(result.deny ?? result.text)).toContain(CANCELLED)
+  await ui.unmount()
+})
+
+test('a wide terminal band names the mod beside the command', async ($, on) => {
+  const clock = engine(on, false)
+  const { call, ui } = await hold($, clock, 'terminal', BAND)
+  expect((await ui.find({ type: 'Text', text: 'Blast Radius' }))?.props.dimColor).toBe(true)
+  expect((await ui.find({ type: 'Text', text: 'rm -rf build' }))?.props.bold).toBe(true)
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, the report still fits: the command keeps the head, the hint goes, every long text truncates, and Proceed runs', async ($, on) => {
+  const clock = engine(on, false)
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: 'Blast Radius' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: 'rm -rf build' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: 'Claude is waiting on your answer' })).toBeUndefined()
+  for (const text of ['rm -rf build', 'delete 13 files (about 48 KB)']) {
+    expect((await ui.find({ type: 'Text', text: new RegExp(`^${text.slice(0, 6)}`) }))?.props).toMatchObject({ wrap: 'truncate' })
+  }
+  expect((await ui.find({ type: 'Text', text: 'build/index.html' }))?.props).toMatchObject({ wrap: 'truncate-middle' })
+  expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
+  await drive(clock, ui.press({ key: 'proceed' }))
+  const result = await drive(clock, call)
+  expect(result.deny).toBeUndefined()
+  expect(result.text).toBe('ran')
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, a long note breaks between words onto a second line instead of being cut at the first', async ($, on) => {
+  // Nothing matches, so the note says why rm has nothing to remove: 51 cells, in 26.
+  const clock = engine(on, false, '0 0 0')
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: "The paths don't exist, so" })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: 'rm has nothing to remove.' }))?.props).toMatchObject({ wrap: 'truncate', dimColor: true })
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
   await ui.unmount()
 })
 
@@ -119,5 +185,37 @@ test('with no room for a pane, the band on the desktop draws the report and answ
   await drive(clock, ui.press({ key: 'proceed' }))
   const result = await drive(clock, call)
   expect(result.text).toBe('ran')
+  await ui.unmount()
+})
+
+test('on the terminal, the keys are said once, on the buttons, not again in a hint line', async ($, on) => {
+  const clock = engine(on)
+  const { call, ui } = await hold($, clock, 'terminal')
+  expect(await ui.find({ type: 'Text', text: /proceed · / })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Button' })).map((b: any) => b.props.hotkey)).toEqual(['1', '2'])
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await ui.unmount()
+})
+
+test('in a short terminal band, the list is cut to fit so the actions still show', async ($, on) => {
+  // 10 rows: 8 go to the border, head, Would, the actions and the blanks; one file and `+ 12 more` fit.
+  const clock = engine(on, false)
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, maxRows: 10, bodyColumns: 60 } })
+  expect(await ui.findAll({ type: 'Text', text: '□' })).toHaveLength(1)
+  expect(await ui.find({ type: 'Text', text: '+ 12 more' })).toBeDefined()
+  expect(await ui.findAll({ type: 'Button' })).toHaveLength(2)
+  await drive(clock, ui.press({ key: 'cancel' }))
+  const result = await drive(clock, call)
+  expect(String(result.deny ?? result.text)).toContain(CANCELLED)
+  await ui.unmount()
+})
+
+test('in a narrow terminal band, a long file path is cut in the middle and keeps its name', async ($, on) => {
+  const clock = engine(on, false, ['1 100 1', 'build/assets/very/deeply/nested/folder/index.html'].join('\n'))
+  const { call, ui } = await hold($, clock, 'terminal', { ...BAND, props: { ...BAND.props, bodyColumns: 30 } })
+  expect(await ui.find({ type: 'Text', text: /^build\/.*….*index\.html$/ })).toBeDefined()
+  await drive(clock, ui.press({ key: 'cancel' }))
+  await drive(clock, call)
   await ui.unmount()
 })

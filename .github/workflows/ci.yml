@@ -10,6 +10,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The PR's merge commit and its first parent, the base, for the version check.
+          fetch-depth: 2
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
 
@@ -20,6 +23,30 @@ jobs:
         run: |
           git status --porcelain -- plugins
           test -z "$(git status --porcelain -- plugins)"
+      - name: A mod whose plugins/ output changed has a higher version
+        # Marketplace installs only update when a mod's version changes, so a
+        # change to a mod's compiled output without a bump never reaches them.
+        # New mods (no plugin.json at the base) are skipped.
+        if: github.event_name == 'pull_request'
+        env:
+          BASE: HEAD^1
+          HEAD_REF: HEAD
+        run: |
+          status=0
+          for dir in $(git ls-tree -d --name-only "$HEAD_REF" plugins/); do
+            mod=${dir#plugins/}
+            manifest="$dir/.claude-plugin/plugin.json"
+            git cat-file -e "$BASE:$manifest" 2>/dev/null || continue
+            git diff --quiet "$BASE" "$HEAD_REF" -- "$dir" && continue
+            old=$(git show "$BASE:$manifest" | jq -r '.version')
+            new=$(git show "$HEAD_REF:$manifest" | jq -r '.version')
+            highest=$(printf '%s\n%s\n' "$old" "$new" | sort -V | tail -n 1)
+            if [ "$new" = "$old" ] || [ "$highest" != "$new" ]; then
+              echo "::error file=mods/$mod/.claude-plugin/plugin.json::$mod changed under $dir/ but its version $new is not above the base's $old; raise it in mods/$mod/.claude-plugin/plugin.json and .claude-plugin/marketplace.json"
+              status=1
+            fi
+          done
+          exit $status
 
       - name: Install Claude Code
         run: npm install -g @anthropic-ai/claude-code@2.1.296

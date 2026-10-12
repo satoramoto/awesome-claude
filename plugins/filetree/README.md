@@ -71,7 +71,8 @@ Don't install it beside the original (`filetree@claude-code-filetree`), or both 
 - Click to select, arrow keys to move through the tree
 - Light on large repos: outside a repo it only checks once whether one exists, and every git call is scoped to the cwd
 - Nerd Font icons with a plain Unicode fallback
-- On Omarchy, the pane takes its colors and background from the current theme and follows theme switches
+- Follows the terminal's theme: it draws on the terminal's own background in Claude Code's theme colours, so it reads on light, dark and ANSI-only themes alike (this fork leaves out upstream's Omarchy background and selection colours, fixed colours that don't read on all of them)
+- The cursor row is marked `▌` in the gutter, bold while the pane has the keyboard; key hints show at the foot then
 
 ### Resizing the pane
 

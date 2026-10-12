@@ -1,34 +1,51 @@
+// Changed in this fork (awesome-claude) for the kit's terminal look: colours are the
+// kit's terminal inks (theme keys or dim), and the shimmer is a bold band sweeping
+// through a row drawn in its activity's colour, not a hex gradient. The cursor row is
+// the kit's selected list row: a `▌` gutter mark in `suggestion` (dim while the pane
+// doesn't have the keyboard), never a background, which no fixed hex reads on every theme.
+// The scrollbar is only its thumb, dim.
 import type { ClientModule } from 'claude-code'
 
-export type Seg = { t: string; c?: string; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
+/**
+ * One run of a row: `c` a colour (an engine theme key, never a hex: the kit's
+ * `termInk` gives it), `dc` the terminal's dim, `sh` a shimmer tone (a key of
+ * `tones`), `dim` the faint flash.
+ */
+export type Seg = { t: string; c?: string; dc?: boolean; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; tab?: string }
 export type RowSpec = { id: string; left: Seg[]; right: Seg[] }
 export type RowsProps = {
   rows: RowSpec[]
+  /** The cursor row's id: its one-cell gutter holds `mark`. */
   active: string
-  activeBg: string
-  hoverBg: string
-  tones: Record<string, { bright: string[]; dim: string[] }>
+  /** The kit's selected-row mark (`MARK.selected`) and its colour (a theme key). */
+  mark: string
+  markColor?: string
+  /** Whether the pane has the keyboard: the mark is dim while it hasn't. */
+  focused: boolean
+  /** Each shimmer tone's colour on the terminal (a theme key, from the kit's `termInk`). */
+  tones: Record<string, string>
   spinner?: string[]
   pointer?: boolean
-  bar?: { pos: number; size: number; thumb: string; track: string }
+  /** The scrollbar: its thumb a dim `┃`, no track (a full-height rule beside the names read as a border). */
+  bar?: { pos: number; size: number }
   preview?: { text: string; path: string; startLine: number; markdown: boolean }
 }
-type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
+type Local = { phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
 
 const TICK_MS = 90
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-function shimmer(i: number, phase: number, len: number, palette: string[]): string {
+/** Whether letter `i` of `len` sits in the band the shimmer sweeps across a name. */
+function inBand(i: number, phase: number, len: number): boolean {
   const band = ((phase * 1.6) % (len + 8)) - 4
-  const d = Math.abs(i - band)
-  return palette[d < 0.8 ? 3 : d < 1.8 ? 2 : d < 2.8 ? 1 : 0] ?? palette[0] ?? '#f97316'
+  return Math.abs(i - band) < 1.8
 }
 
 const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   const { Box, Text } = surface.elements
   let state = surface.state
   if (state === undefined) {
-    state = { hover: -1, phase: 0, drag: false, ref: {} }
+    state = { phase: 0, drag: false, ref: {} }
     surface.setState(state)
   }
   const lit = props.rows.some(r => r.left.some(s => s.sh || s.spin) || r.right.some(s => s.sh || s.spin))
@@ -54,23 +71,20 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
         return
       }
       if (e.type === 'down' || e.type === 'move') {
-        if (!cur.drag) surface.setState({ ...cur, drag: true, hover: -1 })
+        if (!cur.drag) surface.setState({ ...cur, drag: true })
         surface.post({ scrollTo: Math.max(0, Math.min(1, e.y / span)) })
         return
       }
     }
-    if (e.type === 'leave' || e.y < 0 || e.y >= props.rows.length) {
-      if (cur.hover !== -1) surface.setState({ ...cur, hover: -1 })
-      return
-    }
-    if (e.type === 'move' && !e.button && cur.hover !== e.y) surface.setState({ ...cur, hover: e.y })
+    if (e.type === 'leave' || e.y < 0 || e.y >= props.rows.length) return
     const row = props.rows[e.y]
     if (e.type === 'down' && e.button === 'right' && row?.id) {
       surface.post({ copy: row.id, shift: Boolean(e.shift) })
       return
     }
     if (e.type !== 'down' || (e.button ?? 'left') !== 'left' || !row) return
-    let x = 0
+    // After the one-cell gutter.
+    let x = 1
     for (const seg of row.left) {
       const w = [...seg.t].length
       if (seg.tab && e.x >= x && e.x < x + w) {
@@ -97,26 +111,27 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
         </Text>
       )
     }
-    const palette = s.sh ? (s.dim ? props.tones[s.sh]?.dim : props.tones[s.sh]?.bright) : undefined
-    if (!palette) {
+    const tone = s.sh ? props.tones[s.sh] : undefined
+    if (!tone) {
       return (
-        <Text color={s.c} backgroundColor={s.bg} bold={s.b} strikethrough={s.s} italic={s.i}>
+        <Text color={s.c} dimColor={s.dc} bold={s.b} strikethrough={s.s} italic={s.i}>
           {s.t}
         </Text>
       )
     }
-    if (s.one) {
+    // The faint flash (files Claude touched a moment ago) stays dim and still.
+    if (s.one || s.dim) {
       return (
-        <Text color={shimmer(-1, state.phase, s.t.length, palette)}>
+        <Text color={tone} dimColor={s.dim} bold={s.b}>
           {s.t}
         </Text>
       )
     }
     const chars = [...s.t]
     return (
-      <Text bold={s.b}>
+      <Text color={tone}>
         {chars.map((ch, i) => (
-          <Text color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
+          <Text bold={s.b || inBand(i, state.phase, chars.length)}>{ch}</Text>
         ))}
       </Text>
     )
@@ -124,22 +139,22 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
   return (
     <Box flexDirection="column">
       {props.rows.map((r, i) => (
-        <Box
-          flexDirection="row"
-          height={1}
-          overflow="hidden"
-          backgroundColor={r.id && r.id === props.active ? props.activeBg : r.id && i === state.hover ? props.hoverBg : undefined}
-        >
+        <Box flexDirection="row" height={1} overflow="hidden">
+          <Box width={1} flexShrink={0}>
+            {r.id && r.id === props.active ? (
+              <Text color={props.markColor} dimColor={!props.focused || undefined}>
+                {props.mark}
+              </Text>
+            ) : (
+              <Text> </Text>
+            )}
+          </Box>
           <Box flexShrink={1} overflow="hidden">
             {r.left.map(draw)}
           </Box>
           <Box flexGrow={1} />
           {r.right.map(draw)}
-          {props.bar && (
-            <Text color={i >= props.bar.pos && i < props.bar.pos + props.bar.size ? props.bar.thumb : props.bar.track}>
-              {i >= props.bar.pos && i < props.bar.pos + props.bar.size ? '┃' : '│'}
-            </Text>
-          )}
+          {props.bar && <Text dimColor>{i >= props.bar.pos && i < props.bar.pos + props.bar.size ? ' ┃' : '  '}</Text>}
         </Box>
       ))}
     </Box>
