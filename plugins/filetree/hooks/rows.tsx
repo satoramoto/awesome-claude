@@ -1,16 +1,25 @@
+// Changed in this fork (awesome-claude) for the kit's terminal look: colours are the
+// kit's terminal inks (theme keys or dim), and the shimmer is a bold band sweeping
+// through a row drawn in its activity's colour, not a hex gradient.
 import type { ClientModule } from 'claude-code'
 
-export type Seg = { t: string; c?: string; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
+/**
+ * One run of a row: `c` a colour (an engine theme key or a hex), `dc` the
+ * terminal's dim, `sh` a shimmer tone (a key of `tones`), `dim` the faint flash.
+ */
+export type Seg = { t: string; c?: string; dc?: boolean; b?: boolean; s?: boolean; i?: boolean; sh?: string; dim?: boolean; one?: boolean; spin?: boolean; bg?: string; tab?: string }
 export type RowSpec = { id: string; left: Seg[]; right: Seg[] }
 export type RowsProps = {
   rows: RowSpec[]
   active: string
   activeBg: string
   hoverBg: string
-  tones: Record<string, { bright: string[]; dim: string[] }>
+  /** Each shimmer tone's colour on the terminal (a theme key, from the kit's `termInk`). */
+  tones: Record<string, string>
   spinner?: string[]
   pointer?: boolean
-  bar?: { pos: number; size: number; thumb: string; track: string }
+  /** The scrollbar: its thumb drawn plain, its track dim. */
+  bar?: { pos: number; size: number }
   preview?: { text: string; path: string; startLine: number; markdown: boolean }
 }
 type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => void; unpoint?: () => void } }
@@ -18,10 +27,10 @@ type Local = { hover: number; phase: number; drag: boolean; ref: { stop?: () => 
 const TICK_MS = 90
 const FRAMES = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 
-function shimmer(i: number, phase: number, len: number, palette: string[]): string {
+/** Whether letter `i` of `len` sits in the band the shimmer sweeps across a name. */
+function inBand(i: number, phase: number, len: number): boolean {
   const band = ((phase * 1.6) % (len + 8)) - 4
-  const d = Math.abs(i - band)
-  return palette[d < 0.8 ? 3 : d < 1.8 ? 2 : d < 2.8 ? 1 : 0] ?? palette[0] ?? '#f97316'
+  return Math.abs(i - band) < 1.8
 }
 
 const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
@@ -97,26 +106,27 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
         </Text>
       )
     }
-    const palette = s.sh ? (s.dim ? props.tones[s.sh]?.dim : props.tones[s.sh]?.bright) : undefined
-    if (!palette) {
+    const tone = s.sh ? props.tones[s.sh] : undefined
+    if (!tone) {
       return (
-        <Text color={s.c} backgroundColor={s.bg} bold={s.b} strikethrough={s.s} italic={s.i}>
+        <Text color={s.c} dimColor={s.dc} backgroundColor={s.bg} bold={s.b} strikethrough={s.s} italic={s.i}>
           {s.t}
         </Text>
       )
     }
-    if (s.one) {
+    // The faint flash (files Claude touched a moment ago) stays dim and still.
+    if (s.one || s.dim) {
       return (
-        <Text color={shimmer(-1, state.phase, s.t.length, palette)}>
+        <Text color={tone} dimColor={s.dim} bold={s.b}>
           {s.t}
         </Text>
       )
     }
     const chars = [...s.t]
     return (
-      <Text bold={s.b}>
+      <Text color={tone}>
         {chars.map((ch, i) => (
-          <Text color={shimmer(i, state.phase, chars.length, palette)}>{ch}</Text>
+          <Text bold={s.b || inBand(i, state.phase, chars.length)}>{ch}</Text>
         ))}
       </Text>
     )
@@ -136,7 +146,7 @@ const Rows: ClientModule<RowsProps, Local> = (props, surface) => {
           <Box flexGrow={1} />
           {r.right.map(draw)}
           {props.bar && (
-            <Text color={i >= props.bar.pos && i < props.bar.pos + props.bar.size ? props.bar.thumb : props.bar.track}>
+            <Text dimColor={!(i >= props.bar.pos && i < props.bar.pos + props.bar.size)}>
               {i >= props.bar.pos && i < props.bar.pos + props.bar.size ? '┃' : '│'}
             </Text>
           )}

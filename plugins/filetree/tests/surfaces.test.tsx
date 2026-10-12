@@ -120,7 +120,8 @@ async function texts(ui: any): Promise<string> {
   return JSON.stringify(await ui.drawn()) + rows
 }
 
-const STAMP = /\d{4}-\d{2}-\d{2} \d{2}:\d{2}/
+// A file's age on the terminal, as the desktop and the kit's `ago` write it: 5m, 3h, 2d, 3w, 4mo, 2y.
+const STAMP = /"t":" \d+(m|h|d|w|mo|y)"/
 const NERD = /[\u{e000}-\u{f8ff}\u{f0000}-\u{fffff}]/u
 
 test('macOS Claude Code app: desktop pane draws, selects, opens with open', { timeoutMs: 20_000 }, async ($, on) => {
@@ -300,7 +301,7 @@ test('long trees scroll: wheel, scrollbar drag, and a click does not jump the vi
   const props = { ...paneProps(60), scroll: { offset: 0, bodyRows: 20 } }
   const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', component: 'Pane', requestId: 'filetree', props })
   await clock.settle()
-  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  const rowsOf = async () => ((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props
   let p = await rowsOf()
   expect(p.bar).toBeDefined()
   expect(p.rows[0].id).toBe(`${root}/f00.txt`)
@@ -359,7 +360,7 @@ async function scrolledTree($: any, on: any) {
   await clock.settle()
   await $.ui.scroll({ component: 'Pane', requestId: 'filetree', by: 1 } as any)
   await clock.settle()
-  const ids = async () => (((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props.rows as { id: string }[]).map(r => r.id)
+  const ids = async () => (((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props.rows as { id: string }[]).map(r => r.id)
   expect((await ids())[0]).toBe(`${root}/f02.txt`)
   return { root, clock, ui, ids }
 }
@@ -424,7 +425,7 @@ test('watches only git metadata, copies paths, clears search, Home and End', { t
   expect(await ui.find({ key: 'clear' })).toBeUndefined()
   await ui.post({ key: 'end' }, { in: 'rows' })
   await clock.settle()
-  const rowsOf = async () => ((await ui.drawn()) as any).children.find((c: any) => c.type === 'Client').props.props
+  const rowsOf = async () => ((await ui.find({ type: 'Client', key: 'rows' })) as any).props.props
   expect((await rowsOf()).active).toBe(`${root}/c.txt`)
   await ui.post({ key: 'home' }, { in: 'rows' })
   await clock.settle()

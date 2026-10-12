@@ -1,12 +1,18 @@
 // Changed in this fork (awesome-claude) for the desktop version: the desktop surface draws hooks/desktop.tsx.
-import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
+// The terminal draws in the kit's terminal design system: a section header, TREE
+// connectors, the kit's status colours as theme keys, and its note lines.
+import { type BuiltinToolResults, type EngineInterface, type Register, type RenderElement, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
+import { ago } from '@kit/format'
+import { C, GRAY, MUTED, termInk, treePrefix } from '@kit/tokens'
+import { kit } from '@kit/ui'
+
 import type { Activity, FileNode, FileTree, Theme } from '../types'
-import { renderDesktop } from './desktop'
+import { renderDesktop, statusColor, toneColor } from './desktop'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
-import { CHEVRON_CLOSED, CHEVRON_OPEN, fileIcon, GIT_COLOR } from './icons'
+import { fileIcon } from './icons'
 import {
   ancestorsOf,
   type Change,
@@ -28,7 +34,6 @@ import {
   rollCounts,
   replaceChildren,
   rollUp,
-  stamp,
   toNodes,
   underAny,
   visibleRows,
@@ -38,7 +43,8 @@ const TREE = { plugin: 'filetree', key: 'tree' } as const
 const THEME = { plugin: 'filetree', key: 'theme' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
 const PANE = 'filetree'
-const SHIMMER = Object.fromEntries(Object.entries(TONES).map(([k, v]) => [k, { bright: v.bright, dim: v.dim }]))
+/** Each activity tone's terminal colour: the kit's meaning for it (desktop's toneColor), as a theme key. */
+const SHIMMER: Record<string, string> = Object.fromEntries(Object.keys(TONES).map(k => [k, termInk(toneColor(k)).color ?? '']))
 const BRANCH_ROW = '#branch'
 const FLASH_MS = 2700
 const RUNNING_MAX_MS = 600_000
@@ -48,8 +54,6 @@ const FIND_LIMIT = 200
 const READ_REVEAL_LIMIT = 12
 const SEARCH_REVEAL_LIMIT = 60
 const ACTIVITY_TTL_MS = 45_000
-const ADD_COLOR = '#98c379'
-const DEL_COLOR = '#e06c75'
 const THEME_FILE = '.local/state/omarchy/current/theme/colors.toml'
 const THEME_POLL_MS = 2000
 const FONT_SCRIPT =
@@ -1336,7 +1340,10 @@ export const register: Register = (on, options) => {
     const untracked = new Set(t.untrackedDirs)
     const width = Math.max(24, e.props.bodyColumns)
     const rows = visibleRows(t)
-    const fixed = 2 + (t.top ? (t.branch ? 1 : 0) : 1) + (t.selected || latest ? 1 : 0)
+    // The terminal's rows around the tree: the header, the search line and the blank
+    // row an open section leaves under its body, the branch line (or the no-repo note),
+    // the empty note, and the footer.
+    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : 1) + (rows.length === 0 ? 1 : 0) + (t.selected || latest ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1397,29 +1404,54 @@ export const register: Register = (on, options) => {
         },
       )
     }
-    const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
-    const countSegs = (c: [number, number, number] | undefined): Seg[] => {
-      if (!c) return []
-      const out: Seg[] = []
-      if (c[0] > 0) out.push({ t: ` ?:${c[0]}`, c: GIT_COLOR['?'] ?? ADD_COLOR })
-      if (c[1] > 0) out.push({ t: ` M:${c[1]}`, c: GIT_COLOR.M ?? '#e5c07b' })
-      if (c[2] > 0) out.push({ t: ` D:${c[2]}`, c: theme.urgent })
-      return out
+    // The terminal, in the kit's terminal design system: the folder as a section
+    // header with its actions on the right, and in its body (two cells in) the branch
+    // line, the search field and the tree, each row `[TREE connector][icon] name …
+    // figures status`. Colours are the kit's, each with its one meaning (as on the
+    // desktop), drawn as theme keys; quiet marks are the terminal's dim.
+    const k = kit($.ui.resolve(e), 'terminal', width)
+    const plain = theme.fg || undefined
+    /** A kit colour's terminal ink as a row run's fields. */
+    const ink = (color?: string): Pick<Seg, 'c' | 'dc'> => {
+      const i = termInk(color)
+      return { c: i.color, dc: i.dimColor }
     }
-    const rootCounts = t.top ? countSegs(t.counts[t.root]) : []
+    const cells = (segs: Seg[]) => segs.reduce((sum, s) => sum + [...s.t].length, 0)
+    const totals: [number, number] = t.top ? (t.diff[t.root] ?? [0, 0]) : [0, 0]
+    /** A folder's file counts, as the desktop draws them: the letter dim, the figure in its colour. */
+    const countParts = (c: [number, number, number] | undefined): [string, number, string][] =>
+      c
+        ? ([
+            ['?', c[0], C.ok],
+            ['M', c[1], C.warn],
+            ['D', c[2], C.bad],
+          ] as [string, number, string][]).filter(([, n]) => n > 0)
+        : []
+    const countSegs = (c: [number, number, number] | undefined): Seg[] =>
+      countParts(c).flatMap(([letter, n, color]) => [{ t: ` ${letter}`, ...ink(GRAY.dark) }, { t: String(n), ...ink(color) }])
     const header = t.top ? [t.top.split('/').pop() ?? t.top, t.prefix.replace(/\/$/, '')].filter(Boolean).join('/') : t.root.split('/').pop() || t.root
+
+    // Each row's connector, from the whole list so it holds while the view scrolls:
+    // walking up from the bottom, `more[d]` says whether a later row sits at depth d
+    // under the same parent (a pipe above it, a tee rather than an elbow).
+    const prefixes = new Map<string, string>()
+    const more: boolean[] = []
+    for (let i = rows.length - 1; i >= 0; i--) {
+      const r = rows[i]!
+      more.length = Math.min(more.length, r.depth + 1)
+      prefixes.set(r.node.id, treePrefix(Array.from({ length: r.depth }, (_, j) => Boolean(more[j])), !more[r.depth]))
+      more[r.depth] = true
+    }
+    const scrolls = !nativeScroll && rows.length > shown.length + pinned.length
 
     const rowSpec = (r: (typeof rows)[number]): RowSpec => {
       const n = r.node
       const own = t.git[n.id]
       const status = own ?? (underAny(dirname(n.id), untracked, t.root) ? '?' : undefined)
       const isIgnored = !status && underAny(n.id, ignored, t.root)
-      const gitColor = status === 'D' || status === 'U' ? theme.urgent : status ? (GIT_COLOR[status] ?? theme.muted) : undefined
       const isBright = bright.has(n.id)
       const isDim = !isBright && dimmed.has(n.id)
       const tone = t.flashTones[n.id] ?? 'orange'
-      const iconColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : n.kind === 'dir' ? theme.accent : theme.muted))
-      const nameColor = isIgnored ? theme.muted : (gitColor ?? (n.hidden ? theme.muted : theme.fg || undefined))
       const loc = t.diff[n.id]
       const meta = t.showSize
         ? n.kind === 'dir'
@@ -1429,187 +1461,150 @@ export const register: Register = (on, options) => {
           : n.kind === 'file' || (n.kind === 'link' && n.size > 0)
             ? formatSize(n.size)
             : ''
-        : loc
+        : loc || n.kind !== 'file' || !n.mtime
           ? ''
-          : n.kind === 'file'
-            ? stamp(n.mtime)
-            : ''
-      const locText = loc ? `${loc[0] ? ` +${loc[0]}` : ''}${loc[1] ? ` -${loc[1]}` : ''}` : ''
-      const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
-      const badge = dirCounts.length ? '' : status ? ` ${status}` : isIgnored ? (unicode ? ' ⊘' : ' \u{f05e}') : '  '
-      const countsText = dirCounts.map(c => c.t).join('')
-      const cols = Math.max(4, width - r.depth * 2 - 6 - (meta ? meta.length + 1 : 0) - locText.length - badge.length - countsText.length)
-      const name = n.name.length > cols ? n.name.slice(0, cols - 1) + '…' : n.name
-      const caret = n.kind === 'dir' ? (unicode ? (r.open ? '▾' : '▸') : r.open ? CHEVRON_OPEN : CHEVRON_CLOSED) + ' ' : '  '
-      const isRepo = n.kind === 'dir' && n.id === t.top
-      const glyph = unicode ? (n.kind === 'dir' ? '■' : '·') : fileIcon(n, r.open, isRepo)
-      const lit = isBright || isDim
-      const left: Seg[] = [
-        { t: '  '.repeat(r.depth) },
-        { t: caret, c: theme.muted },
-        lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', c: iconColor },
-        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, c: nameColor, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
-      ]
+          : ago(now - n.mtime)
       const right: Seg[] = []
-      if (meta) right.push({ t: ` ${meta}`, c: theme.muted })
-      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, c: ADD_COLOR })
-      if (loc && loc[1] > 0) right.push({ t: ` -${loc[1]}`, c: DEL_COLOR })
+      if (meta) right.push({ t: ` ${meta}`, ...ink(MUTED) })
+      if (loc && loc[0] > 0) right.push({ t: ` +${loc[0]}`, ...ink(C.ok) })
+      if (loc && loc[1] > 0) right.push({ t: ` −${loc[1]}`, ...ink(C.bad) })
+      const dirCounts = n.kind === 'dir' ? countSegs(t.counts[n.id]) : []
       right.push(...dirCounts)
-      if (badge) right.push({ t: badge, c: status ? gitColor : theme.muted, b: true })
+      // The status letter's column, kept when empty so the figures line up.
+      if (!dirCounts.length) {
+        right.push(status ? { t: ` ${status}`, ...ink(statusColor(status)) } : isIgnored ? { t: unicode ? ' ⊘' : ' \u{f05e}', ...ink(MUTED) } : { t: '  ' })
+      }
+      const tree = prefixes.get(n.id) ?? ''
+      // The name gets what the connector, the icon, the figures, a cell's gap and the scrollbar leave.
+      const room = Math.max(4, k.width - [...tree].length - 2 - cells(right) - 1 - (scrolls ? 1 : 0))
+      const name = [...n.name].length > room ? [...n.name].slice(0, room - 1).join('') + '…' : n.name
+      // Plain glyphs: the kit's folder (its fold arrow, as TERM_GLYPH draws it) and file.
+      const glyph = unicode ? (n.kind === 'dir' ? (r.open ? '▾' : '▸') : '□') : fileIcon(n, r.open, n.kind === 'dir' && n.id === t.top)
+      const lit = isBright || isDim
+      const nameInk = isIgnored || n.hidden ? ink(MUTED) : status ? ink(statusColor(status)) : { c: plain }
+      const left: Seg[] = [
+        { t: tree, ...ink(MUTED) },
+        lit ? { t: glyph + ' ', sh: tone, dim: isDim, one: true } : { t: glyph + ' ', ...ink(MUTED) },
+        lit ? { t: name, sh: tone, dim: isDim, b: isBright } : { t: name, ...nameInk, b: n.id === t.selected, s: status === 'D' && n.kind !== 'dir' },
+      ]
       return { id: n.id, left: clean(left), right: clean(right) }
     }
 
-    const note = (text: string): RowSpec => ({ id: '', left: [{ t: text, c: theme.muted }], right: [] })
     const specs: RowSpec[] = [
-      ...(rows.length === 0 ? [note('empty')] : []),
       ...pinned.map(rowSpec),
-      ...(pinned.length > 0 ? [note('  ⋮')] : []),
+      ...(pinned.length > 0 ? [{ id: '', left: [{ t: '⋮', dc: true }], right: [] }] : []),
       ...shown.map(rowSpec),
     ]
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
-    const bar =
-      !nativeScroll && rows.length > shown.length + pinned.length
-        ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize, thumb: theme.accent, track: theme.muted }
-        : undefined
+    const bar = scrolls ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize } : undefined
 
-    const branchRow = () => {
-      if (!t.top || !t.branch) return null
+    // The branch: its name, then ahead, behind and the upstream dim; on the right the
+    // lines and files changed, or "clean". Outside a repo, a note says so.
+    const branchLine = () => {
+      if (!t.top) return k.note('norepo', 'no git repo · git status starts after git init')
+      if (!t.branch) return null
       const b = t.branch
-      const isFlash = bright.has(BRANCH_ROW)
-      const tone = t.flashTones[BRANCH_ROW] ?? 'teal'
-      const label = b.head
+      const flash = bright.has(BRANCH_ROW) ? toneColor(t.flashTones[BRANCH_ROW] ?? 'teal', true) : undefined
+      const changed: RenderElement[] = [
+        ...(totals[0] > 0 ? [<Text key="add" {...termInk(C.ok)}>{`+${totals[0]}`}</Text>] : []),
+        ...(totals[1] > 0 ? [<Text key="del" {...termInk(C.bad)}>{`−${totals[1]}`}</Text>] : []),
+        ...countParts(t.counts[t.root]).map(([letter, n, color]) => (
+          <Text key={`n-${letter}`}>
+            <Text dimColor>{letter}</Text>
+            <Text {...termInk(color)}>{String(n)}</Text>
+          </Text>
+        )),
+      ]
+      return k.item('branch', {
+        lead: <Text {...(flash ? termInk(flash) : { dimColor: true })}>{unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd}</Text>,
+        text: b.head,
+        textColor: flash ?? plain,
+        note: [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', b.upstream].filter(Boolean).join(' '),
+        right: changed.length ? changed : ['clean'],
+      })
+    }
+
+    // Git's latest step: its icon and word in the kit's status colour (running blue,
+    // failed red, done green with the word plain), a commit's hash dim.
+    const chip = (a: Activity) => {
+      const color = a.state === 'failed' ? C.bad : a.state === 'running' ? C.blue : C.ok
+      const hash = a.state === 'done' && a.kind === 'git commit' ? (a.detail.split(' ')[0] ?? '') : ''
       return (
-        <Box flexDirection="row" height={1} overflow="hidden">
-          <Box flexDirection="row" flexShrink={0}>
-            <Text color={isFlash ? (TONES[tone]?.solid ?? theme.accent) : theme.accent}>{(unicode ? BRANCH_ICON.plain : BRANCH_ICON.nerd) + ' '}</Text>
-            <Text bold color={isFlash ? (TONES[tone]?.solid ?? (theme.fg || undefined)) : theme.fg || undefined}>
-              {label}
-            </Text>
-            {b.ahead > 0 && <Text color={TONES.teal?.solid}>{` ↑${b.ahead}`}</Text>}
-            {b.behind > 0 && <Text color={TONES.blue?.solid}>{` ↓${b.behind}`}</Text>}
-          </Box>
-          {b.upstream && (
-            <Box flexShrink={1} overflow="hidden">
-              <Text color={theme.muted} wrap="truncate-end">
-                {` ${b.upstream}`}
+        <Box key="chip" flexDirection="row" flexShrink={0} gap={k.space.pair}>
+          <Text {...termInk(color)}>{unicode ? a.plain : a.nerd}</Text>
+          <Text {...(a.state === 'done' ? { color: plain } : termInk(color))}>{a.state === 'running' ? `${a.label}…` : a.label}</Text>
+          {hash ? <Text dimColor>{hash}</Text> : null}
+        </Box>
+      )
+    }
+
+    const actions = k.actions('head', [
+      { key: 'up', label: unicode ? '↑' : '\u{f005d}', quiet: true, onPress: () => void goUp($) },
+      { key: 'cwd', label: unicode ? '⌂' : '\u{f02dc}', quiet: !follow, onPress: () => void goHome($) },
+      { key: 'refresh', label: unicode ? '↻' : '\u{f0450}', quiet: true, onPress: () => void refreshAll($) },
+      {
+        key: 'hidden',
+        label: unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}',
+        quiet: !t.showHidden,
+        onPress: () => void patch($, cur => ({ showHidden: !cur.showHidden })),
+      },
+      { key: 'size', label: unicode ? 'Σ' : '\u{f02ca}', quiet: !t.showSize, onPress: () => void patch($, cur => ({ showSize: !cur.showSize })) },
+      { key: 'collapse', label: unicode ? '⊟' : '\u{eac5}', quiet: true, onPress: () => void collapseAll($) },
+      t.selected ? { key: 'unselect', label: unicode ? '⊘' : '\u{f0777}', onPress: () => void patch($, () => ({ selected: '' })) } : null,
+    ])
+
+    const searchLine = (
+      <Box key="search" flexDirection="row" gap={k.space.item}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Input
+            key="q"
+            label="/ "
+            placeholder="search"
+            submitLabel="jump"
+            autoFocus
+            value={t.query}
+            onInput={(v: string) => void search($, v)}
+            onSubmit={(v: string) => void jump($, v)}
+          />
+        </Box>
+        {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
+      </Box>
+    )
+
+    const footer =
+      t.selected || latest ? (
+        <Box key="foot" flexDirection="row" gap={k.space.group} paddingLeft={k.edge.left}>
+          {t.selected ? (
+            <Box flexShrink={1} minWidth={0}>
+              <Text dimColor wrap="truncate-start">
+                selected: {t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)}
               </Text>
             </Box>
-          )}
+          ) : null}
           <Box flexGrow={1} />
-          <Box flexDirection="row" flexShrink={0}>
-            {totals[0] > 0 && <Text color={ADD_COLOR}>{` +${totals[0]}`}</Text>}
-            {totals[1] > 0 && <Text color={DEL_COLOR}>{` -${totals[1]}`}</Text>}
-            {rootCounts.map(c => (
-              <Text color={c.c}>{c.t}</Text>
-            ))}
-            {rootCounts.length === 0 && totals[0] === 0 && totals[1] === 0 && <Text color={theme.muted}> clean</Text>}
-          </Box>
+          {latest ? chip(latest) : null}
         </Box>
-      )
-    }
-
-    const chip = (a: Activity) => {
-      const tone = a.state === 'failed' ? 'red' : a.tone
-      const color = TONES[tone]?.solid ?? theme.accent
-      const icon = unicode ? a.plain : a.nerd
-      const hash = a.state === 'done' && a.kind === 'git commit' ? a.detail.split(' ')[0] ?? '' : ''
-      return (
-        <Box flexDirection="row" marginLeft={2}>
-          <Text color={color}>{icon + ' '}</Text>
-          <Text bold={a.state === 'running'} color={color}>
-            {a.state === 'running' ? `${a.label}…` : a.label}
-          </Text>
-          {hash && <Text color={theme.muted}>{` ${hash}`}</Text>}
-        </Box>
-      )
-    }
+      ) : null
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)} backgroundColor={theme.bg || undefined}>
-        <Box flexDirection="row">
-          <Text bold color={theme.accent} wrap="truncate-start">
-            {header}
-          </Text>
-          <Box flexGrow={1} />
-          <Box flexDirection="row" gap={2}>
-            <Button
-              key="up"
-              plain
-              dimColor
-              label={unicode ? '↑' : '\u{f005d}'}
-              onPress={() => void goUp($)}
-            />
-            <Button
-              key="cwd"
-              plain
-              dimColor={!follow}
-              label={unicode ? '⌂' : '\u{f02dc}'}
-              onPress={() => void goHome($)}
-            />
-            <Button
-              key="refresh"
-              plain
-              dimColor
-              label={unicode ? '↻' : '\u{f0450}'}
-              onPress={() => void refreshAll($)}
-            />
-            <Button
-              key="hidden"
-              plain
-              dimColor={!t.showHidden}
-              label={unicode ? (t.showHidden ? '◉' : '○') : t.showHidden ? '\u{f0208}' : '\u{f0209}'}
-              onPress={() => void patch($, cur => ({ showHidden: !cur.showHidden }))}
-            />
-            <Button
-              key="size"
-              plain
-              dimColor={!t.showSize}
-              label={unicode ? 'Σ' : '\u{f02ca}'}
-              onPress={() => void patch($, cur => ({ showSize: !cur.showSize }))}
-            />
-            <Button key="collapse" plain dimColor label={unicode ? '⊟' : '\u{eac5}'} onPress={() => void collapseAll($)} />
-            {t.selected && (
-              <Button key="unselect" plain label={unicode ? '⊘' : '\u{f0777}'} onPress={() => void patch($, () => ({ selected: '' }))} />
-            )}
-            <Text> </Text>
-          </Box>
-        </Box>
-        {branchRow()}
-        {!t.top && <Text color={theme.muted}>{unicode ? '± ' : '\u{e702} '}no git repo · git status starts after git init</Text>}
-        <Box flexDirection="row">
-          <Box flexGrow={1}>
-            <Input
-              key="q"
-              label="/ "
-              placeholder="search"
-              submitLabel="jump"
-              autoFocus
-              value={t.query}
-              onInput={(v: string) => void search($, v)}
-              onSubmit={(v: string) => void jump($, v)}
-            />
-          </Box>
-          {t.query ? <Button key="clear" plain dimColor label={unicode ? '×' : '\u{f0156}'} onPress={() => void search($, '')} /> : null}
-        </Box>
-        <Client
-          key="rows"
-          module="./rows.tsx"
-          props={{ rows: specs, active: t.cursor, activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
-        />
+        {k.section({
+          id: 'files',
+          title: header,
+          right: actions,
+          children: [
+            branchLine(),
+            searchLine,
+            rows.length === 0 ? k.note('empty', t.query ? 'no match' : 'empty') : null,
+            <Client
+              key="rows"
+              module="./rows.tsx"
+              props={{ rows: specs, active: t.cursor, activeBg: theme.selection, hoverBg: faint(theme.selection), tones: SHIMMER, pointer, ...(bar ? { bar } : {}) } satisfies RowsProps}
+            />,
+          ],
+        })}
         <Box flexGrow={1} />
-        {(t.selected || latest) && (
-          <Box flexDirection="row">
-            {t.selected ? (
-              <Box flexShrink={1}>
-                <Text dimColor wrap="truncate-start">
-                  selected: {t.selected !== t.root && inside(t.root, t.selected) ? t.selected.slice(t.root.endsWith('/') ? t.root.length : t.root.length + 1) : shortPath(t.selected)}
-                </Text>
-              </Box>
-            ) : null}
-            <Box flexGrow={1} />
-            {latest && chip(latest)}
-          </Box>
-        )}
+        {footer}
       </Box>
     )
   })

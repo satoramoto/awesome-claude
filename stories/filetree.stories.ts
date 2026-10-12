@@ -7,8 +7,9 @@ import * as mod from '../mods/filetree/hooks/register'
 import { show, where } from './show'
 
 // The whole filetree pane (a fork of data-goblin/claude-code-filetree), from the
-// mod's own render hook, one story per scenario. In the terminal its rows are a
-// `Client` (rows.tsx) that animates the shimmer on its own; on the desktop the hook
+// mod's own render hook, one story per scenario. In the terminal it draws with the
+// kit's terminal system (a section header, TREE connectors, status inks); its rows
+// are a `Client` (rows.tsx) that animates the shimmer on its own; on the desktop the hook
 // draws them with the kit (hooks/desktop.tsx), Claude's activity as lit rows.
 const hooks = collect(mod as any)
 
