@@ -124,16 +124,36 @@ const terminalThemeStyles = () =>
 
 const VERTICAL = new Set(['top', 'bottom', 'height', 'minHeight', 'marginTop', 'marginBottom', 'marginY', 'paddingTop', 'paddingBottom', 'paddingY', 'rowGap'])
 
+/**
+ * The vertical spacing props. The desktop draws these at half a row (SPACING_ROW),
+ * while sizes (`height`, `minHeight`) and offsets (`top`, `bottom`) take a whole
+ * row (CELL.row). Measured on the real pane (2.1.295): `marginTop={1}` is 9.5px,
+ * `paddingY={0.6}` about 5.7px, and a `height={2.5}` chart 47.5px. Every
+ * horizontal prop (widths, paddingX, gaps between columns) takes a column (CELL.col).
+ */
+const VERTICAL_SPACING = new Set(['marginTop', 'marginBottom', 'marginY', 'paddingTop', 'paddingBottom', 'paddingY', 'rowGap'])
+/** One unit of vertical margin, padding or row gap on the desktop, in pixels. */
+export const SPACING_ROW = CELL.row / 2
+
 /** A size prop as CSS: cells as pixels (desktop) or ch / lines (terminal); strings, such as percentages, as written. */
 export const unit = (surface: Surface, key: string, v: unknown) => {
   if (typeof v !== 'number') return String(v)
   if (surface === 'terminal') return VERTICAL.has(key) ? `${v * TERMINAL_ROW_EM}em` : `${v}ch`
+  if (VERTICAL_SPACING.has(key)) return `${v * SPACING_ROW}px`
   return `${v * (VERTICAL.has(key) ? CELL.row : CELL.col)}px`
 }
 
+/**
+ * Colour strings the desktop doesn't know as a border colour: it draws the border
+ * in its default colour (the text's) instead, so a `transparent` border is a
+ * visible outline there (seen on 2.1.295).
+ */
+const DESKTOP_DEFAULT_BORDER = new Set(['transparent'])
+
 const borderOf = (surface: Surface, style: string, c: string | undefined, dim: boolean | undefined) => {
   const width = style === 'bold' ? 2 : style === 'double' ? 3 : 1
-  const paint = color(c ?? 'currentColor')
+  const unknown = surface !== 'terminal' && c !== undefined && DESKTOP_DEFAULT_BORDER.has(c.trim().toLowerCase())
+  const paint = color(unknown ? 'currentColor' : (c ?? 'currentColor'))
   const css: Record<string, string> = { border: `${width}px ${style === 'double' ? 'double' : 'solid'} ${dim ? `color-mix(in srgb, ${paint} 50%, transparent)` : paint}` }
   css.borderRadius = style === 'round' ? (surface === 'terminal' ? '0.4em' : '8px') : '0'
   return css
@@ -154,6 +174,14 @@ const boxStyle = (surface: Surface, p: Record<string, any>) => {
     } else if (k === 'marginY' || k === 'paddingY') {
       const base = k.startsWith('margin') ? 'margin' : 'padding'
       s[`${base}Top`] = s[`${base}Bottom`] = unit(surface, k, v)
+    } else if (k === 'margin' || k === 'padding') {
+      // All four sides: each axis in its own unit, as the X and Y forms.
+      s[`${k}Left`] = s[`${k}Right`] = unit(surface, k, v)
+      s[`${k}Top`] = s[`${k}Bottom`] = unit(surface, `${k}Y`, v)
+    } else if (k === 'gap') {
+      // Both gaps: between columns in a column's width, between rows in vertical spacing.
+      s.columnGap = unit(surface, 'columnGap', v)
+      s.rowGap = unit(surface, 'rowGap', v)
     } else if (k === 'backgroundColor') s.background = color(v)
     else if (k === 'borderStyle') {
       // The desktop draws these; `dashed` it ignores.
@@ -363,6 +391,7 @@ const STYLES = `
   .r-field.terminal select { appearance: none; border: none; background: transparent; padding: 0; outline: none; color: var(--r-accent); }
   .r-field .r-submit { opacity: 0.6; display: none; }
   .r-field:focus-within .r-submit { display: inline; }
+  .r-field .button.r-go { align-self: center; }
 
   .r-code { margin: 0; font: 12px/1.45 'SF Mono', Menlo, monospace; background: var(--r-code); border-radius: 6px; padding: 4px 0; overflow: hidden; }
   .terminal .r-code { font: inherit; padding: 0; border-radius: 0; }
@@ -775,11 +804,16 @@ const button = (node: Node, ctx: Ctx, children: globalThis.Node[]) => {
   } else if (p.plain) {
     // Chromeless on purpose: the docs say a desktop draws its native button either way,
     // but the app as we see it draws a plain Button as its label alone.
+    // The desktop is "a surface that draws no children" (the engine's Button docs): it
+    // draws the label as plain text, or the children's text where there's no label,
+    // and drops the children's styling (colour, bold). Drawing the children here hid
+    // that: filetree's icon buttons showed their icons here and their labels, piled
+    // up, in the app.
     b.className = 'button plain'
-    body(b)
+    b.append(label)
   } else {
     b.className = `button native${p.variant === 'primary' ? ' primary' : ''}`
-    body(b)
+    b.append(label)
   }
   if (p.dimColor) {
     b.classList.add('dim')
@@ -827,7 +861,19 @@ const input = (p: Record<string, any>, ctx: Ctx) => {
     if (field.isConnected && focused?.el === field) focused = null
   }
   wrap.append(field)
-  wrap.append(Object.assign(document.createElement('span'), { className: 'r-submit', textContent: `↵ ${p.submitLabel ?? 'submit'}` }))
+  if (surface === 'terminal') {
+    wrap.append(Object.assign(document.createElement('span'), { className: 'r-submit', textContent: `↵ ${p.submitLabel ?? 'submit'}` }))
+  } else {
+    // The desktop draws the submit as its own button beside the field, always: the
+    // element reaches it as props alone (no sign of whether an onSubmit exists), so
+    // every Input has one, labelled `submitLabel` or "submit".
+    const go = Object.assign(document.createElement('button'), { type: 'button', className: 'button native r-go', textContent: p.submitLabel ?? 'submit' })
+    go.onclick = ev => {
+      ev.preventDefault()
+      ctx.press(() => p.onSubmit?.(field.value, arg('submit')))
+    }
+    wrap.append(go)
+  }
   // A redraw while typing keeps the focus and the caret.
   if (focused?.id === id) {
     const { start, end, el: was } = focused

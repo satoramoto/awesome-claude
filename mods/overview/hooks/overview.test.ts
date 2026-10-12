@@ -2,6 +2,9 @@ import type { On } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { FILL } from '@kit/tokens'
+import { BAND_ROWS } from '@kit/ui'
+
 // The overview pane drawn by the engine's test kit, mostly on the terminal.
 // The test's own hooks sit beneath the mod and stand for the engine: the
 // session's usage (context and limits), its agents, git and gh answered from
@@ -483,5 +486,26 @@ test('below 30 columns each section draws its header and figures only', async ($
   expect(await ui.find({ key: 'meter' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '5-hour' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Model' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('the desktop draws the inspector without outlines: every section header a fixed-height fill, no border anywhere, hide a dim label', async ($, on) => {
+  await session($, on, 'lane')
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'desktop', ...pane(60) })
+  const tree = (await ui.drawn()) as Drawn
+  const every = (d: Drawn): Drawn[] => [d, ...kids(d).flatMap(every)]
+  const boxes = every(tree).filter(d => d.type === 'Box')
+  // The real desktop draws a `transparent` border in the text's colour: headers and tiles came out as outlined bubbles.
+  expect(boxes.filter(b => b.props?.borderStyle !== undefined)).toEqual([])
+  const bands = boxes.filter(b => b.props?.backgroundColor === FILL.head)
+  expect(bands.length).toBeGreaterThanOrEqual(5)
+  for (const b of bands) {
+    expect(b.props?.height).toBe(BAND_ROWS)
+    expect(b.props?.paddingY).toBeUndefined()
+  }
+  // The desktop draws a Button's label alone: hide is a dim label, no grey child Text.
+  const hide = every(tree).find(d => d.type === 'Button' && String(keyOf(d)).startsWith('hide-'))
+  expect(hide?.props).toMatchObject({ label: 'hide', dimColor: true })
+  expect(kids(hide!)).toEqual([])
   await ui.unmount()
 })

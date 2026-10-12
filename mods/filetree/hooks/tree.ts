@@ -126,13 +126,50 @@ export type Change = 'new' | 'mod' | 'del'
 
 export function parseBranch(record: string): Branch {
   const body = record.replace(/^## /, '')
-  if (body.startsWith('HEAD (no branch)')) return { head: 'detached', upstream: '', ahead: 0, behind: 0 }
+  if (body.startsWith('HEAD (no branch)')) return { head: 'detached', upstream: '', host: '', ahead: 0, behind: 0 }
   const head = body.match(/^(?:No commits yet on |Initial commit on )?(.+?)(?:\.\.\.|\s|$)/)?.[1] ?? body
   const upstream = body.match(/\.\.\.(\S+)/)?.[1] ?? ''
   const ahead = Number(body.match(/ahead (\d+)/)?.[1] ?? 0)
   const behind = Number(body.match(/behind (\d+)/)?.[1] ?? 0)
-  return { head, upstream, ahead, behind }
+  return { head, upstream, host: '', ahead, behind }
 }
+
+/** The remote an upstream lives on: `origin` of `origin/feat/x`. */
+export function remoteName(upstream: string): string {
+  const slash = upstream.indexOf('/')
+  return slash > 0 ? upstream.slice(0, slash) : ''
+}
+
+/**
+ * A remote URL's host, lowercased: `https://github.com/o/r.git`,
+ * `ssh://git@host:22/o/r`, scp-like `git@gitlab.com:o/r.git`. Empty for a local
+ * path or anything else without one.
+ */
+export function remoteHost(url: string): string {
+  const u = url.trim()
+  const full = u.match(/^[a-z][a-z0-9+.-]*:\/\/(?:[^@/]*@)?(\[[^\]]+\]|[^/:?#]+)/i)
+  if (full) return (full[1] ?? '').toLowerCase()
+  const scp = u.match(/^(?:[^@/]+@)?([^/:]+):(?!\/)/)
+  return scp ? (scp[1] ?? '').toLowerCase() : ''
+}
+
+/** Where an upstream lives, by its remote's host. */
+export type HostKind = 'github' | 'gitlab' | 'forgejo' | 'other'
+
+/** GitHub by its host, GitLab and Forgejo by theirs or a host that names them (a self-hosted `gitlab.corp`). */
+export function hostKind(host: string): HostKind {
+  const h = host.toLowerCase()
+  if (h === 'github.com' || h.endsWith('.github.com')) return 'github'
+  if (h.includes('gitlab')) return 'gitlab'
+  if (h.includes('codeberg') || h.includes('forgejo')) return 'forgejo'
+  return 'other'
+}
+
+/** Each host's icon (kit/icons.ts): GitHub's mark, GitLab's, Forgejo's, else a generic remote. */
+export const HOST_ICON: Record<HostKind, string> = { github: 'mark-github', gitlab: 'gitlab', forgejo: 'forgejo', other: 'cloud' }
+
+/** Each host's mark on the terminal, which has no glyph for them: two letters, or ⇅ for any other remote. */
+export const HOST_MARK: Record<HostKind, string> = { github: 'gh', gitlab: 'gl', forgejo: 'fj', other: '⇅' }
 
 export function mapper(root: string, prefix: string): (rel: string) => string | null {
   return rel => (rel.startsWith(prefix) ? join(root, rel.slice(prefix.length).replace(/\/$/, '')).replace(/\/$/, '') : null)

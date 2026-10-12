@@ -67,7 +67,7 @@ const base = {
   untrackedDirs: [],
   top: ROOT,
   prefix: '',
-  branch: { head: 'feat/search', upstream: 'origin/feat/search', ahead: 2, behind: 0 },
+  branch: { head: 'feat/search', upstream: 'origin/feat/search', host: 'github.com', ahead: 2, behind: 0 },
   counts: {
     [ROOT]: [1, 3, 1],
     [p('src')]: [1, 2, 1],
@@ -174,7 +174,19 @@ export const longNames = {
     ],
     git: { ...base.git, [p('src/components/AnExtremelyLongComponentNameThatKeepsGoingWellPastThePane.tsx')]: 'A' },
     diff: { ...base.diff, [p('src/components/AnExtremelyLongComponentNameThatKeepsGoingWellPastThePane.tsx')]: [212, 0] },
-    branch: { head: 'feature/a-very-long-branch-name-for-the-search-rework', upstream: 'origin/feature/a-very-long-branch-name-for-the-search-rework', ahead: 12, behind: 4 },
+    branch: { head: 'feature/a-very-long-branch-name-for-the-search-rework', upstream: 'origin/feature/a-very-long-branch-name-for-the-search-rework', host: 'github.com', ahead: 12, behind: 4 },
   },
   activity: [],
 }
+
+/** A short branch on GitLab, nothing ahead: the name, then the GitLab mark (the upstream its tooltip). */
+export const gitlab = { tree: { ...base, branch: { head: 'dev', upstream: 'origin/dev', host: 'gitlab.com', ahead: 0, behind: 0 } }, activity: [] }
+
+/** A branch on Codeberg (Forgejo), one behind. */
+export const forgejo = { tree: { ...base, branch: { head: 'main', upstream: 'upstream/main', host: 'codeberg.org', ahead: 0, behind: 1 } }, activity: [] }
+
+/** A branch on a self-hosted remote: the generic remote icon. */
+export const otherRemote = { tree: { ...base, branch: { head: 'main', upstream: 'origin/main', host: 'git.example.org', ahead: 0, behind: 0 } }, activity: [] }
+
+/** A local branch that tracks nothing: no upstream icon. */
+export const untracked = { tree: { ...base, branch: { head: 'spike', upstream: '', host: '', ahead: 0, behind: 0 } }, activity: [] }

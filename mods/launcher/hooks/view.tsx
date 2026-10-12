@@ -1,11 +1,11 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import { basename, bytes } from '@kit/format'
+import { basename, bytes, middle } from '@kit/format'
 import { C, GRAY, MUTED, STATUS } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { CELLS, EDGE, MEASURE, SPACE, kit } from '@kit/ui'
 
-import type { LaunchConfig, LaunchFile, Server, Status } from '../types'
+import type { KillConfirm, LaunchConfig, LaunchFile, Server, Status } from '../types'
 
 /** What the pane draws with; the terminal's table has the same elements, Svg aside. */
 export type PaneElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Button' | 'Link'> & Partial<Pick<Elements['desktop'], 'Svg'>>
@@ -15,6 +15,10 @@ export type Actions = {
   start: (name: string) => void
   stop: (name: string) => void
   restart: (name: string) => void
+  /** Takes over the server another process runs on its port, so Stop works on it. */
+  adopt: (name: string) => void
+  /** Kill's press: the first arms the confirm, a second within its time ends the process on the port. */
+  kill: (name: string) => void
   /** Unfolds a configuration's details and output, or folds them. */
   toggle: (name: string) => void
 }
@@ -28,6 +32,8 @@ export const LOOK: Record<Status, { word: string; color: string; kind: StatusKin
   starting: { word: 'starting', color: C.blue, kind: 'running' },
   running: { word: 'running', color: C.ok, kind: 'done' },
   elsewhere: { word: 'running elsewhere', color: C.ok, kind: 'done' },
+  // Amber: it can't start on its own port until that process ends (or autoPort moves it).
+  taken: { word: 'port taken', color: C.warn, kind: 'warn' },
   failed: { word: 'failed', color: C.bad, kind: 'failed' },
 }
 
@@ -51,6 +57,17 @@ const TAIL = { terminal: 8, app: 14 } as const
 const TITLE_KEEPS = 12
 const RULE_GAPS = 2
 
+/**
+ * A desktop row's measure, in columns, to tell whether its address fits: the band's
+ * inset and fold arrow before the title, the gap between parts, and the room a
+ * native Button takes beyond its label.
+ */
+const DESK_LEAD = 4
+const DESK_GAP = 1
+const DESK_BUTTON = 1
+/** The columns a desktop prop's label and the body's indents take, left of a value. */
+const DESK_PROP_LABEL = 14
+
 /** The cells of a running server's CPU sparkline on the terminal: the last 12 samples. */
 const SPARK_CELLS = 6
 /** The CPU percent a sparkline's top stands for at least, so an idle server's noise stays low. */
@@ -65,23 +82,26 @@ const TERM_WORD: Record<Status, string> = {
   starting: 'starting',
   running: 'running',
   elsewhere: 'elsewhere',
+  taken: 'taken',
   failed: 'failed',
 }
 
 /**
  * What every terminal row's right side gives up as the pane narrows, one step at a
  * time and the same step for every row, so their columns stay aligned: the address
- * shortens to its port, then the CPU sparkline goes, then the state's word (the
- * glyph stays), then the address, then Restart (it stays in `/launcher restart`).
+ * shortens to its port, then the CPU sparkline goes, then Take over (Kill stays),
+ * then the state's word (the glyph stays), then the address, then Restart (it
+ * stays in `/launcher restart`).
  */
-type Fit = { address: 'full' | 'port' | null; spark: boolean; word: boolean; restart: boolean }
+type Fit = { address: 'full' | 'port' | null; spark: boolean; word: boolean; restart: boolean; adopt: boolean }
 const FITS: Fit[] = [
-  { address: 'full', spark: true, word: true, restart: true },
-  { address: 'port', spark: true, word: true, restart: true },
-  { address: 'port', spark: false, word: true, restart: true },
-  { address: 'port', spark: false, word: false, restart: true },
-  { address: null, spark: false, word: false, restart: true },
-  { address: null, spark: false, word: false, restart: false },
+  { address: 'full', spark: true, word: true, restart: true, adopt: true },
+  { address: 'port', spark: true, word: true, restart: true, adopt: true },
+  { address: 'port', spark: false, word: true, restart: true, adopt: true },
+  { address: 'port', spark: false, word: true, restart: true, adopt: false },
+  { address: 'port', spark: false, word: false, restart: true, adopt: false },
+  { address: null, spark: false, word: false, restart: true, adopt: false },
+  { address: null, spark: false, word: false, restart: false, adopt: false },
 ]
 
 /**
@@ -139,7 +159,7 @@ export const renderPane = (
   servers: Record<string, Server>,
   open: string[],
   act: Actions,
-  opts: { focused?: boolean } = {},
+  opts: { focused?: boolean; confirm?: KillConfirm | null } = {},
 ): RenderElement => {
   const { Box, Text, Link } = els
   const terminal = surface === 'terminal'
@@ -166,16 +186,38 @@ export const renderPane = (
   const failed = all.filter(x => x.s.status === 'failed').length
 
   const isUp = (s: Server) => s.status === 'running' || s.status === 'elsewhere'
-  /** What can be done to a server: Start, or Stop and the quiet Restart. */
+  /**
+   * What can be done to a server: Start while it's stopped or failed; Stop and the
+   * quiet Restart while it runs from here (started or taken over); Take over and
+   * Kill while its own server runs elsewhere; Kill (and Start on the next port,
+   * with autoPort) while another process holds its port. Kill asks once more
+   * (`Kill PID 1234?`, red) before it ends anything.
+   */
   const controls = (c: LaunchConfig, s: Server) => {
     const mine = s.status === 'running' || s.status === 'starting'
-    const canStart = s.status === 'stopped' || s.status === 'failed' || (s.status === 'elsewhere' && Boolean(c.autoPort))
+    const canStart = s.status === 'stopped' || s.status === 'failed' || (s.status === 'taken' && Boolean(c.autoPort))
+    const held = (s.status === 'elsewhere' || s.status === 'taken') && Boolean(s.pid)
+    const armed = Boolean(held && opts.confirm && opts.confirm.name === c.name && opts.confirm.pid === s.pid)
     return {
       start: canStart ? { key: `start-${c.name}`, label: 'Start', onPress: () => act.start(c.name) } : null,
       stop: mine ? { key: `stop-${c.name}`, label: 'Stop', onPress: () => act.stop(c.name) } : null,
       restart: mine ? { key: `restart-${c.name}`, label: 'Restart', quiet: true, onPress: () => act.restart(c.name) } : null,
+      adopt: held && s.status === 'elsewhere' ? { key: `adopt-${c.name}`, label: 'Take over', quiet: true, onPress: () => act.adopt(c.name) } : null,
+      kill: held
+        ? armed
+          ? { key: `kill-${c.name}`, label: `Kill PID ${s.pid}?`, tone: 'danger' as const, onPress: () => act.kill(c.name) }
+          : { key: `kill-${c.name}`, label: 'Kill', quiet: true, onPress: () => act.kill(c.name) }
+        : null,
     }
   }
+  /** A row's actions in order: the main ones, then the quiet ones, less Restart or Take over where the row has no room for them. */
+  const listOf = (a: ReturnType<typeof controls>, fit: { restart: boolean; adopt: boolean }) => [
+    a.start,
+    a.stop,
+    fit.restart ? a.restart : null,
+    fit.adopt ? a.adopt : null,
+    a.kill,
+  ]
   /** Where a server answers on a terminal row, whole; one that doesn't answer shows its port. */
   const addressOf = (s: Server) => (isUp(s) ? `localhost:${s.port}` : `:${s.port}`)
   /** A server's CPU series once there's a line to draw: answering, two samples or more. */
@@ -192,13 +234,13 @@ export const renderPane = (
     const full = max(all.map(({ s }) => cells(addressOf(s))))
     const port = max(all.map(({ s }) => cells(`:${s.port}`)))
     const spark = all.some(({ s }) => sparkOf(s) !== null)
-    const labels = (c: LaunchConfig, s: Server, restart: boolean) => {
-      const a = controls(c, s)
-      return [a.start, a.stop, restart ? a.restart : null].filter(x => x !== null).map(x => x.label)
-    }
+    const labels = (c: LaunchConfig, s: Server, fit: Fit) =>
+      listOf(controls(c, s), fit)
+        .filter(x => x !== null)
+        .map(x => x.label)
     const actions = (fit: Fit) =>
       max(all.map(({ c, s }) => {
-        const l = labels(c, s, fit.restart)
+        const l = labels(c, s, fit)
         return l.reduce((n, x) => n + cells(x), 0) + CELLS.group * Math.max(0, l.length - 1)
       }))
     const state = (fit: Fit) => 1 + (fit.word ? CELLS.item + word : 0)
@@ -231,7 +273,7 @@ export const renderPane = (
   const row = (c: LaunchConfig, s: Server) => {
     const look = LOOK[s.status]
     const up = isUp(s)
-    const { start, stop, restart } = controls(c, s)
+    const acts = controls(c, s)
 
     const where = (label: string) =>
       up ? (
@@ -251,7 +293,7 @@ export const renderPane = (
       const fit = grid.fit
       const address = fit.address === 'full' ? addressOf(s) : `:${s.port}`
       const cpu = sparkOf(s)
-      const shown = [start, stop, fit.restart ? restart : null]
+      const shown = listOf(acts, fit)
       const right = (
         <Box key={`right-${c.name}`} flexDirection="row" gap={CELLS.group}>
           <Box key={`state-${c.name}`} flexDirection="row" gap={CELLS.item} width={grid.state} flexShrink={0}>
@@ -298,13 +340,25 @@ export const renderPane = (
       return { title: c.name, right }
     }
 
+    // The state's word keeps its width; the address gives way first, and drops
+    // out when the row can't hold it beside the title, the word and the actions.
+    const shown = listOf(acts, { restart: true, adopt: true }).filter(x => x !== null)
+    const address = up ? `localhost:${s.port}` : `:${s.port}`
+    const need =
+      DESK_LEAD + cells(c.name) + DESK_GAP + cells(look.word) + DESK_GAP + cells(address) + shown.reduce((n, a) => n + DESK_GAP + cells(a.label) + DESK_BUTTON, 0)
     const right = (
       <Box key="right" flexDirection="row" alignItems="center" gap={SPACE.item} minWidth={0} flexShrink={1}>
-        <Text key="state" color={look.color} wrap="truncate">
-          {look.word}
-        </Text>
-        {where(up ? `localhost:${s.port}` : `:${s.port}`)}
-        {start || stop || restart ? k.actions(`actions-${c.name}`, [start, stop, restart]) : null}
+        <Box key={`state-${c.name}`} flexShrink={0}>
+          <Text key="state" color={look.color}>
+            {look.word}
+          </Text>
+        </Box>
+        {need <= columns ? (
+          <Box key={`where-${c.name}`} flexDirection="row" minWidth={0} flexShrink={1}>
+            {where(address)}
+          </Box>
+        ) : null}
+        {shown.length ? k.actions(`actions-${c.name}`, shown) : null}
       </Box>
     )
     return { title: c.name, right }
@@ -313,24 +367,40 @@ export const renderPane = (
   /** Unfolded: what it runs, where, how it ended, then the tail of its output. */
   const details = (c: LaunchConfig, s: Server) => {
     const tail = terminal ? quietLog(c, s, TAIL.terminal) : s.log.slice(-TAIL.app)
-    const elsewhere = `Port ${s.port} answers, but this session didn't start it.`
+    const held = s.status === 'elsewhere' || s.status === 'taken'
+    const note = s.adopted
+      ? `Taken over: its output can't be shown here, as it writes to wherever it was started, not to the launcher.`
+      : s.status === 'elsewhere'
+        ? `Port ${s.port} answers, but this session didn't start it.`
+        : s.status === 'taken'
+          ? `Port ${s.port} is held by another process, not this configuration's server.`
+          : null
+    const line = (key: string, text: string) =>
+      terminal ? (
+        k.note(key, text)
+      ) : (
+        <Text key={key} dimColor wrap="truncate">
+          {text}
+        </Text>
+      )
+    // The process holding the port, cut in the middle so its start and end both show.
+    const proc = (held || s.adopted) && s.command ? s.command : null
     return [
       k.prop(`command-${c.name}`, 'command', commandOf(c)),
       c.cwd ? k.prop(`cwd-${c.name}`, 'cwd', c.cwd) : null,
       // On the terminal, what the header's sparkline last measured, as figures.
       terminal && s.cpu?.length ? k.prop(`cpu-${c.name}`, 'cpu', percent(s.cpu[s.cpu.length - 1]!)) : null,
       terminal && s.cpu?.length && s.rss ? k.prop(`memory-${c.name}`, 'memory', `${bytes(s.rss)}B`) : null,
-      s.status === 'elsewhere' ? (
-        terminal ? (
-          k.note(`note-${c.name}`, elsewhere)
-        ) : (
-          <Text key={`note-${c.name}`} dimColor wrap="truncate">
-            {elsewhere}
-          </Text>
-        )
-      ) : null,
+      (held || s.adopted) && s.pid ? k.prop(`pid-${c.name}`, 'pid', String(s.pid)) : null,
+      proc
+        ? terminal
+          ? k.prop(`process-${c.name}`, 'process', proc, { path: true })
+          : k.prop(`process-${c.name}`, 'process', middle(proc, Math.max(16, columns - DESK_PROP_LABEL)))
+        : null,
+      note ? line(`note-${c.name}`, note) : null,
       s.status === 'failed' && s.code !== null ? k.prop(`exit-${c.name}`, 'exit', <Text {...k.ink(C.bad)}>{String(s.code)}</Text>) : null,
-      tail.length ? (
+      // A server running elsewhere writes its output there: no empty log to show.
+      !tail.length && (held || s.adopted) ? null : tail.length ? (
         // The output is its own block: one blank row under the props.
         <Box key={`log-${c.name}`} flexDirection="column" marginTop={terminal ? k.space.block : SPACE.block} minWidth={0}>
           {tail.map((line, i) =>

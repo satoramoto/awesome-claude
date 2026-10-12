@@ -1,4 +1,5 @@
 import { GLYPH } from './tokens'
+import type { Duo } from './tokens'
 
 /*
  * The kit's icons: stroked drawings on a 16×16 grid, drawn as SVG at one exact
@@ -72,6 +73,32 @@ const FILLED: Record<string, string> = {
 }
 
 /**
+ * Where a branch's upstream lives, by the remote's host: GitHub's mark and a
+ * generic remote (a cloud) are Octicons (`@primer/octicons`, `mark-github-16.svg`
+ * and `cloud-16.svg`, MIT, © GitHub Inc.); GitLab's and Forgejo's marks are from
+ * Simple Icons (`icons/gitlab.svg`, `icons/forgejo.svg`, CC0 1.0), on their
+ * 24×24 grid. All copied unchanged, drawn filled in the icon's colour.
+ */
+const HOSTS: Record<string, { d: string; grid: number }> = {
+  'mark-github': {
+    grid: 16,
+    d: 'M6.766 11.328c-2.063-.25-3.516-1.734-3.516-3.656 0-.781.281-1.625.75-2.188-.203-.515-.172-1.609.063-2.062.625-.078 1.468.25 1.968.703.594-.187 1.219-.281 1.985-.281.765 0 1.39.094 1.953.265.484-.437 1.344-.765 1.969-.687.218.422.25 1.515.046 2.047.5.593.766 1.39.766 2.203 0 1.922-1.453 3.375-3.547 3.64.531.344.89 1.094.89 1.954v1.625c0 .468.391.734.86.547C13.781 14.359 16 11.53 16 8.03 16 3.61 12.406 0 7.984 0 3.563 0 0 3.61 0 8.031a7.88 7.88 0 0 0 5.172 7.422c.422.156.828-.125.828-.547v-1.25c-.219.094-.5.156-.75.156-1.031 0-1.64-.562-2.078-1.609-.172-.422-.36-.672-.719-.719-.187-.015-.25-.093-.25-.187 0-.188.313-.328.625-.328.453 0 .844.281 1.25.86.313.452.64.655 1.031.655s.641-.14 1-.5c.266-.265.47-.5.657-.656',
+  },
+  cloud: {
+    grid: 16,
+    d: 'M2 7.25A5.225 5.225 0 0 1 7.25 2a5.222 5.222 0 0 1 4.767 3.029A4.472 4.472 0 0 1 16 9.5c0 2.505-1.995 4.5-4.5 4.5h-8A3.474 3.474 0 0 1 0 10.5c0-1.41.809-2.614 2.001-3.17Zm1.54.482a.75.75 0 0 1-.556.832c-.86.22-1.484.987-1.484 1.936 0 1.124.876 2 2 2h8c1.676 0 3-1.324 3-3s-1.324-3-3-3a.75.75 0 0 1-.709-.504A3.72 3.72 0 0 0 7.25 3.5C5.16 3.5 3.5 5.16 3.5 7.25c.002.146.014.292.035.436l.004.036.001.008Z',
+  },
+  gitlab: {
+    grid: 24,
+    d: 'm23.6004 9.5927-.0337-.0862L20.3.9814a.851.851 0 0 0-.3362-.405.8748.8748 0 0 0-.9997.0539.8748.8748 0 0 0-.29.4399l-2.2055 6.748H7.5375l-2.2057-6.748a.8573.8573 0 0 0-.29-.4412.8748.8748 0 0 0-.9997-.0537.8585.8585 0 0 0-.3362.4049L.4332 9.5015l-.0325.0862a6.0657 6.0657 0 0 0 2.0119 7.0105l.0113.0087.03.0213 4.976 3.7264 2.462 1.8633 1.4995 1.1321a1.0085 1.0085 0 0 0 1.2197 0l1.4995-1.1321 2.4619-1.8633 5.006-3.7489.0125-.01a6.0682 6.0682 0 0 0 2.0094-7.003z',
+  },
+  forgejo: {
+    grid: 24,
+    d: 'M16.7773 0c1.6018 0 2.9004 1.2986 2.9004 2.9005s-1.2986 2.9004-2.9004 2.9004c-1.0854 0-2.0315-.596-2.5288-1.4787H12.91c-2.3322 0-4.2272 1.8718-4.2649 4.195l-.0007 2.1175a7.0759 7.0759 0 0 1 4.148-1.4205l.1176-.001 1.3385.0002c.4973-.8827 1.4434-1.4788 2.5288-1.4788 1.6018 0 2.9004 1.2986 2.9004 2.9005s-1.2986 2.9004-2.9004 2.9004c-1.0854 0-2.0315-.596-2.5288-1.4787H12.91c-2.3322 0-4.2272 1.8718-4.2649 4.195l-.0007 2.319c.8827.4973 1.4788 1.4434 1.4788 2.5287 0 1.602-1.2986 2.9005-2.9005 2.9005-1.6018 0-2.9004-1.2986-2.9004-2.9005 0-1.0853.596-2.0314 1.4788-2.5287l-.0002-9.9831c0-3.887 3.1195-7.0453 6.9915-7.108l.1176-.001h1.3385C14.7458.5962 15.692 0 16.7773 0ZM7.2227 19.9052c-.6596 0-1.1943.5347-1.1943 1.1943s.5347 1.1943 1.1943 1.1943 1.1944-.5347 1.1944-1.1943-.5348-1.1943-1.1944-1.1943Zm9.5546-10.4644c-.6596 0-1.1944.5347-1.1944 1.1943s.5348 1.1943 1.1944 1.1943c.6596 0 1.1943-.5347 1.1943-1.1943s-.5347-1.1943-1.1943-1.1943Zm0-7.7346c-.6596 0-1.1944.5347-1.1944 1.1943s.5348 1.1943 1.1944 1.1943c.6596 0 1.1943-.5347 1.1943-1.1943s-.5347-1.1943-1.1943-1.1943Z',
+  },
+}
+
+/**
  * Each named icon's glyph on the terminal: one cell wide, from Unicode blocks
  * monospace fonts carry (geometric shapes, arrows, box drawing, a few dingbats),
  * never one with an emoji presentation (⚠ ⚡ ◼ draw as emoji in some terminals).
@@ -109,15 +136,28 @@ export const TERM_GLYPH: Readonly<Record<string, string>> = {
  */
 export const glyphOf = (key: string): string => TERM_GLYPH[key] ?? ([...key].length === 1 ? key : '•')
 
-/** The SVG for an icon (a GLYPH or a name), stroked in `color`; null when the kit has none. */
-export const iconSvg = (key: string, color: string, px = ICON_PX): string | null => {
-  const filled = FILLED[key]
-  if (filled)
-    return `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 16 16" fill="${color}"><path d="${filled}"/></svg>`
+/** An XML text node's escapes, for a tooltip's `<title>`. */
+const xml = (text: string) => text.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+
+/**
+ * The SVG for an icon (a GLYPH or a name), drawn in `color`; null when the kit has none.
+ *
+ * A `Duo` colour (a file type's, `FILE_TYPE` in kit/tokens.ts) draws the dark value
+ * and switches to the light one by the page's colour scheme, in a style inside the
+ * SVG: the engine tells a render hook no desktop theme. `title` is a tooltip,
+ * shown where the SVG is drawn interactive.
+ */
+export const iconSvg = (key: string, color: string | Duo, px = ICON_PX, title?: string): string | null => {
+  const host = HOSTS[key]
+  const filled = host?.d ?? FILLED[key]
   const body = PATHS[key]
-  if (!body) return null
-  return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 16 16" ` +
-    `fill="none" stroke="${color}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`
-  )
+  if (!filled && !body) return null
+  const grid = host?.grid ?? 16
+  const base = typeof color === 'string' ? color : color.dark
+  const paint = filled ? 'fill' : 'stroke'
+  const scheme = typeof color === 'string' ? '' : `<style>@media (prefers-color-scheme: light){svg{${paint}:${color.light}}}</style>`
+  const tip = title ? `<title>${xml(title)}</title>` : ''
+  const open = `<svg xmlns="http://www.w3.org/2000/svg" width="${px}" height="${px}" viewBox="0 0 ${grid} ${grid}" `
+  if (filled) return `${open}fill="${base}">${scheme}${tip}<path d="${filled}"/></svg>`
+  return `${open}fill="none" stroke="${base}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">${scheme}${tip}${body}</svg>`
 }

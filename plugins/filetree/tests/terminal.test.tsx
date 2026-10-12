@@ -10,7 +10,7 @@ const LONG = 'a-file-whose-name-runs-on-and-on-well-past-any-sidebar.config.ts'
 type Dirs = Record<string, [string, 'file' | 'dir'][]>
 
 /** A repository on macOS: `src/a.ts` modified (+3 −1), `notes.md` new, the branch one ahead of its upstream. */
-function world(on: any, opts: { dirs?: Dirs; top?: string; status?: string } = {}) {
+function world(on: any, opts: { dirs?: Dirs; top?: string; status?: string; remote?: string } = {}) {
   const dirs: Dirs = opts.dirs ?? {
     [ROOT]: [['src', 'dir'], ['README.md', 'file'], ['notes.md', 'file'], [LONG, 'file']],
     [`${ROOT}/src`]: [['a.ts', 'file'], ['b.ts', 'file']],
@@ -50,6 +50,7 @@ function world(on: any, opts: { dirs?: Dirs; top?: string; status?: string } = {
     if (verb === 'rev-parse' && argv.at(-1) === 'HEAD') return ok('aaaaaaa1\n')
     if (verb === 'rev-parse') return top ? ok(`\n${top}\n`) : { value: { exitCode: 128, stdout: '', stderr: 'not a git repository', isStdoutTruncated: false, isStderrTruncated: false } }
     if (verb === 'status') return ok(opts.status ?? '## main...origin/main [ahead 1]\0 M src/a.ts\0?? notes.md\0')
+    if (verb === 'remote' && argv.includes('get-url')) return ok(`${opts.remote ?? 'https://github.com/k/proj.git'}\n`)
     if (verb === 'diff' && argv.includes('--numstat')) return ok('3\t1\tsrc/a.ts\0')
     if (verb === 'ls-files') return ok('src/a.ts\0src/b.ts\0README.md\0notes.md\0')
     return ok('')
@@ -151,14 +152,42 @@ test("terminal: a name takes its git state's colour as a theme key; the figures 
   await ui.unmount()
 })
 
-test("terminal: the branch line keeps the repo's totals in colour and leaves out an upstream of the same name", async ($, on) => {
+test("terminal: the branch line keeps the repo's totals in colour and marks the upstream by its host, never its name", async ($, on) => {
   const { ui } = await terminal($, on)
-  // Ahead, dim after the name; `origin/main` only restates `main`.
-  expect((await ui.findAll({ type: 'Text', text: /↑1/ })).length).toBeGreaterThan(0)
+  // Ahead, then the upstream's host mark (GitHub's `gh`), dim after the name; never `origin/main`.
+  expect((await ui.findAll({ type: 'Text', text: /↑1 gh/ })).length).toBeGreaterThan(0)
   expect(await ui.find({ type: 'Text', text: /origin\/main/ })).toBeUndefined()
   expect((await ui.findAll({ type: 'Text', text: '+3' })).some((t: any) => t.props.color === 'success')).toBe(true)
   expect((await ui.findAll({ type: 'Text', text: '−1' })).some((t: any) => t.props.color === 'error')).toBe(true)
   expect((await ui.findAll({ type: 'Text', text: 'M1' })).some((t: any) => t.props.color === 'warning')).toBe(true)
+  await ui.unmount()
+})
+
+for (const [remote, mark] of [
+  ['git@gitlab.com:k/proj.git', 'gl'],
+  ['https://codeberg.org/k/proj.git', 'fj'],
+  ['https://git.example.org/k/proj.git', '⇅'],
+] as const) {
+  test(`terminal: an upstream on ${remote} is marked ${mark}`, async ($, on) => {
+    const clock = world(on, { remote })
+    await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+    await clock.settle()
+    const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(60) })
+    await clock.settle()
+    expect((await ui.findAll({ type: 'Text', text: `↑1 ${mark}` })).length).toBeGreaterThan(0)
+    await ui.unmount()
+  })
+}
+
+test('terminal: a branch that tracks nothing has no upstream mark', async ($, on) => {
+  const clock = world(on, { status: '## spike\0 M src/a.ts\0' })
+  await $.session.start({ cwd: ROOT, surface: 'terminal', isInteractive: true })
+  await clock.settle()
+  const ui = await $.ui.mount({ plugin: 'filetree', surface: 'terminal', ...pane(60) })
+  await clock.settle()
+  const all = ((await ui.findAll({ type: 'Text' })) as any[]).map(t => String(t.text ?? ''))
+  expect(all).toContain('spike')
+  expect(all.some(t => /^(gh|gl|fj|⇅)$/.test(t.trim()))).toBe(false)
   await ui.unmount()
 })
 
@@ -176,10 +205,10 @@ test('terminal: a long branch name is cut once, in the middle, with the file cou
       whole: all.includes(head),
       cut: all.find(t => t.startsWith('…') && head.endsWith(t.slice(1))),
       counts: all.includes('M1'),
-      note: all.some(t => /↑2 origin\/dev/.test(t)),
+      note: all.some(t => /↑2 gh/.test(t)),
     }
   }
-  // Wide: the whole name, its note (ahead and a differently named upstream) and the counts.
+  // Wide: the whole name, its note (ahead and the upstream's host mark) and the counts.
   expect(await branch(100)).toMatchObject({ whole: true, counts: true, note: true })
   // Narrow: the counts and the note give way; the name is cut once, keeping its end.
   const narrow = await branch(30)

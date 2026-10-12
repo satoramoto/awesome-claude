@@ -126,6 +126,11 @@ Import shared code by alias; the build rewrites it:
   Octicons (`issue-opened`, `comment`, `pr-open`, `pr-merged`, `pr-closed`,
   `pr-draft`, the branch glyph). Draw them through `k.icon(key, color)`, which
   falls back to the glyph on the terminal. Add a new Octicon to `FILLED` unchanged.
+- An icon button on the desktop (filetree's `iconButton`) is the icon with a
+  Button over it whose label is two Braille blanks (U+2800), which draw nothing
+  and no renderer trims. Known limitation: screen readers hear those buttons as
+  unnamed, because the engine gives a Button no accessible name separate from its
+  label. The icon's `alt` carries the name until the engine adds one.
 - Draw the terminal and the app surfaces separately where they differ
   (`renderTerminal` / `renderApp` in `mods/issues/hooks/view.tsx`); `e.surface`
   is `terminal`, `desktop`, `vscode` or `mobile`. `Input` doesn't exist on mobile.
@@ -154,6 +159,40 @@ The look is an instrument inspector (think Premiere's Effect Controls):
 - Desktop limits (README, "Drawing for the desktop"): whole percentages only
   (`pct()`), `flexGrow` ≤ 10000, no Box `hover`, no `dashed` borders; SVG blurs
   when scaled, so keep it to small fixed-size pieces.
+
+### Desktop spacing and borders, as the real app draws them
+
+Measured against the real desktop pane (2.1.295); the Storybook bench applies
+the same rules (`unit()` and `borderOf()` in `playground/render.ts`), so what it
+shows is what the app draws. Design within them:
+
+- **Any number is accepted** for margin, padding, gap, width and height, fractions
+  included (the validator refuses only non-numbers, and percentages that aren't
+  whole). There's no spacing scale to snap to, so the kit's `SPACE`/`EDGE` *are*
+  the scale: use them, never raw numbers.
+- **Horizontal units are columns, ~7.8px**: width, minWidth, paddingX/Left/Right,
+  marginX/Left/Right, columnGap, and `gap` between items in a row.
+- **Size units are rows, ~19px (one text line)**: height, minHeight, top, bottom.
+  A `height={3.5}` chart is 66.5px.
+- **Vertical spacing is half a row, ~9.5px a unit**: marginTop/Bottom/Y,
+  paddingTop/Bottom/Y, rowGap (and `gap` between rows). So `marginTop={1}` is
+  half a text line, not a line: a section's body sits 9.5px under its header and
+  sections 19px apart (body marginBottom 1 + section marginTop 1).
+- **Row heights follow their content**: a native Button, a Link or an icon is
+  not exactly a text line tall, so a padded row grows or shrinks with what it
+  holds. Bands (section headers, the perf footer) therefore take a fixed
+  `height: BAND_ROWS` (1.3 rows) instead of vertical padding, so every header is
+  the same height.
+- **Borders**: `round`, `single`, `double`, `bold`, `classic` draw; `dashed`
+  doesn't. A colour the desktop doesn't know, `transparent` included, draws in
+  the text's colour, so a "transparent" border is a visible outline. There's no
+  way to round a fill without an outline: bands and tiles are square-cornered
+  fills (`FILL`), and the only border in the mods is blast-radius's warning hold.
+- **Backgrounds**: hex and `rgba()` fills draw (the kit's `FILL` and `TRACK`).
+- **Buttons draw their `label` alone**, uncoloured (`dimColor` dims it), never
+  their children or the children's styling. A coloured action (`tone: 'danger'`)
+  is a coloured Text with a Button of `BLANK`s (U+2800) laid over it; an icon
+  button is the icon with such a Button over it.
 
 ## Terminal
 
@@ -218,6 +257,14 @@ Text props; the kit's components apply it themselves.
 | cyan, orchid | other parts within one chart | cyan the default foreground, orchid dim (`TERM_TINT`) |
 | any other hex, `rgb()`, `hsl()` | (not a kit colour) | the default foreground |
 | a theme key's name (`success`, `claude`) | as the theme says | itself |
+| `FILE_TYPE.*` (a `Duo`: light and dark) | this file's type (IntelliJ's New UI icon palette), on a file tree's icons only | none: `k.icon` draws file icons dim, as a type is no state a theme key means |
+
+`FILE_TYPE` is the one group that isn't a status: a file tree's icons take it
+(`k.icon(key, FILE_TYPE.typescript)`), never text, a header, a control or the
+upstream's host icon, which stay grey. Each entry is a light and a dark value
+from intellij-community's expui icons (Apache 2.0); the SVG picks one by the
+page's colour scheme, the dark where it can't tell. `Kit/File Types` in
+Storybook shows them on both.
 
 A bar's parts are solid theme colours, one glyph (`━`): neighbours differ by
 tone (default foreground, dim, a theme key), as `TERM_TINT` alternates them.

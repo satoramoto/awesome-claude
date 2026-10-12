@@ -276,6 +276,12 @@ Borders: `round` draws rounded corners, and `single`, `double`, `bold` and
 `classic` draw; `dashed` doesn't. SVG is drawn as an image the page scales, so it
 blurs as the pane resizes: draw with boxes and text.
 
+What it paints (measured on the real pane, 2.1.295): a horizontal unit is a
+column (~7.8px), `height` a row (~19px), but vertical margin, padding and row gap
+half a row (~9.5px); a `transparent` border colour draws in the text's colour;
+a Button draws its `label` alone, never its children. The mod-authoring skill
+has the details, and Storybook draws by the same rules.
+
 ## License
 
 [MIT](LICENSE), except the forked mods, which keep their own licenses:

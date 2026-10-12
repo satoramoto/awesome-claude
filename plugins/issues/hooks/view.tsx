@@ -2,7 +2,7 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { ago } from '../kit/format'
 import { C, GRAY, MUTED, treePrefix } from '../kit/tokens'
-import { EDGE, SPACE, kit } from '../kit/ui'
+import { BLANK, EDGE, SPACE, kit } from '../kit/ui'
 import type { RightPart } from '../kit/ui'
 
 import type { Issue, IssueList, LinkedPr } from '../types'
@@ -82,11 +82,24 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
     </Link>
   )
 
-  /** A secondary action: its label in the mid grey, brightening under the pointer as a plain Button does. */
-  const quiet = (key: string, label: string, onPress: () => void) => (
-    <Button key={key} plain onPress={onPress}>
-      <Text color={GRAY.mid}>{label}</Text>
-    </Button>
+  /**
+   * A secondary action: dim at rest (`dimColor` on the Button), as the desktop draws
+   * a Button's label alone and never a child Text, so a grey child never showed there.
+   */
+  const quiet = (key: string, label: string, onPress: () => void) => k.action({ key, label, onPress, quiet: true })
+
+  /**
+   * An action whose word is coloured: the word as a coloured Text and over it a Button
+   * labelled with as many Braille blanks (drawn as nothing), since the desktop draws a
+   * Button's label uncoloured and never its children. A press on the word is the Button's.
+   */
+  const tinted = (key: string, label: string, color: string, onPress: () => void) => (
+    <Box key={`${key}-tint`} position="relative" flexShrink={0} flexDirection="row">
+      <Text color={color}>{label}</Text>
+      <Box position="absolute" top={0} left={0}>
+        <Button key={key} plain label={BLANK.repeat([...label].length)} onPress={onPress} />
+      </Box>
+    </Box>
   )
 
   const picked = (issue: Issue) => act.selected.includes(issue.number)
@@ -149,13 +162,9 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
               refined ? null : quiet(`refine-${issue.number}`, 'Refine', () => act.refine(issue)),
               <Button key={`start-${issue.number}`} plain label="Start" onPress={() => act.start(issue)} />,
               // Picks it for a sprint: the word turns blue and the tile takes the selected fill.
-              picked(issue) ? (
-                <Button key={`pick-${issue.number}`} plain onPress={() => act.toggle(issue)}>
-                  <Text color={C.blue}>Selected</Text>
-                </Button>
-              ) : (
-                quiet(`pick-${issue.number}`, 'Select', () => act.toggle(issue))
-              ),
+              picked(issue)
+                ? tinted(`pick-${issue.number}`, 'Selected', C.blue, () => act.toggle(issue))
+                : quiet(`pick-${issue.number}`, 'Select', () => act.toggle(issue)),
             ],
           )}
           </Box>,
@@ -195,7 +204,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
   // One repository, so no foldable header: its name as a plain line, the counts on the right.
   const head = row('repo', [<Text key="r" color={GRAY.mid} wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
   return (
-    <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={1}>
+    <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={SPACE.block}>
       <Box key="head" width="100%" marginBottom={SPACE.block}>
         {head}
       </Box>

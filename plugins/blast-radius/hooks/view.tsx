@@ -285,10 +285,9 @@ export const renderApp = (els: AppElements, state: Held, columns: number, opts: 
         </Box>
       ) : null}
       <Box key="buttons" flexDirection="row" alignItems="center" gap={SPACE.item} width="100%" minWidth={0} marginTop={SPACE.block * 1.5}>
-        {/* Proceed runs the command: its label in red, the colour of what it would destroy. */}
-        <Button key="proceed" label="Proceed" hotkey="1" onPress={decide('proceed')}>
-          <Text color={C.bad}>Proceed</Text>
-        </Button>
+        {/* Proceed runs the command: its label in red, the colour of what it would destroy.
+            The kit's danger action, as the desktop draws no coloured Text inside a Button. */}
+        {k.action({ key: 'proceed', label: 'Proceed', hotkey: '1', tone: 'danger', onPress: decide('proceed') })}
         {/* Cancel is the main button and holds the focus, so Enter refuses. */}
         <Button key="cancel" label="Cancel" hotkey="2" variant="primary" autoFocus onPress={decide('cancel')} />
         <Box key="hint" flexShrink={1} minWidth={0}>

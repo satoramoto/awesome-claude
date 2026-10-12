@@ -3,8 +3,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { TERM_GLYPH } from '@kit/icons'
-import { C, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '@kit/tokens'
-import { FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, kit } from '@kit/ui'
+import { C, FILL, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '@kit/tokens'
+import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, kit } from '@kit/ui'
 import type { Kit } from '@kit/ui'
 
 // The kit's own tests. The build copies kit/ into each mod but leaves kit tests
@@ -298,4 +298,64 @@ test('a sparkline is Braille on the terminal, newest on the right, and an SVG li
     return d.type === 'Svg' ? d : kids(d).map(find).find(Boolean)
   })(desk)
   expect(String(svg?.props?.source)).toContain('<polyline')
+})
+
+/** Every element in a drawn tree, depth first. */
+const all = (d: Drawn): Drawn[] => [d, ...kids(d).flatMap(all)]
+/** The vertical spacing props, which the desktop draws at half a row. */
+const SPACING = ['margin', 'marginX', 'marginY', 'marginTop', 'marginBottom', 'marginLeft', 'marginRight', 'padding', 'paddingX', 'paddingY', 'paddingTop', 'paddingBottom', 'paddingLeft', 'paddingRight', 'gap', 'rowGap', 'columnGap']
+
+test('on the desktop the kit draws no outline: bands and tiles are fills with no border, and every band is one fixed height', async ($, on) => {
+  const draw = kitPane($, on)
+  const tree = await draw(
+    k =>
+      ({
+        type: 'Box',
+        props: { flexDirection: 'column' },
+        children: [
+          ...everything(k),
+          // A band holding a Button and one holding only text come out the same height.
+          k.section({ id: 'act', title: 'Actions', right: k.actions('a', [{ key: 'go', label: 'Start', onPress: () => undefined }]), children: [k.tile('t', [k.note('n', 'a tile')])] }),
+          k.section({ id: 'plain', title: 'Plain', right: k.summary([['3', 'running']]), children: [k.tile('s', [k.note('n2', 'selected')], { selected: true })] }),
+          // The desktop draws no key hints: k.hints is null there.
+        ].filter(Boolean),
+      }) as never,
+    { surface: 'desktop', columns: 60 },
+  )
+  const boxes = all(tree).filter(d => d.type === 'Box')
+  // A `transparent` border draws in the text's colour there, so the kit asks for no border at all.
+  expect(boxes.filter(b => b.props?.borderStyle !== undefined || b.props?.borderColor !== undefined)).toEqual([])
+  const bands = boxes.filter(b => b.props?.backgroundColor === FILL.head)
+  // Five sections and the perf footer.
+  expect(bands.length).toBe(6)
+  for (const b of bands) {
+    expect(b.props?.height).toBe(BAND_ROWS)
+    expect(b.props?.paddingY).toBeUndefined()
+  }
+  const tiles = boxes.filter(b => b.props?.backgroundColor === FILL.tile || b.props?.backgroundColor === FILL.selected)
+  // The two tiles (and the selected item row, which shares the selected tint).
+  expect(tiles.length).toBe(3)
+  // Spacing is plain finite numbers (or percentages), never negative: what the desktop accepts.
+  for (const b of boxes)
+    for (const p of SPACING) {
+      const v = b.props?.[p]
+      if (v === undefined) continue
+      expect(typeof v === 'number' && Number.isFinite(v) && v >= 0).toBe(true)
+    }
+})
+
+test('a danger action on the desktop is a red word under a blank-labelled Button, pressed by its key; on the terminal a red label', async ($, on) => {
+  const draw = kitPane($, on)
+  let pressed = 0
+  const build = (k: Kit) => k.action({ key: 'proceed', label: 'Proceed', hotkey: '1', tone: 'danger', onPress: () => void pressed++ }) as never
+  const desk = await draw(build, { surface: 'desktop' })
+  const button = all(desk).find(d => d.type === 'Button')
+  // The desktop draws a Button's label alone, uncoloured: the colour is on a Text beside it, the label blank.
+  expect(button?.props?.label).toBe(BLANK.repeat('Proceed'.length))
+  expect(kids(button!)).toEqual([])
+  expect(button?.props?.hotkey).toBe('1')
+  expect(texts(desk).find(t => shown(t) === 'Proceed')?.props).toMatchObject({ color: C.bad })
+  const term = await draw(build)
+  expect(all(term).find(d => d.type === 'Button')?.props?.label).toBe('Proceed')
+  expect(texts(term).find(t => shown(t) === 'Proceed')?.props).toMatchObject({ color: 'error' })
 })

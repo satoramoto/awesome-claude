@@ -27,6 +27,10 @@ import {
   parseNumstat,
   posix,
   relative,
+  remoteHost,
+  remoteName,
+  HOST_MARK,
+  hostKind,
   dropBelow,
   useDrives,
   rollCounts,
@@ -239,6 +243,7 @@ async function readGit($: EngineInterface): Promise<void> {
       if (others.exitCode === 0) for (const rel of others.stdout.split('\0').filter(Boolean)) files[join(root, rel)] = 'new'
     }
     for (const path of Object.keys(diff)) if (files[path] === 'new') delete diff[path]
+    const branch = parsed.branch ? { ...parsed.branch, host: await hostOf($, t.top, remoteName(parsed.branch.upstream)) } : null
     dirty = { root, files }
     await patch($, cur =>
       cur.root === root
@@ -246,7 +251,7 @@ async function readGit($: EngineInterface): Promise<void> {
             git: parsed.git,
             ignored: parsed.ignored,
             untrackedDirs: parsed.untrackedDirs,
-            branch: parsed.branch,
+            branch,
             counts: rollCounts(files, root),
             diff: rollUp(diff, root),
           }
@@ -254,6 +259,27 @@ async function readGit($: EngineInterface): Promise<void> {
     )
   } catch {
     return
+  }
+}
+
+/** Each repo's remotes' hosts, by `top` and remote name: a remote's URL rarely changes, so it's read once a load. */
+const hosts = new Map<string, string>()
+
+/** The host of `remote`'s URL in the repo at `top` (`github.com`), or '' for none. */
+async function hostOf($: EngineInterface, top: string, remote: string): Promise<string> {
+  if (!remote) return ''
+  const id = `${top}\u0000${remote}`
+  const known = hosts.get(id)
+  if (known !== undefined) return known
+  try {
+    const run = await git($, top, ['remote', 'get-url', remote], 5_000)
+    if (run.exitCode !== 0) return ''
+    // Only a successful lookup is cached: a timeout or failure is retried on a later refresh.
+    const host = remoteHost(run.stdout)
+    hosts.set(id, host)
+    return host
+  } catch {
+    return ''
   }
 }
 
@@ -1366,10 +1392,10 @@ export const register: Register = (on, options) => {
     const rows = visibleRows(t)
     // In the rows' text column, one cell in from the section body.
     const hints = k.hints('keys', TREE_HINTS, { width: k.width - 1 })
-    // The terminal's rows around the tree: the header, the search line and the blank
-    // row an open section leaves under its body, the branch line (or the no-repo note),
-    // the empty note, the footer and the key hints.
-    const fixed = 3 + (t.top ? (t.branch ? 1 : 0) : 1) + (rows.length === 0 ? 1 : 0) + (t.selected || latest ? 1 : 0) + (hints ? 1 : 0)
+    // The terminal's rows around the tree: the search line and the blank row under it,
+    // the header and the blank row an open section leaves under its body, the branch
+    // line (or the no-repo note), the empty note, the footer and the key hints.
+    const fixed = 4 + (t.top ? (t.branch ? 1 : 0) : 1) + (rows.length === 0 ? 1 : 0) + (t.selected || latest ? 1 : 0) + (hints ? 1 : 0)
     const room = nativeScroll ? Math.max(1, rows.length) : Math.max(5, (e.props.scroll?.bodyRows ?? 40) - fixed)
     const isLit = (id: string) => bright.has(id) || dimmed.has(id)
     const focus = followClaude && t.flashOn ? ([...t.flash].reverse().find(id => id !== BRANCH_ROW) ?? t.cursor) : t.cursor
@@ -1538,8 +1564,8 @@ export const register: Register = (on, options) => {
     const barSize = Math.max(1, Math.round((specs.length * shown.length) / Math.max(1, rows.length)))
     const bar = scrolls ? { pos: max ? Math.round((from / max) * (specs.length - barSize)) : 0, size: barSize } : undefined
 
-    // The branch: its name, then ahead, behind and the upstream dim (the upstream only
-    // when it isn't the same name on a remote); on the right the lines and files
+    // The branch: its name, then ahead, behind and the upstream's host mark dim (none
+    // when the branch tracks nothing); on the right the lines and files
     // changed, or "clean". It sits one cell in, as the tree's rows sit after their
     // cursor gutter, so its icon and name share their columns. The note is left out
     // when the name wouldn't fit beside it, so the name is cut once, in the middle,
@@ -1561,8 +1587,9 @@ export const register: Register = (on, options) => {
         ...(totals[1] > 0 ? [figure('del', `−${totals[1]}`, C.bad, 1)] : []),
         ...countParts(t.counts[t.root]).map(([letter, n, color]) => figure(`n-${letter}`, `${letter}${n}`, color, 2)),
       ]
-      const same = b.upstream.slice(b.upstream.indexOf('/') + 1) === b.head
-      const note = [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', same ? '' : b.upstream].filter(Boolean).join(' ')
+      // The upstream as its host's mark (gh, gl, fj, ⇅), not its name: the terminal has no glyph for the hosts.
+      const mark = b.upstream ? HOST_MARK[hostKind(b.host)] : ''
+      const note = [b.ahead > 0 ? `↑${b.ahead}` : '', b.behind > 0 ? `↓${b.behind}` : '', mark].filter(Boolean).join(' ')
       // What the row leaves the name: the indent, the icon's column, and the figures.
       const avail = k.width - 1 - 2
       const cluster = (parts: { cells: number }[]) => parts.reduce((n, p) => n + p.cells + k.space.item, 0)
@@ -1612,9 +1639,11 @@ export const register: Register = (on, options) => {
       { key: 'collapse', label: unicode ? '⊟' : '\u{eac5}', quiet: true, onPress: () => void collapseAll($) },
     ])
 
-    // The search field, in the branch line's columns: a dim search glyph, then the field.
+    // The search field, the pane's first row, above the folder's header (as on the
+    // desktop): a dim search glyph in the header's arrow column, then the field; one
+    // blank row parts it from the header, as a head line is parted from the sections.
     const searchLine = (
-      <Box key="search" flexDirection="row" paddingLeft={1}>
+      <Box key="search" flexDirection="row" paddingLeft={k.edge.left} paddingRight={k.edge.right} marginBottom={k.space.block}>
         <Box width={2} flexShrink={0}>
           <Text dimColor>{unicode ? '⌕' : '\u{f0349}'}</Text>
         </Box>
@@ -1663,6 +1692,7 @@ export const register: Register = (on, options) => {
 
     return (
       <Box flexDirection="column" minHeight={Math.max(1, e.props.scroll?.bodyRows ?? 1)}>
+        {searchLine}
         {k.section({
           id: 'files',
           title: header,
@@ -1671,7 +1701,6 @@ export const register: Register = (on, options) => {
           keepRight: true,
           children: [
             branchLine(),
-            searchLine,
             rows.length === 0 ? (
               <Box key="empty" paddingLeft={1}>
                 {k.note('empty', t.query ? 'no match' : 'empty', 'empty', { width: k.width - 1 })}

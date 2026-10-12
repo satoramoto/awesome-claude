@@ -2,6 +2,12 @@ import type { On, ProcessSpawnRequest } from 'claude-code'
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { FILL } from '../kit/tokens'
+import { BAND_ROWS } from '../kit/ui'
+
+/** How long Kill's confirm waits for its second press (register.tsx's CONFIRM_MS). */
+const CONFIRM_MS = 4_000
+
 // The launcher pane drawn by the engine's test kit on each surface. The test's
 // hooks sit beneath the mod and stand for the engine: `fs` holds one project's
 // .claude/launch.json, `lsof` lists the ports set in `listening`, and
@@ -24,9 +30,39 @@ const PANE = {
 
 const result = (stdout: string, exitCode = 0) => ({ value: { exitCode, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } })
 
+type Proc = { ppid: number; command: string; cwd: string }
+
+/**
+ * The process table ps and lsof read: the storybook server on 6006 (pid 6006, as
+ * every listening port's pid is its port) under the npm that ran its script.
+ */
+const PROCS: [number, Proc][] = [
+  [6006, { ppid: 6000, command: 'node /repo/app/node_modules/.bin/storybook dev -p 6006', cwd: '/repo/app' }],
+  [6000, { ppid: 1, command: 'npm --prefix app run storybook', cwd: '/repo' }],
+]
+
+/** When every process started, as `ps -o lstart=` says it, unless `starts` says otherwise. */
+const START = 'Mon Oct 12 10:00:00 2026'
+
 type World = {
-  /** Ports something listens on, as lsof would list them. */
+  /** Ports something listens on, as lsof would list them, each by the process whose pid is the port. */
   listening: Set<number>
+  /** More listeners: another process on a port, lsof listing it before the port's own (`first`) or after. */
+  extra: { port: number; pid: number; addr: string; first?: boolean }[]
+  /** What ps and lsof say of each pid. */
+  procs: Map<number, Proc>
+  /** When a pid's process started, where it isn't START. */
+  starts: Map<number, string>
+  /** Every `kill` the mod ran, its arguments after `kill`. */
+  signals: string[][]
+  /** Runs on each signal the mod sends, before the signal acts. */
+  onSignal?: (sig: string, pid: number) => void
+  /** A process that ignores SIGTERM (only SIGKILL ends it). */
+  stubborn: boolean
+  /** A process no signal ends. */
+  unkillable: boolean
+  /** Every toast the mod showed. */
+  toasts: string[]
   /** The CPU percent ps reports for every listening process. */
   cpu: number
   /** Every spawn the mod asked for. */
@@ -44,26 +80,76 @@ type World = {
  * session in /repo/app (so the mod walks up). A spawned server writes a line
  * and runs until its loop ends, unless `crash` names it: then it fails at once.
  */
-const engine = (on: On, opts: { crash?: string; hang?: string } = {}): World => {
+const engine = (on: On, opts: { crash?: string; hang?: string; launch?: { version: string; configurations: object[] }; procs?: [number, Proc][] } = {}): World => {
   const clock = mock.clock(on, { now: NOW })
-  const world: World = { listening: new Set([6006]), cpu: 4, spawned: [], killed: [], clock, opened: [] }
+  const world: World = {
+    listening: new Set([6006]),
+    extra: [],
+    procs: new Map(opts.procs ?? PROCS),
+    starts: new Map(),
+    signals: [],
+    stubborn: false,
+    unkillable: false,
+    toasts: [],
+    cpu: 4,
+    spawned: [],
+    killed: [],
+    clock,
+    opened: [],
+  }
+  const launch = opts.launch ?? LAUNCH
   on('session.cwd', async () => ({ value: '/repo/app' }))
   on('ui.open', async (_$, e) => {
     world.opened.push({ id: e.id, title: e.title ?? '' })
     return { value: { isPlaced: true } }
   })
   on('ui.panes', async () => ({ value: [] }))
-  on('ui.toast', async () => ({ value: undefined }))
+  on('ui.toast', async (_$, e) => {
+    world.toasts.push(e.text)
+    return { value: undefined }
+  })
   on('command.run', async () => ({ text: '' }))
   on('fs.exists', async (_$, e) => ({ value: e.path === '/repo/.claude/launch.json' || e.path === '/repo/.git' }))
   on('fs.read', async (_$, e) => {
     if (e.path !== '/repo/.claude/launch.json') throw new Error(`ENOENT ${e.path}`)
-    return { value: JSON.stringify(LAUNCH) }
+    return { value: JSON.stringify(launch) }
   })
-  // Each listening port's process has the port for its pid; ps reports each at `world.cpu` percent and 200 MB.
+  // Each listening port's process has the port for its pid; ps reports each at `world.cpu` percent and 200 MB,
+  // and `ps -A` (or `-p`) the process table with start times. `kill -TERM` ends a process (unless stubborn or
+  // unkillable), `-KILL` too (unless unkillable).
+  const row = (pid: number, p: Proc) => `${String(pid).padStart(5)} ${p.ppid} ${world.starts.get(pid) ?? START} ${p.command}`
   on('process.run', async (_$, e) => {
-    if (e.argv[0] === 'lsof') return result([...world.listening].map(p => `p${p}\nf3\nn*:${p}`).join('\n'), world.listening.size ? 0 : 1)
-    if (e.argv[0] === 'ps') return result(e.argv[e.argv.length - 1]!.split(',').map(pid => `${pid} ${world.cpu.toFixed(1)} 204800`).join('\n'))
+    const [cmd, ...args] = e.argv
+    if (cmd === 'lsof' && args.includes('cwd')) {
+      const pids = args[args.indexOf('-p') + 1]!.split(',').map(Number)
+      return result(pids.filter(p => world.procs.has(p)).map(p => `p${p}\nfcwd\nn${world.procs.get(p)!.cwd}`).join('\n'))
+    }
+    if (cmd === 'lsof') {
+      const extra = (first: boolean) => world.extra.filter(x => Boolean(x.first) === first).map(x => `p${x.pid}\nf4\nn${x.addr}:${x.port}`)
+      const lines = [...extra(true), ...[...world.listening].map(p => `p${p}\nf3\nn*:${p}`), ...extra(false)]
+      return result(lines.join('\n'), lines.length ? 0 : 1)
+    }
+    if (cmd === 'ps' && args.includes('-A')) return result([...world.procs].map(([pid, p]) => row(pid, p)).join('\n'))
+    if (cmd === 'ps' && args.some(a => a.includes('lstart'))) {
+      const pids = args[args.indexOf('-p') + 1]!.split(',').map(Number)
+      const rows = pids.filter(p => world.procs.has(p)).map(p => row(p, world.procs.get(p)!))
+      return result(rows.join('\n'), rows.length ? 0 : 1)
+    }
+    if (cmd === 'ps') return result(e.argv[e.argv.length - 1]!.split(',').map(pid => `${pid} ${world.cpu.toFixed(1)} 204800`).join('\n'))
+    if (cmd === 'kill') {
+      const [sig, pidText] = args as [string, string]
+      const pid = Number(pidText)
+      if (sig !== '-0') {
+        world.signals.push(args)
+        world.onSignal?.(sig, pid)
+      }
+      if (!world.unkillable && (sig === '-KILL' || (sig === '-TERM' && !world.stubborn))) {
+        world.listening.delete(pid)
+        world.procs.delete(pid)
+        world.extra = world.extra.filter(x => x.pid !== pid)
+      }
+      return result('', world.listening.has(pid) || world.procs.has(pid) ? 0 : 1)
+    }
     return result('', 1)
   })
   on('process.spawn', async function* (_$, e, next) {
@@ -329,6 +415,8 @@ test('a server that exits with an error shows failed, unfolded with its output',
   engine(on, { crash: 'app' })
   await launcher($)
   expect((await launcher($, 'start app')).text).toContain('Starting app on http://localhost:5173')
+  // The crash lands after Start answers; the next read shows it.
+  expect((await launcher($, 'list')).text).toContain('app  failed  :5173')
 
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'launcher', surface, ...PANE })
@@ -363,4 +451,317 @@ test('/launcher start refuses a server whose port another process holds, and sto
   expect((await launcher($, 'stop storybook')).text).toContain('started elsewhere')
   expect((await launcher($, 'start nope')).text).toContain('No configuration named "nope"')
   expect(world.spawned).toHaveLength(0)
+})
+
+// Two configurations on one port, as a checkout and its worktree's Storybook: the
+// worktree's runs (started by bun with its --cwd, the server working there), the
+// checkout's doesn't.
+const SHARED = {
+  version: '0.0.1',
+  configurations: [
+    { name: 'app', runtimeExecutable: 'npm', runtimeArgs: ['--prefix', 'app', 'run', 'dev'], port: 5173 },
+    { name: 'storybook', runtimeExecutable: 'bun', runtimeArgs: ['run', 'storybook'], port: 6006, autoPort: true },
+    { name: 'storybook-wt', runtimeExecutable: 'bun', runtimeArgs: ['run', '--cwd=/wt', 'storybook'], port: 6006, autoPort: true },
+  ],
+}
+const SHARED_PROCS: [number, Proc][] = [
+  [6006, { ppid: 6001, command: 'node /wt/node_modules/.bin/storybook dev --port 6006 --no-open --ci', cwd: '/wt' }],
+  [6001, { ppid: 6000, command: '/opt/homebrew/bin/bun run --cwd=/wt storybook', cwd: '/repo' }],
+  [6000, { ppid: 1, command: '/Applications/Claude.app/Contents/Helpers/disclaimer -- /opt/homebrew/bin/bun run --cwd=/wt storybook', cwd: '/repo' }],
+]
+
+test('on the desktop every header band is as tall, whatever its row holds, and nothing has a border', { timeoutMs: 15_000 }, async ($, on) => {
+  const world = engine(on, { launch: SHARED, procs: SHARED_PROCS })
+  await launcher($, 'start app')
+  world.listening.add(5173)
+  await launcher($, 'list')
+  // app runs here (Stop, Restart, its URL), storybook's port is taken (Start, Kill),
+  // storybook-wt runs elsewhere (Take over, Kill, its URL).
+  for (const columns of [40, 80]) {
+    const ui = await mountAt($, 'desktop', columns)
+    expect(await ui.find({ key: 'stop-app' })).toBeDefined()
+    expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'adopt-storybook-wt' })).toBeDefined()
+    const bands = (await ui.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === FILL.head)
+    expect(bands, `one band a row at ${columns}`).toHaveLength(3)
+    for (const b of bands) {
+      expect(b.props.height, `band height at ${columns}`).toBe(BAND_ROWS)
+      expect(b.props.flexShrink).toBe(0)
+    }
+    const bordered = (await ui.findAll({})).filter(x => x.props.borderStyle !== undefined)
+    expect(bordered, `no borders at ${columns}`).toHaveLength(0)
+    await ui.unmount()
+  }
+  await launcher($, 'stop app')
+})
+
+test('two configurations on one port: only the one whose process holds it runs, the other reads port taken', async ($, on) => {
+  engine(on, { launch: SHARED, procs: SHARED_PROCS })
+  const { text } = await launcher($, 'list')
+  expect(text).toContain('storybook  port taken  :6006')
+  expect(text).toContain('storybook-wt  running elsewhere  http://localhost:6006')
+
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await mountAt($, surface, 100)
+    // The terminal's word is the short one; the desktop's says which.
+    const taken = surface === 'terminal' ? { key: 'word-storybook', text: 'taken' } : { key: 'state-storybook', text: 'port taken' }
+    expect(await ui.find(taken), `taken on the ${surface}`).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: 'localhost:6006' }), `one URL on the ${surface}`).toBeDefined()
+    expect(await ui.findAll({ type: 'Link' }), `only the running one's URL on the ${surface}`).toHaveLength(1)
+    // The taken one can start on the next port (autoPort) or kill what holds it; it's not its to take over.
+    expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'kill-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'adopt-storybook' })).toBeUndefined()
+    // The running one offers Take over and Kill, never Start.
+    expect(await ui.find({ key: 'adopt-storybook-wt' })).toBeDefined()
+    expect(await ui.find({ key: 'kill-storybook-wt' })).toBeDefined()
+    expect(await ui.find({ key: 'start-storybook-wt' })).toBeUndefined()
+    if (surface === 'desktop') {
+      // The head counts one running, not two.
+      expect(await ui.find({ key: 'head', text: /1 running/ })).toBeDefined()
+      expect(await ui.find({ key: 'head', text: /2 running/ })).toBeUndefined()
+    }
+    await ui.unmount()
+  }
+})
+
+test('a process this session started is its own configuration\'s, even on a port another configuration shares', { timeoutMs: 15_000 }, async ($, on) => {
+  const world = engine(on, { launch: SHARED, procs: [] })
+  world.listening.clear()
+  await launcher($, 'start storybook')
+  world.listening.add(6006)
+  const { text } = await launcher($, 'list')
+  expect(text).toContain('storybook  running  http://localhost:6006')
+  expect(text).toContain('storybook-wt  port taken  :6006')
+  await launcher($, 'stop storybook')
+})
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`on the ${surface}, Take over and Kill show only for a port held elsewhere; running rows offer Stop and Restart, stopped ones Start`, { timeoutMs: 15_000 }, async ($, on) => {
+    const world = engine(on)
+    await launcher($)
+    const ui = await mountAt($, surface, 100)
+    expect(await ui.find({ key: 'adopt-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'kill-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'stop-storybook' })).toBeUndefined()
+    expect(await ui.find({ key: 'start-storybook' })).toBeUndefined()
+    expect(await ui.find({ key: 'adopt-app' })).toBeUndefined()
+    expect(await ui.find({ key: 'kill-app' })).toBeUndefined()
+    expect(await ui.find({ key: 'start-app' })).toBeDefined()
+    await ui.press({ key: 'start-app' })
+    world.listening.add(5173)
+    await launcher($, 'list')
+    expect(await ui.find({ key: 'stop-app' })).toBeDefined()
+    expect(await ui.find({ key: 'restart-app' })).toBeDefined()
+    expect(await ui.find({ key: 'start-app' })).toBeUndefined()
+    expect(await ui.find({ key: 'adopt-app' })).toBeUndefined()
+    expect(await ui.find({ key: 'kill-app' })).toBeUndefined()
+    // Unfolded, the process holding the port: its pid and its command.
+    await ui.press({ key: 'toggle-storybook' })
+    expect(await ui.find({ key: 'pid-storybook', text: '6006' })).toBeDefined()
+    expect(await ui.find({ key: 'process-storybook', text: /storybook dev -p 6006/ })).toBeDefined()
+    await ui.press({ key: 'stop-app' })
+    await ui.unmount()
+  })
+
+  test(`on the ${surface}, Kill asks once more, ends the process on a second press, and reverts if none comes`, async ($, on) => {
+    const world = engine(on)
+    await launcher($)
+    const ui = await mountAt($, surface, 100)
+    await ui.press({ key: 'kill-storybook' })
+    expect(await ui.find({ type: 'Text', text: 'Kill PID 6006?' }) ?? (await ui.find({ type: 'Button', text: 'Kill PID 6006?' })), 'the confirm').toBeDefined()
+    expect(world.signals, 'nothing killed on the first press').toEqual([])
+    // No second press: it lapses back to Kill.
+    await world.clock.advance(CONFIRM_MS + 1)
+    expect(await ui.find({ text: /Kill PID/ }), 'reverted').toBeUndefined()
+    expect(await ui.find({ key: 'kill-storybook', text: 'Kill' })).toBeDefined()
+    expect(world.signals).toEqual([])
+    // Pressed twice in time: SIGTERM, then the row is stopped and Start works.
+    await ui.press({ key: 'kill-storybook' })
+    await ui.press({ key: 'kill-storybook' })
+    expect(world.signals).toEqual([['-TERM', '6006']])
+    expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'kill-storybook' })).toBeUndefined()
+    expect(await ui.find({ type: 'Text', text: surface === 'terminal' ? /^stopped$/ : 'stopped' })).toBeDefined()
+    await ui.unmount()
+  })
+
+  test(`on the ${surface}, a taken-over server reads running with Stop, and Stop signals its pid`, async ($, on) => {
+    const world = engine(on)
+    await launcher($)
+    const ui = await mountAt($, surface, 100)
+    await ui.press({ key: 'adopt-storybook' })
+    await launcher($, 'list')
+    expect(await ui.find({ key: surface === 'terminal' ? 'word-storybook' : 'state-storybook', text: /^running$/ })).toBeDefined()
+    expect(await ui.find({ type: 'Link', text: 'localhost:6006' })).toBeDefined()
+    expect(await ui.find({ key: 'stop-storybook' })).toBeDefined()
+    expect(await ui.find({ key: 'adopt-storybook' })).toBeUndefined()
+    expect(await ui.find({ key: 'kill-storybook' })).toBeUndefined()
+    await ui.press({ key: 'toggle-storybook' })
+    expect(await ui.find({ type: 'Text', text: /output can't be shown/ })).toBeDefined()
+    if (surface === 'desktop') expect(await ui.find({ key: 'head', text: /1 running/ })).toBeDefined()
+    await ui.press({ key: 'stop-storybook' })
+    expect(world.signals).toEqual([['-TERM', '6006']])
+    expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+test('Kill sends SIGKILL to a process that outlives SIGTERM', async ($, on) => {
+  const world = engine(on)
+  world.stubborn = true
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'kill-storybook' })
+  const killing = ui.press({ key: 'kill-storybook' })
+  await world.clock.advance(3_000)
+  await killing
+  expect(world.signals).toEqual([['-TERM', '6006'], ['-KILL', '6006']])
+  expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+  await ui.unmount()
+})
+
+/** A process that isn't the storybook server, as another program's. */
+const OTHER: Proc = { ppid: 1, command: 'node /elsewhere/server.js', cwd: '/elsewhere' }
+
+test('Kill refuses when the port has passed to another process between its two presses', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'kill-storybook' })
+  // The storybook server left the port (still alive) and another process listens there now.
+  world.listening.delete(6006)
+  world.procs.set(7007, OTHER)
+  world.extra.push({ port: 6006, pid: 7007, addr: '127.0.0.1' })
+  await ui.press({ key: 'kill-storybook' })
+  expect(world.signals, 'no signal to either').toEqual([])
+  expect(world.toasts).toEqual(['storybook: not killed: port 6006 is now held by process 7007, not process 6006.'])
+  // The row is read again: it names the process on the port now.
+  await ui.press({ key: 'toggle-storybook' })
+  expect(await ui.find({ key: 'pid-storybook', text: '7007' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Kill refuses when the pid is a later process (another start time) by its second press', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'kill-storybook' })
+  world.starts.set(6006, 'Mon Oct 12 11:30:00 2026')
+  await ui.press({ key: 'kill-storybook' })
+  expect(world.signals).toEqual([])
+  expect(world.toasts).toHaveLength(1)
+  expect(world.toasts[0]).toContain('storybook: not killed: process 6006 is now another process (started Mon Oct 12 11:30:00 2026')
+  await ui.unmount()
+})
+
+test('Kill sends no SIGKILL once the pid it sent SIGTERM is a later process', async ($, on) => {
+  const world = engine(on)
+  world.stubborn = true
+  // Right after SIGTERM the pid belongs to a process started later.
+  world.onSignal = sig => void (sig === '-TERM' && world.starts.set(6006, 'Mon Oct 12 11:30:00 2026'))
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'kill-storybook' })
+  const killing = ui.press({ key: 'kill-storybook' })
+  await world.clock.advance(3_000)
+  await killing
+  expect(world.signals).toEqual([['-TERM', '6006']])
+  await ui.unmount()
+})
+
+test('lsof listing IPv4 and IPv6 listeners of different processes on one port: Kill names both and signals neither', async ($, on) => {
+  const world = engine(on)
+  world.procs.set(7007, OTHER)
+  world.extra.push({ port: 6006, pid: 7007, addr: '[::1]' })
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'kill-storybook' })
+  expect(world.toasts).toEqual([
+    'storybook: not killed: 2 processes listen on port 6006 (processes 6006 and 7007); Kill ends one process, so end them from a terminal.',
+  ])
+  expect(await ui.find({ text: /Kill PID/ }), 'not armed').toBeUndefined()
+  await ui.press({ key: 'kill-storybook' })
+  expect(world.signals).toEqual([])
+  await ui.unmount()
+})
+
+test('a taken-over server stays taken over while another process also listens on its port, listed first', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'adopt-storybook' })
+  world.procs.set(7007, OTHER)
+  world.extra.push({ port: 6006, pid: 7007, addr: '[::1]', first: true })
+  expect((await launcher($, 'list')).text).toContain('storybook  running  http://localhost:6006')
+  expect(await ui.find({ key: 'stop-storybook' })).toBeDefined()
+  // Stop signals the one taken over, not the other.
+  await ui.press({ key: 'stop-storybook' })
+  expect(world.signals).toEqual([['-TERM', '6006']])
+  await ui.unmount()
+})
+
+test('a taken-over server whose process exits reads stopped, and Stop signals nothing', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'adopt-storybook' })
+  world.listening.delete(6006)
+  world.procs.delete(6006)
+  expect((await launcher($, 'list')).text).toContain('storybook  stopped  :6006')
+  expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
+  expect(await ui.find({ key: 'stop-storybook' })).toBeUndefined()
+  expect((await launcher($, 'stop storybook')).text).toContain("storybook isn't running from this session")
+  expect(world.signals).toEqual([])
+  await ui.unmount()
+})
+
+test('Stop on a taken-over server whose pid is now a later process refuses and lets it go', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  await mountAt($, 'desktop', 100).then(async ui => {
+    await ui.press({ key: 'adopt-storybook' })
+    await ui.unmount()
+  })
+  world.starts.set(6006, 'Mon Oct 12 11:30:00 2026')
+  const { text } = await launcher($, 'stop storybook')
+  expect(text).toContain('storybook: not stopped, and no longer taken over: process 6006 is now another process')
+  expect(world.signals).toEqual([])
+  const ui = await mountAt($, 'desktop', 100)
+  expect(await ui.find({ key: 'adopt-storybook' }), 'it can be taken over again').toBeDefined()
+  await ui.unmount()
+})
+
+test('a Stop that fails keeps the server taken over and says so', async ($, on) => {
+  const world = engine(on)
+  world.unkillable = true
+  await launcher($)
+  const ui = await mountAt($, 'desktop', 100)
+  await ui.press({ key: 'adopt-storybook' })
+  const stopping = launcher($, 'stop storybook')
+  await world.clock.advance(3_000)
+  expect((await stopping).text).toBe("storybook: Stop failed: could not end process 6006 (it may be another user's); still taken over.")
+  expect(world.signals).toEqual([['-TERM', '6006'], ['-KILL', '6006']])
+  expect((await launcher($, 'list')).text).toContain('storybook  running  http://localhost:6006')
+  expect(await ui.find({ key: 'stop-storybook' })).toBeDefined()
+  expect(await ui.find({ key: 'adopt-storybook' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('on a narrow desktop a running row keeps its state word whole; its URL goes first', { timeoutMs: 15_000 }, async ($, on) => {
+  const world = engine(on)
+  await launcher($, 'start app')
+  world.listening.add(5173)
+  await launcher($, 'list')
+  const narrow = await mountAt($, 'desktop', 30)
+  expect((await narrow.find({ key: 'state-app' }))?.props.flexShrink, 'the word never shrinks').toBe(0)
+  expect(await narrow.find({ key: 'state-app', text: 'running' })).toBeDefined()
+  expect(await narrow.find({ key: 'where-app' }), 'no URL').toBeUndefined()
+  expect(await narrow.find({ key: 'stop-app' })).toBeDefined()
+  await narrow.unmount()
+  const wide = await mountAt($, 'desktop', 80)
+  expect(await wide.find({ key: 'where-app' })).toBeDefined()
+  expect((await wide.find({ key: 'where-app' }))?.props.flexShrink, 'the URL gives way').toBe(1)
+  await wide.unmount()
+  await launcher($, 'stop app')
 })

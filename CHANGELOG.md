@@ -2,6 +2,38 @@
 
 ## Unreleased
 
+- **Kit and Storybook bench**: the bench now draws the desktop as the engine
+  does: a Button shows its label only (dim with `dimColor`), never its
+  children; every Input draws its submit button; vertical margin, padding and
+  row gap are half a row; and a `transparent` border is drawn in the text
+  colour, as the desktop does. The kit therefore draws no outlines (plain
+  fills, no round borders) and header bands have a fixed height
+  (`BAND_ROWS`), so a row's Button or Link no longer changes its height.
+  It also gains IntelliJ file-type colours (`FILE_TYPE`), host icons
+  (GitHub, GitLab, Forgejo, a cloud), and danger and quiet actions drawn as
+  the desktop shows them.
+- **`overview`** (0.7.0): on the desktop, the kit's flat headers without
+  outlines; a branch's hide button is a dim label.
+- **`issues`** (0.3.0): on the desktop, Refine and Select are dim labels, and
+  Selected is a blue word under a blank-labelled Button; no outlined tiles.
+- **`blast-radius`** (0.4.0): on the desktop, Proceed shows in red (the kit's
+  danger action) instead of a red child the app never drew.
+- **`lab`** (0.2.0): on the desktop, the index rows put each experiment's note
+  beside its button, since the app draws a Button's label only.
+- **`filetree`** (0.5.0): the desktop header puts search first; the upstream
+  shows as its host's icon (GitHub, GitLab, Forgejo, otherwise a cloud; none
+  for a local upstream); file icons use IntelliJ's file-type colours; failed
+  host lookups are retried. On the terminal, search comes first and the
+  upstream is a host mark.
+- **`launcher`** (0.2.0): two configurations sharing a port are told apart by
+  the process listening on it (its command, parents and folder); the other
+  reads "port taken". A port held elsewhere offers Take over (Stop then
+  signals that process) and Kill (two presses, SIGTERM then SIGKILL).
+  Running rows offer Stop and Restart. Before any signal, the launcher checks
+  that the process still holds the port and has the start time and command it
+  had when it was recorded; if not, it refuses and says why. Kill refuses on a
+  port that several processes listen on, and names them. A failed Stop keeps
+  the server taken over.
 - **`blast-radius`** (0.3.0): the terminal hold is drawn with the kit's
   terminal design system, in its calmer look: dim labels, plain values, key
   hints when focused and paths cut in the middle.

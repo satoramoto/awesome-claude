@@ -85,15 +85,24 @@ export const register: Register = on => {
             <Text bold>{group}</Text>
             {experiments
               .filter(x => x.group === group)
-              .map(x => (
-                <Button key={`open-${x.id}`} plain onPress={() => void openExperiment($, x.id)}>
-                  {x.title}{' '}
-                  <Text dimColor>
-                    {x.id}
-                    {x.surfaces.length ? ` · ${x.surfaces.join(', ')}` : ' · expected refusal'}
-                  </Text>
-                </Button>
-              ))}
+              .map(x => {
+                const note = `${x.id}${x.surfaces.length ? ` · ${x.surfaces.join(', ')}` : ' · expected refusal'}`
+                // The desktop draws a Button's label alone, never a dim child Text: there the
+                // title is the label and the note a dim Text beside it.
+                return e.surface === 'terminal' ? (
+                  <Button key={`open-${x.id}`} plain onPress={() => void openExperiment($, x.id)}>
+                    {x.title}{' '}
+                    <Text dimColor>{note}</Text>
+                  </Button>
+                ) : (
+                  <Box key={`row-${x.id}`} flexDirection="row" gap={1}>
+                    <Button key={`open-${x.id}`} plain label={x.title} onPress={() => void openExperiment($, x.id)} />
+                    <Text dimColor wrap="truncate">
+                      {note}
+                    </Text>
+                  </Box>
+                )
+              })}
           </Box>
         ))}
       </Box>
