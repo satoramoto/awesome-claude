@@ -39,12 +39,16 @@ const PANE = {
   props: { title: 'Issues', isFocused: false, bodyColumns: 60, placement: 'dock', scroll: { offset: 0, bodyRows: 40 }, view: {} },
 } as const
 
+/** What `gh issue list` answers: GH_ISSUES by default. */
+type Gh = { exitCode: number; stdout: string; stderr: string }
+
 /**
- * The engine beneath the mod: a clock that holds still, and gh answering from
- * GH_ISSUES. Returns the panes the mod opened, as `{ id, title }`.
+ * The engine beneath the mod: a clock that holds still, and gh answering
+ * `issue list` with `issues` (GH_ISSUES by default) and `repo view` with the
+ * repository. Returns the panes the mod opened, as `{ id, title }`.
  */
-const engine = (on: On) => {
-  const opened: { id: string; title: string }[] = []
+const engine = (on: On, issues: Gh = { exitCode: 0, stdout: JSON.stringify(GH_ISSUES), stderr: '' }) => {
+  const opened: { id: string; title?: string }[] = []
   mock.clock(on, { now: NOW })
   // A call on `$` (an op) is answered with `{ value }`; an event like command.run with its result.
   on('session.cwd', async () => ({ value: '/repo' }))
@@ -54,10 +58,15 @@ const engine = (on: On) => {
   })
   on('command.run', async () => ({ text: '' }))
   on('process.run', async (_$, e) => ({
-    value:
-      e.argv[0] === 'gh' && e.argv[1] === 'issue' && e.argv[2] === 'list'
-        ? { exitCode: 0, stdout: JSON.stringify(GH_ISSUES), stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
-        : { exitCode: 1, stdout: '', stderr: 'not answered in this test', isStdoutTruncated: false, isStderrTruncated: false },
+    value: {
+      ...(e.argv[0] === 'gh' && e.argv[1] === 'issue' && e.argv[2] === 'list'
+        ? issues
+        : e.argv[0] === 'gh' && e.argv[1] === 'repo' && e.argv[2] === 'view'
+          ? { exitCode: 0, stdout: 'satoramoto/awesome-claude\n', stderr: '' }
+          : { exitCode: 1, stdout: '', stderr: 'not answered in this test' }),
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
   }))
   return opened
 }
@@ -68,7 +77,7 @@ const open = ($: Engine) =>
 
 test('the pane opens on its own when a session starts', async ($, on) => {
   const opened = engine(on)
-  on('command.register', async () => ({ value: undefined }))
+  on('command.register', async (_$, e) => ({ value: { command: e.name } }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   expect(opened).toEqual([{ id: 'issues', title: 'Issues' }])
@@ -84,6 +93,69 @@ test('/issues opens a pane listing the open issues, on the terminal and the desk
     expect(await ui.find({ type: 'Text', text: 'Fold arrow is clipped in the desktop pane' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+/** The pane on the terminal, `columns` wide. */
+const terminal = ($: Engine, columns = 60) =>
+  $.ui.mount({ plugin: 'issues', surface: 'terminal', ...PANE, props: { ...PANE.props, bodyColumns: columns } })
+
+test('on the terminal, a section titled with the repository, its counts on the right, an item per issue', async ($, on) => {
+  engine(on)
+  await open($)
+
+  const ui = await terminal($)
+  expect(await ui.find({ key: 'section-issues' })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^satoramoto\/awesome-claude$/ }))?.props.bold).toBe(true)
+  expect(await ui.find({ type: 'Text', text: /^2 open$/ })).toBeDefined()
+  // Each issue: the open-issue mark in green, its title, its number and its age on the right.
+  expect(await ui.findAll({ type: 'Text', text: /^◉$/ })).toHaveLength(2)
+  expect((await ui.find({ type: 'Text', text: /^◉$/ }))?.props.color).toBe('success')
+  expect(await ui.find({ key: 'row-24' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^Snapshot tests of what mods draw$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^2h$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^5h$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('on the terminal, labels show as pills while they fit beside the title', async ($, on) => {
+  engine(on)
+  await open($)
+
+  const wide = await terminal($, 60)
+  expect((await wide.find({ type: 'Text', text: /^tests$/ }))?.props.color).toBe('#0e8a16')
+  await wide.unmount()
+
+  // At 30 columns the title keeps its room and the label is left out; the number and age stay.
+  const narrow = await terminal($, 30)
+  expect(await narrow.find({ type: 'Text', text: /^tests$/ })).toBeUndefined()
+  expect(await narrow.find({ type: 'Text', text: /^#24$/ })).toBeDefined()
+  await narrow.unmount()
+})
+
+test('on the terminal, reading is a dim note under the section', async ($, on) => {
+  engine(on)
+  const ui = await terminal($)
+  expect((await ui.find({ type: 'Text', text: /^Reading issues…$/ }))?.props.dimColor).toBe(true)
+  await ui.unmount()
+})
+
+test('on the terminal, no open issues is a dim note under the repository', async ($, on) => {
+  engine(on, { exitCode: 0, stdout: '[]', stderr: '' })
+  await open($)
+  const ui = await terminal($)
+  expect(await ui.find({ type: 'Text', text: /^satoramoto\/awesome-claude$/ })).toBeDefined()
+  expect((await ui.find({ type: 'Text', text: /^No open issues\.$/ }))?.props.dimColor).toBe(true)
+  await ui.unmount()
+})
+
+test('on the terminal, a gh failure is an error note: a red ✕ and the reason', async ($, on) => {
+  engine(on, { exitCode: 1, stdout: '', stderr: 'none of the git remotes configured for this repository point to a known GitHub host' })
+  await open($)
+  const ui = await terminal($)
+  expect((await ui.find({ type: 'Text', text: /^✕$/ }))?.props.color).toBe('error')
+  expect(await ui.find({ type: 'Text', text: /^No GitHub repository for this session$/ })).toBeDefined()
+  await ui.unmount()
 })
 
 test('on the desktop, Refine shows only on an unrefined issue, Start on every one', async ($, on) => {

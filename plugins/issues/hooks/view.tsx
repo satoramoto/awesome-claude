@@ -1,7 +1,7 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { ago } from '../kit/format'
-import { C, GRAY, MUTED } from '../kit/tokens'
+import { C, GRAY, MUTED, treePrefix } from '../kit/tokens'
 import { EDGE, SPACE, kit } from '../kit/ui'
 
 import type { Issue, IssueList, LinkedPr } from '../types'
@@ -210,37 +210,84 @@ const prIcon = (pr: LinkedPr) => (pr.state === 'MERGED' ? 'pr-merged' : pr.state
 const prColor = (pr: LinkedPr) =>
   pr.state === 'MERGED' ? C.purple : pr.state === 'CLOSED' || pr.isDraft || !pr.state ? MUTED : pr.conflicting ? C.bad : pr.failing ? C.warn : C.ok
 
-/** What an open PR's checks say, on the right of its line. */
-const prNote = (Text: AppElements['Text'], pr: LinkedPr): RenderElement | null => {
+/** What an open PR's checks say, on the right of its line, in the surface's ink for the colour. */
+const prNote = (Text: AppElements['Text'], pr: LinkedPr, ink: (color: string) => object = color => ({ color })): RenderElement | null => {
   if (pr.state !== 'OPEN') return null
-  if (pr.conflicting) return <Text key="ci" color={C.bad}>conflicts</Text>
-  if (pr.failing) return <Text key="ci" color={C.warn}>{`${pr.failing} failing`}</Text>
-  if (pr.pending) return <Text key="ci" color={C.blue}>{`${pr.pending} pending`}</Text>
+  if (pr.conflicting) return <Text key="ci" {...ink(C.bad)}>conflicts</Text>
+  if (pr.failing) return <Text key="ci" {...ink(C.warn)}>{`${pr.failing} failing`}</Text>
+  if (pr.pending) return <Text key="ci" {...ink(C.blue)}>{`${pr.pending} pending`}</Text>
   return null
 }
 
-/** The terminal: a line per issue, its number, title and age, cut to the pane's width. */
-export const renderTerminal = (els: TermElements, list: IssueList | null, at: number): RenderElement => {
+/** Cells an issue's title keeps before its labels give way, on the terminal (half the body when that's more). */
+const TITLE_MIN = 16
+
+/**
+ * The terminal: one section, the repository as its title and the counts on the
+ * right; an item per issue, its labels as pills where they fit, its number and
+ * age on the right; each linked PR on a tree row under it.
+ *
+ *   ▾ satoramoto/awesome-claude ……… 5 open  2 today
+ *     ◉ Snapshot tests of what…      tests  #24   2h
+ *     └─⇡ #31  Snapshot tests for…     1 failing
+ */
+export const renderTerminal = (els: TermElements, list: IssueList | null, columns: number, at: number): RenderElement => {
   const { Box, Text } = els
-  if (!list) return <Text dimColor>Reading issues…</Text>
-  if (list.note) return <Text dimColor>{list.note}</Text>
-  const { open } = counts(list, at)
-  return (
-    <Box flexDirection="column">
-      <Text>
-        <Text bold>{list.repo || 'Issues'}</Text>
-        <Text dimColor>{`  ${open} open`}</Text>
-      </Text>
-      {list.issues.length ? null : <Text dimColor>No open issues.</Text>}
-      {list.issues.map(issue => (
-        <Box key={`issue-${issue.number}`} flexDirection="row" gap={1}>
-          <Text color={OPEN}>{`#${issue.number}`}</Text>
-          <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text wrap="truncate">{issue.title}</Text>
-          </Box>
-          <Text dimColor>{ago(at - issue.updatedAt)}</Text>
-        </Box>
-      ))}
+  const k = kit(els, 'terminal', columns)
+  const pane = (title: string, right: RenderElement | null, body: (RenderElement | null)[]) => k.section({ id: 'issues', title, right, children: body })
+
+  if (!list) return pane('Issues', null, [k.note('loading', 'Reading issues…', 'loading')])
+  if (list.note) return pane(list.repo || 'Issues', null, [k.note('error', list.note, 'error')])
+
+  const { open, fresh } = counts(list, at)
+  const ages = list.issues.map(i => ago(at - i.updatedAt))
+  // Numbers and ages right-aligned in columns of their own, so they line up row to row.
+  const ageWidth = Math.max(0, ...ages.map(a => a.length))
+  const numberWidth = Math.max(0, ...list.issues.map(i => `#${i.number}`.length))
+  const figure = (key: string, text: string, width: number) => (
+    <Box key={key} width={width} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+      <Text dimColor>{text}</Text>
     </Box>
+  )
+
+  const issueRow = (issue: Issue, age: string) => {
+    // The lead's two cells, the gap before the right cluster, the number and the age.
+    const keep = Math.max(TITLE_MIN, Math.floor(k.width / 2))
+    let used = 2 + k.space.item + numberWidth + k.space.item + ageWidth + Math.min([...issue.title].length, keep)
+    // Labels in GitHub's order, while each still fits beside the title's minimum; the rest are left out.
+    const labels: RenderElement[] = []
+    for (const l of issue.labels) {
+      const w = [...l.name].length + k.space.item
+      if (used + w > k.width) break
+      used += w
+      labels.push(k.pill(`label-${l.name}`, l.name, l.color))
+    }
+    const prs = issue.prs.map((pr, i) =>
+      k.item(`pr-${issue.number}-${pr.number}`, {
+        tree: treePrefix([], i === issue.prs.length - 1),
+        lead: prIcon(pr),
+        leadColor: prColor(pr),
+        text: `#${pr.number}`,
+        note: pr.title || undefined,
+        right: [prNote(Text, pr, k.ink)],
+      }),
+    )
+    return (
+      <Box key={`issue-${issue.number}`} flexDirection="column">
+        {k.item(`row-${issue.number}`, {
+          lead: 'issue-opened',
+          leadColor: OPEN,
+          text: issue.title,
+          right: [...labels, figure('n', `#${issue.number}`, numberWidth), figure('age', age, ageWidth)],
+        })}
+        {prs}
+      </Box>
+    )
+  }
+
+  return pane(
+    list.repo || 'Issues',
+    k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null]),
+    list.issues.length ? list.issues.map((issue, i) => issueRow(issue, ages[i]!)) : [k.note('empty', 'No open issues.')],
   )
 }

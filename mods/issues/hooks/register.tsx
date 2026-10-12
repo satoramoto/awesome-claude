@@ -248,8 +248,9 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const data = await read($, list)
-    const at = Date.now()
-    if (e.surface === 'terminal') return renderTerminal($.ui.resolve(e) as TermElements, data, at)
+    // The engine's clock, so ages read the same time a test holds still.
+    const at = await $.clock.now()
+    if (e.surface === 'terminal') return renderTerminal($.ui.resolve(e) as TermElements, data, e.props.bodyColumns, at)
     const picked = await read($, selected)
     const pick = (n: number) => update($, selected, s => (s.includes(n) ? s.filter(x => x !== n) : [...s, n]))
     return renderApp($.ui.resolve(e) as AppElements, data, e.props.bodyColumns, at, {
