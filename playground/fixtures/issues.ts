@@ -77,3 +77,12 @@ export const empty = { list: { repo: 'satoramoto/awesome-claude', more: false, a
 export const noRepo = { list: { repo: '', more: false, at: now, issues: [], note: 'No GitHub repository for this session' } }
 
 export const reading = { list: null }
+
+/** A read under way, the last-good issues (4 minutes old) kept meanwhile. */
+export const refreshing = { list: { ...busy.list, at: now - 4 * 60_000 }, reading: true }
+
+/** The last read failed: the issues from 12 minutes ago kept, with why. */
+export const refreshFailed = { list: { ...busy.list, at: now - 12 * 60_000, failed: 'error connecting to api.github.com' } }
+
+/** The terminal's cursor on the second issue (drawn at full strength with the pane focused). */
+export const cursor = { ...busy, cursor: 23 }

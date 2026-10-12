@@ -3,12 +3,13 @@ import type { Elements, RenderElement } from 'claude-code'
 import { ago } from '@kit/format'
 import { C, GRAY, MUTED, treePrefix } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
+import type { RightPart } from '@kit/ui'
 
 import type { Issue, IssueList, LinkedPr } from '../types'
 
 /** The app surfaces' elements; `Input` only where the surface draws fields (not mobile). */
 export type AppElements = Pick<Elements['desktop'], 'Box' | 'Text' | 'Link' | 'Button' | 'Svg'> & Partial<Pick<Elements['desktop'], 'Input'>>
-export type TermElements = Pick<Elements['terminal'], 'Box' | 'Text'>
+export type TermElements = Pick<Elements['terminal'], 'Box' | 'Text'> & Partial<Pick<Elements['terminal'], 'Button'>>
 
 /** Open issues are green, as GitHub draws them. */
 const OPEN = C.ok
@@ -222,24 +223,66 @@ const prNote = (Text: AppElements['Text'], pr: LinkedPr, ink: (color: string) =>
 /** Cells an issue's title keeps before its labels give way, on the terminal (half the body when that's more). */
 const TITLE_MIN = 16
 
+/** How the terminal pane stands and what its rows do; the hooks module fills it. */
+export type TermState = {
+  /** Whether the pane has the keyboard (`e.props.isFocused`): key hints show, the cursor is drawn at full strength. */
+  focused?: boolean
+  /** Whether gh is being read right now. */
+  reading?: boolean
+  /** The issue the cursor is on, by number. */
+  cursor?: number | null
+  /**
+   * Enter on a row's mark: hands the issue to the session to start. Given, each
+   * row leads with a focusable mark the arrows walk, and the list draws a cursor.
+   */
+  start?: (issue: Issue) => void
+}
+
+/** The key of the focusable mark that leads an issue's row on the terminal. */
+const markKey = (n: number) => `mark-${n}`
+
+/** The issue a focused element's key names (a row's mark), or null. */
+export const cursorOf = (key: string | undefined): number | null => {
+  const m = /^mark-(\d+)$/.exec(key ?? '')
+  return m ? Number(m[1]) : null
+}
+
+/** What the terminal's keys do while the pane has them: the most used first. */
+const HINTS = [
+  { key: '↑↓', label: 'move' },
+  { key: 'enter', label: 'start' },
+]
+
 /**
  * The terminal: one section, the repository as its title and the counts on the
  * right; an item per issue, its labels as pills where they fit, its number and
- * age on the right; each linked PR on a tree row under it.
+ * age on the right; each linked PR on a tree row under it. With `start`, each
+ * row leads with a focusable mark: the row under the focus is the cursor's
+ * (`▌` in the gutter), Enter starts it, and the keys show under the list.
  *
- *   ▾ satoramoto/awesome-claude ……… 5 open  2 today
- *     ◉ Snapshot tests of what…      tests  #24   2h
- *     └─⇡ #31  Snapshot tests for…     1 failing
+ *   ▾ satoramoto/awesome-claude ──── ↻ 2m  5 open  2 today
+ *    ▌◉ Snapshot tests of what…      tests  #24   2h
+ *      └─⇡ #31  Snapshot tests for…     1 failing
+ *     ↑↓ move · enter start
+ *
+ * A read under way shows the figures' age (`↻ 2m`); a failed one an amber `▲`
+ * and the age, the last-good issues kept. Only a first read that fails, with
+ * nothing to keep, is an error note.
  */
-export const renderTerminal = (els: TermElements, list: IssueList | null, columns: number, at: number): RenderElement => {
-  const { Box, Text } = els
-  const k = kit(els, 'terminal', columns)
-  const pane = (title: string, right: RenderElement | null, body: (RenderElement | null)[]) => k.section({ id: 'issues', title, right, children: body })
+export const renderTerminal = (els: TermElements, list: IssueList | null, columns: number, at: number, st: TermState = {}): RenderElement => {
+  const { Box, Text, Button } = els
+  const k = kit(els, 'terminal', columns, { focused: st.focused })
+  const pane = (title: string, right: RenderElement | null, body: (RenderElement | null)[], loading = false) =>
+    k.section({ id: 'issues', title, right: right ?? undefined, loading, children: body })
 
-  if (!list) return pane('Issues', null, [k.note('loading', 'Reading issues…', 'loading')])
-  if (list.note) return pane(list.repo || 'Issues', null, [k.note('error', list.note, 'error')])
+  if (!list) return pane('Issues', null, [k.note('loading', 'Reading issues…', 'loading')], true)
+  if (list.note) return pane(list.repo || 'Issues', null, [k.note('error', list.note, 'error')], Boolean(st.reading))
 
   const { open, fresh } = counts(list, at)
+  // Rows take the keyboard when Enter has something to do: every row then says whether it's the cursor's.
+  const keys = Boolean(st.start && Button)
+  const chosen = (n: number) => (keys ? st.cursor === n : undefined)
+  const gutter = keys ? 1 : 0
   const ages = list.issues.map(i => ago(at - i.updatedAt))
   // Numbers and ages right-aligned in columns of their own, so they line up row to row.
   const ageWidth = Math.max(0, ...ages.map(a => a.length))
@@ -253,14 +296,15 @@ export const renderTerminal = (els: TermElements, list: IssueList | null, column
   const issueRow = (issue: Issue, age: string) => {
     // The lead's two cells, the gap before the right cluster, the number and the age.
     const keep = Math.max(TITLE_MIN, Math.floor(k.width / 2))
-    let used = 2 + k.space.item + numberWidth + k.space.item + ageWidth + Math.min([...issue.title].length, keep)
+    let used = gutter + 2 + k.space.item + numberWidth + k.space.item + ageWidth + Math.min([...issue.title].length, keep)
     // Labels in GitHub's order, while each still fits beside the title's minimum; the rest are left out.
-    const labels: RenderElement[] = []
+    const labels: RightPart[] = []
     for (const l of issue.labels) {
       const w = [...l.name].length + k.space.item
       if (used + w > k.width) break
       used += w
-      labels.push(k.pill(`label-${l.name}`, l.name, l.color))
+      // Should the row still run short, labels go before the age and the number, the last label first.
+      labels.push({ part: k.pill(`label-${l.name}`, l.name, l.color), drop: 3 })
     }
     const prs = issue.prs.map((pr, i) =>
       k.item(`pr-${issue.number}-${pr.number}`, {
@@ -270,24 +314,41 @@ export const renderTerminal = (els: TermElements, list: IssueList | null, column
         text: `#${pr.number}`,
         note: pr.title || undefined,
         right: [prNote(Text, pr, k.ink)],
+        // In the gutter's column too, so the tree lines up under its issue.
+        selected: keys ? false : undefined,
       }),
     )
+    // The open-issue mark; with keys, a Button the focus ring lands on, Enter on it starting the issue.
+    const lead =
+      keys && Button ? (
+        <Button key={markKey(issue.number)} plain label={`#${issue.number}`} onPress={() => st.start!(issue)}>
+          {k.icon('issue-opened', OPEN)}
+        </Button>
+      ) : (
+        'issue-opened'
+      )
     return (
       <Box key={`issue-${issue.number}`} flexDirection="column">
         {k.item(`row-${issue.number}`, {
-          lead: 'issue-opened',
+          lead,
           leadColor: OPEN,
           text: issue.title,
-          right: [...labels, figure('n', `#${issue.number}`, numberWidth), figure('age', age, ageWidth)],
+          // The age tells least, so it goes first, then the number; the CI marks sit on rows of their own.
+          right: [...labels, { part: figure('n', `#${issue.number}`, numberWidth), drop: 1, cells: numberWidth }, { part: figure('age', age, ageWidth), drop: 2, cells: ageWidth }],
+          selected: chosen(issue.number),
         })}
         {prs}
       </Box>
     )
   }
 
+  // Last-good figures say how old they are while a read is under way, or once one failed.
+  const age = st.reading || list.failed ? ago(Math.max(0, at - list.at)) : undefined
   return pane(
     list.repo || 'Issues',
-    k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null]),
-    list.issues.length ? list.issues.map((issue, i) => issueRow(issue, ages[i]!)) : [k.note('empty', 'No open issues.')],
+    k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null], { loading: st.reading, age, failed: Boolean(list.failed) }),
+    list.issues.length
+      ? [...list.issues.map((issue, i) => issueRow(issue, ages[i]!)), keys ? k.hints('hints', HINTS) : null]
+      : [k.note('empty', 'No open issues.')],
   )
 }
