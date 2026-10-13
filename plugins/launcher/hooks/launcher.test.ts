@@ -411,6 +411,37 @@ test('Start runs the configuration in the project root with PORT set; it shows r
   await ui.unmount()
 })
 
+test('a redraw that leaves a row alone keeps its Start button\'s press handle, and a press on it still starts the server', async ($, on) => {
+  const world = engine(on)
+  await launcher($)
+  const handleOf = async (ui: { drawn: () => Promise<unknown> }, key: string): Promise<number | undefined> => {
+    const find = (d: any): any =>
+      d && typeof d === 'object'
+        ? d.type === 'Button' && d.props?.key === key
+          ? d
+          : ((d.children ?? []) as unknown[]).flat(Infinity).map(find).find(Boolean)
+        : undefined
+    return find(await ui.drawn())?.press?.handle
+  }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ plugin: 'launcher', surface, ...PANE })
+    const before = await handleOf(ui, 'start-app')
+    expect(before, `${surface}: Start is drawn`).toBeDefined()
+    // Unfolding the other row writes the pane's state and draws it again; app's row is as it was.
+    await ui.press({ key: 'toggle-storybook' })
+    expect(await ui.find({ key: 'command-storybook' }), `${surface}: storybook unfolded`).toBeDefined()
+    expect(await handleOf(ui, 'start-app'), `${surface}: Start keeps the handle the first drawing had`).toBe(before)
+    await ui.press({ key: 'toggle-storybook' })
+    await ui.unmount()
+  }
+  const ui = await $.ui.mount({ plugin: 'launcher', surface: 'desktop', ...PANE })
+  await ui.press({ key: 'toggle-storybook' })
+  await ui.press({ key: 'start-app' })
+  expect(world.spawned, 'the press reached Start after the redraw').toHaveLength(1)
+  await ui.unmount()
+  await launcher($, 'stop app')
+})
+
 test('a server that exits with an error shows failed, unfolded with its output', async ($, on) => {
   engine(on, { crash: 'app' })
   await launcher($)

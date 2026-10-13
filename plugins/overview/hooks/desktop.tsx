@@ -1,11 +1,11 @@
 import type { Elements, RenderElement } from 'claude-code'
 
-import { bytes, money, short, tokens } from '../kit/format'
+import { bytes, middle, money, short, tokens } from '../kit/format'
 import type { PerfSnapshot } from '../kit/perf'
 import { C, GLYPH, GRAY, INK, MUTED, RAMP, TRACK, levelColor } from '../kit/tokens'
 import { EDGE, SPACE, kit } from '../kit/ui'
 
-import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot, WorkspacesGh } from '../types'
+import type { Activity, Agent, AgentExtra, BranchView, Doing, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot, WorkspacesGh } from '../types'
 
 /*
  * The app mode: a properties inspector for the session, drawn as an instrument.
@@ -16,7 +16,7 @@ import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote,
  * - Type: values plain, labels and units dim, bold only for section titles and
  *   the context %, uppercase only for captions and a branch's state word.
  * - Spacing: the kit's SPACE scale and INSET; nothing else.
- * - Each fact once: calls and time in the header, failures in Activity, cost in Accounting.
+ * - Each fact once: calls and time in the header, cost in Accounting.
  */
 
 /** The elements the app mode draws with: the desktop and VS Code have these. */
@@ -99,9 +99,50 @@ export const tagOf = (name: string): string => {
   return known[name] ?? name.slice(0, 3).toLowerCase()
 }
 
-/** An agent's status as its rail's colour: running blue, done green, failed red. */
-const statusColor = (status: string): string =>
+/** An agent's status as its icon's colour: running or queued blue, done green, failed red, else grey. */
+export const statusColor = (status: string): string =>
   status === 'running' || status === 'pending' ? C.blue : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
+
+/** A mark for each kind of thing: its icon on the app surfaces, its one-cell glyph on the terminal. */
+type Mark = { icon: string; glyph: string }
+
+/**
+ * Each kind of agent's mark: code for a lane lead, tools for a worker, a bolt for
+ * a quick fix, a checklist (◎ on the terminal, as ✓ means done) for a reviewer,
+ * a telescope to explore, a task list to plan, a robot for the general agent and
+ * a book for the guide; the agents sparkle for any other.
+ */
+const AGENT_MARK: Record<string, Mark> = {
+  developer: { icon: 'code', glyph: '◆' },
+  worker: { icon: 'tools', glyph: '◇' },
+  'quick-fix': { icon: 'zap', glyph: '↯' },
+  reviewer: { icon: 'checklist', glyph: '◎' },
+  explore: { icon: 'telescope', glyph: '⌕' },
+  plan: { icon: 'tasklist', glyph: '≡' },
+  'general-purpose': { icon: 'hubot', glyph: '○' },
+  'claude-code-guide': { icon: 'book', glyph: '?' },
+}
+export const agentMark = (type: string): Mark => AGENT_MARK[type.toLowerCase()] ?? { icon: GLYPH.agents, glyph: '✦' }
+
+/** Each kind of tool call's mark, for an agent's "doing now" line. */
+const DOING_MARK: Record<string, Mark> = {
+  bash: { icon: 'terminal', glyph: '$' },
+  edit: { icon: 'pencil', glyph: '✎' },
+  read: { icon: 'eye', glyph: '◇' },
+  search: { icon: 'search', glyph: '⌕' },
+  web: { icon: 'globe', glyph: '◎' },
+  agent: { icon: GLYPH.agents, glyph: '✦' },
+  mcp: { icon: 'plug', glyph: '⏚' },
+  other: { icon: 'dot-fill', glyph: '·' },
+}
+export const doingMark = (d: Doing): Mark => DOING_MARK[d.kind] ?? DOING_MARK.other!
+
+/**
+ * A "doing now" line's argument in what's left of `cells` after its name and a
+ * space, cut in the middle (`mods/…/register.tsx`) so its end stays in view.
+ */
+export const doingArg = (d: Doing, cells: number): string | undefined =>
+  d.arg ? middle(d.arg, Math.max(8, cells - [...d.text].length - 1)) : undefined
 
 /**
  * A PR's state as one colour: merged purple; closed or draft grey; an open one green,
@@ -178,15 +219,11 @@ export const activityChart = (a: Activity) => {
   })
   const peak = Math.max(0, ...log.map(p => p.calls ?? 0))
   const otherCount = allTools.slice(named.length).reduce((n, [, t]) => n + t.n, 0)
-  // Failed tool calls (the only place failures are counted).
-  const failures = allTools.reduce((n, [, t]) => n + t.err, 0)
-  const otherErr = allTools.slice(named.length).reduce((n, [, t]) => n + t.err, 0)
-  const errNote = (err: number) => (err > 0 ? { note: `!${err}`, noteColor: C.bad } : {})
   const cacheIn = a.turnLog.reduce((n, p) => n + p.cacheRead, 0)
   const allIn = a.turnLog.reduce((n, p) => n + p.cacheRead + p.cacheWrite + p.input, 0)
   // Turn numbers under the first, middle and last bar.
   const ticks = log.length ? [0, Math.floor((log.length - 1) / 2), log.length - 1].filter((v, i, xs) => xs.indexOf(v) === i) : []
-  return { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, failures, otherErr, errNote, cacheIn, allIn, ticks }
+  return { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, cacheIn, allIn, ticks }
 }
 
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
@@ -265,14 +302,14 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
     : null
 
   // ---- activity: tool calls per turn, each bar sliced by tool ----
-  const { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, failures, otherErr, errNote, cacheIn, allIn, ticks } = activityChart(a)
+  const { named, OTHER, SLOTS, log, first, sliced, peak, otherCount, cacheIn, allIn, ticks } = activityChart(a)
   const activity =
     log.length || toolCalls
       ? k.section({
           id: 'activity',
           icon: GLYPH.tools,
           title: 'Activity',
-          right: k.summary([[String(peak), 'peak'], failures ? [String(failures), 'failed', C.bad] : null, [`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`, 'cached']]),
+          right: k.summary([[String(peak), 'peak'], [`${allIn ? Math.round((cacheIn / allIn) * 100) : 0}%`, 'cached']]),
           ...fold('activity'),
           children: [
             <Box key="chart" flexDirection="column">
@@ -284,8 +321,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
             </Box>,
             <Box key="legend" marginTop={SPACE.block} width="100%">
               {k.legend('act', [
-                ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n), ...errNote(a.tools[t.name]!.err) })),
-                ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount), ...errNote(otherErr) }] : []),
+                ...named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n) })),
+                ...(otherCount ? [{ label: 'Other', color: OTHER, figure: String(otherCount) }] : []),
               ])}
             </Box>,
           ],
@@ -300,19 +337,16 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
         title: 'Agents',
         right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
-        // A tile per agent, two lines:
-        //   [status icon] description            12k  3m
-        //   type                                 running
+        // A tile per agent, one line, and a second while it runs:
+        //   [type icon, status colour] description     12k  3m
+        //   [tool icon] Editing kit/ui.tsx
+        // The type and status are the icon's tooltip.
         children: fx.buildTree(d.agents).map(({ agent, depth }, i) => {
           const x = d.extras[agent.id]
           const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
           const color = statusColor(agent.status)
-          const glyph =
-            agent.status === 'running' ? GLYPH.running
-            : agent.status === 'completed' ? GLYPH.done
-            : agent.status === 'failed' ? GLYPH.failed
-            : agent.status === 'killed' ? GLYPH.stopped
-            : GLYPH.pending
+          const who = `${agent.type} · ${agent.status.toLowerCase()}`
+          const doing = agent.status === 'running' ? x?.doing : undefined
           const row = (key: string, l: (RenderElement | null)[], r: (RenderElement | null)[]) => (
             <Box key={key} flexDirection="row" justifyContent="space-between" gap={SPACE.item} width="100%">
               <Box flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={1} minWidth={0} overflow="hidden">
@@ -329,17 +363,33 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
               {k.tile(`tile-${agent.id}`, [
                 row(
                   'l1',
-                  [k.icon(glyph, color), <Text key="d" wrap="truncate">{agent.description || agent.type}</Text>],
+                  [
+                    <Box key="i" flexShrink={0}>
+                      {k.icon(agentMark(agent.type).icon, color, undefined, { tooltip: who })}
+                    </Box>,
+                    <Text key="d" wrap="truncate">{agent.description || agent.type}</Text>,
+                  ],
                   [
                     x?.tokens !== undefined ? <Text key="t" color={GRAY.mid}>{tokens(x.tokens)}</Text> : null,
                     ms !== undefined ? <Text key="ms" color={GRAY.dark}>{short(ms)}</Text> : null,
                   ],
                 ),
-                row(
-                  'l2',
-                  [<Text key="type" color={GRAY.mid} wrap="truncate">{agent.type}</Text>],
-                  [<Text key="s" color={color}>{agent.status.toLowerCase()}</Text>],
-                ),
+                // What it's doing now, while it runs: the tool's icon, its name, then its argument dim.
+                doing
+                  ? row(
+                      'l2',
+                      [
+                        <Box key="i" flexShrink={0}>
+                          {k.icon(doingMark(doing).icon, MUTED)}
+                        </Box>,
+                        <Text key="t" wrap="truncate">
+                          {doing.text}
+                          {doing.arg ? <Text color={GRAY.mid}>{` ${doingArg(doing, d.columns - depth * 2 - 6)}`}</Text> : null}
+                        </Text>,
+                      ],
+                      [],
+                    )
+                  : null,
               ])}
             </Box>
           )

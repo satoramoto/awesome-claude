@@ -272,7 +272,7 @@ const HINTS = [
  * gutter), Enter starts it, and the keys show under the list, lined up with
  * the rows' marks.
  *
- *   ▾ awesome-claude  5 open ─────────────────────
+ *   awesome-claude  5 open ─────────────────────── ▾
  *     ◉ Workspaces: show which checks…  ■ overview  #21  3d
  *
  *    ▌◉ Snapshot tests of what…            ■ tests  #24  2h

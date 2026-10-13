@@ -15,6 +15,8 @@ import type {
   Agent,
   AgentExtra,
   BranchView,
+  Doing,
+  DoingKind,
   GhInfo,
   GitFile,
   GitInfo,
@@ -30,7 +32,9 @@ import type {
   WorkspacesGh,
 } from '../types'
 import { parseLeftRight, startedBy } from './branches'
+import { short } from '../kit/format'
 import { createPerf } from '../kit/perf'
+import { holdButtons } from '../kit/ui'
 
 import { renderDesktop } from './desktop'
 import type { AppElements, DesktopData, Helpers } from './desktop'
@@ -670,8 +674,29 @@ const storeLimits = async ($: EngineInterface, list: SessionRateLimit[]) => {
   if (!same(await read($, limits), fresh)) await update($, limits, () => fresh)
 }
 
+// The session's folder, read once, so an agent's paths can be drawn relative to it.
+let sessionCwd: string | undefined
+
+/** Keeps an agent's latest tool call in words, written only when it changed. */
+const noteDoing = async ($: EngineInterface, id: string, tool: string, args: Record<string, unknown>): Promise<void> => {
+  sessionCwd ??= await $.session.cwd().catch(() => undefined)
+  const doing = describeCall(tool, args, sessionCwd)
+  const old = (await read($, agentExtra))[id]?.doing
+  if (old && old.kind === doing.kind && old.text === doing.text && old.arg === doing.arg) return
+  await update($, agentExtra, all => ({ ...all, [id]: { ...all[id], doing } }))
+}
+
 // Ticks once a second while any agent runs, so elapsed times move; stopped when none do.
 let ticker: Timer | undefined
+/** The running agents' elapsed times as their cards last showed them (`elapsedShown`). */
+let lastElapsed = ''
+
+/** Each running agent's elapsed time as its card draws it (`short`, whole minutes) at `t`. */
+export const elapsedShown = (list: Agent[], extras: Record<string, AgentExtra>, t: number): string =>
+  list
+    .filter(a => a.status === 'running' && extras[a.id]?.startedAt !== undefined)
+    .map(a => `${a.id} ${short(t - extras[a.id]!.startedAt!)}`)
+    .join('\n')
 
 const refreshAgents = async ($: EngineInterface): Promise<void> => {
   const extras = await read($, agentExtra)
@@ -686,8 +711,14 @@ const refreshAgents = async ($: EngineInterface): Promise<void> => {
   if (JSON.stringify(before) !== JSON.stringify(fresh)) await update($, agents, () => fresh)
   const running = fresh.some(a => a.status === 'running' || a.status === 'pending')
   if (running) {
-    // Elapsed times move only where someone can see them.
-    if (await isShown($)) await update($, now, () => Date.now())
+    // Elapsed times move only where someone can see them, and redraw only when one
+    // drawn would read differently (a card shows whole minutes).
+    const t = Date.now()
+    const elapsed = elapsedShown(fresh, extras, t)
+    if (elapsed !== lastElapsed && (await isShown($))) {
+      lastElapsed = elapsed
+      await update($, now, () => t)
+    }
     ticker ??= $.clock.every(TICK_MS, () => void perf.time('agents', () => refreshAgents($)).catch(() => undefined))
   } else if (ticker) {
     ticker.cancel()
@@ -713,6 +744,55 @@ export const editedPath = (tool: string, args: { file_path?: unknown; notebook_p
   if (!EDIT_TOOLS.includes(tool)) return undefined
   const path = args.file_path ?? args.notebook_path
   return typeof path === 'string' && path ? path : undefined
+}
+
+/** `path` relative to the session's folder when it's inside it, else as given. */
+const relative = (path: string, cwd: string | undefined): string =>
+  cwd && path.startsWith(`${cwd.replace(/\/$/, '')}/`) ? path.slice(cwd.replace(/\/$/, '').length + 1) : path
+
+/** A string argument, its first line, trimmed; empty when it isn't one. */
+const arg = (v: unknown): string => (typeof v === 'string' ? (v.trim().split('\n')[0] ?? '').trim() : '')
+
+/**
+ * A tool call for an agent's "doing now" line: its kind, a name or verb and its
+ * argument (`Bash` `bun build.ts`, `Editing` `kit/ui.tsx`, `Searching` `TODO`).
+ * Paths are made relative to the session's folder.
+ */
+export const describeCall = (tool: string, args: Record<string, unknown>, cwd?: string): Doing => {
+  const doing = (kind: DoingKind, text: string, v: unknown, isPath = false): Doing => {
+    const a = arg(v)
+    return a ? { kind, text, arg: isPath ? relative(a, cwd) : a } : { kind, text }
+  }
+  switch (tool) {
+    case 'Bash':
+      return doing('bash', 'Bash', args.command)
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return doing('edit', 'Editing', args.file_path ?? args.notebook_path, true)
+    case 'Write':
+      return doing('edit', 'Writing', args.file_path, true)
+    case 'Read':
+      return doing('read', 'Reading', args.file_path, true)
+    case 'Grep':
+      return doing('search', 'Searching', args.pattern)
+    case 'Glob':
+      return doing('search', 'Finding', args.pattern)
+    case 'WebFetch':
+      return doing('web', 'Fetching', args.url)
+    case 'WebSearch':
+      return doing('web', 'Searching the web', args.query)
+    case 'Agent':
+    case 'Task':
+      return doing('agent', 'Starting agent', args.description)
+    default:
+      // An MCP tool by its own name, its server dim after it: `search_issues` `github`.
+      if (tool.startsWith('mcp__')) {
+        const [, server, ...name] = tool.split('__')
+        return name.length ? { kind: 'mcp', text: name.join('__'), arg: server } : { kind: 'mcp', text: tool }
+      }
+      return { kind: 'other', text: tool }
+  }
 }
 
 /** The activity with one more tool call. */
@@ -831,7 +911,7 @@ const tick = async ($: EngineInterface) => {
   if (t - last.resources >= RESOURCES_EVERY) {
     last.resources = t
     const res = await perf.time('resources', () => sampleResources($)).catch(() => null)
-    if (res) await update($, resources, () => res)
+    if (res && !same(await read($, resources), res)) await update($, resources, () => res)
   }
   // The session's elapsed time moves even when nothing else does.
   if (t - last.clock >= EVERY.clock) {
@@ -866,6 +946,9 @@ export const register: Register = on => {
   // A tool that may have changed files (or pushed, or opened a PR) marks git stale;
   // a gh or push command marks the PRs stale too. Nothing waits on the bookkeeping.
   on('tool.call', async ($, e, next) => {
+    // A subagent's call, as it starts: what that agent is doing now.
+    const agentId = e.agentId
+    if (agentId) void noteDoing($, agentId, e.tool, e as unknown as Record<string, unknown>).catch(() => undefined)
     const ran = await next(e)
     if (!('deny' in ran && ran.deny)) {
       const path = editedPath(e.tool, e as { file_path?: unknown; notebook_path?: unknown })
@@ -976,9 +1059,11 @@ export const register: Register = on => {
       perf: perf.snapshot(),
     }
     // The terminal draws the same inspector in cells; the app surfaces as boxes.
+    // Buttons keep their press handles across redraws, so a click made just before one still lands.
+    const els = holdButtons($.ui.resolve(e), e)
     if (e.surface === 'terminal') {
-      return perf.time('render', () => renderTerminal($.ui.resolve(e) as TermElements, data, TERM_HELPERS))
+      return perf.time('render', () => renderTerminal(els as TermElements, data, TERM_HELPERS))
     }
-    return perf.time('render', () => renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS))
+    return perf.time('render', () => renderDesktop(els as AppElements, data, HELPERS))
   })
 }

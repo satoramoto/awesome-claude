@@ -40,6 +40,20 @@ export type AgentExtra = {
   tokens?: number
   /** `agent.spawn`'s `parentAgentId`: the loop that spawned it, for when the list leaves `parentId` out. */
   parentId?: string
+  /** Its latest tool call, from its loop's `tool.call`: what it's doing now (drawn while it runs). */
+  doing?: Doing
+}
+
+/** The kind of tool a call is, for its icon (desktop) or glyph (terminal). */
+export type DoingKind = 'bash' | 'edit' | 'read' | 'search' | 'web' | 'agent' | 'mcp' | 'other'
+
+/** An agent's latest tool call: its kind, a name or verb (`Bash`, `Editing`) and its argument (`bun build.ts`, `kit/ui.tsx`). */
+export type Doing = {
+  kind: DoingKind
+  /** The tool's name or verb, drawn at normal weight. */
+  text: string
+  /** Its command, path, URL or pattern, drawn dim and cut in the middle where the line is too long. */
+  arg?: string
 }
 
 /** One drawn row of the Tasks tree. */

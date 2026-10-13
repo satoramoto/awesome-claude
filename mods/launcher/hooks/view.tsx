@@ -59,7 +59,7 @@ const RULE_GAPS = 2
 
 /**
  * A desktop row's measure, in columns, to tell whether its address fits: the band's
- * inset and fold arrow before the title, the gap between parts, and the room a
+ * inset and its fold arrow (at the row's right end), the gap between parts, and the room a
  * native Button takes beyond its label.
  */
 const DESK_LEAD = 4
@@ -132,15 +132,33 @@ const cells = (s: string) => [...s].length
 const percent = (cpu: number) => `${cpu < 10 ? cpu.toFixed(1).replace(/\.0$/, '') : Math.round(cpu)}%`
 
 /**
+ * What the pane can draw of each server: everything but its CPU and memory as
+ * kept, those as the figures and sparkline show them (the samples the line
+ * spans, its top, the last figure, the memory's). Two equal ones draw alike,
+ * so a refresh that changes neither need not redraw.
+ */
+export const drawnServers = (servers: Record<string, Server>) =>
+  Object.fromEntries(
+    Object.entries(servers).map(([name, { cpu, rss, ...s }]) => [
+      name,
+      {
+        ...s,
+        cpu: cpu ? [cpu.length >= 2, cpu.slice(-2 * SPARK_CELLS).map(percent), percent(Math.max(SPARK_FLOOR, ...cpu))] : null,
+        rss: rss ? bytes(rss) : null,
+      },
+    ]),
+  )
+
+/**
  * The pane, on every surface: the project as a plain line (on the desktop with how
  * many answer), then one foldable row per configuration. On the terminal each
  * row's state, address, CPU and buttons sit in columns shared by every row:
  *
  *   yahaha/.claude/launch.json
  *
- *   ▸ app        ──── ✓ running    localhost:5173  ⣀⣤⣶⣤⣀⣀  Stop  Restart
+ *   app        ──── ✓ running    localhost:5173  ⣀⣤⣶⣤⣀⣀  Stop  Restart ▸
  *
- *   ▾ storybook  ──── ✕ failed     :6006                   Start
+ *   storybook  ──── ✕ failed     :6006                   Start         ▾
  *     command    npm --prefix app run storybook
  *     exit       1
  *

@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { TERM_GLYPH } from '@kit/icons'
 import { C, FILL, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '@kit/tokens'
-import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, kit } from '@kit/ui'
+import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, fold, holdButtons, kit } from '@kit/ui'
 import type { Kit } from '@kit/ui'
 
 // The kit's own tests. The build copies kit/ into each mod but leaves kit tests
@@ -276,6 +276,52 @@ test('a path is cut in the middle, keeping its end', async ($, on) => {
   expect(shown(prop)).toContain('…/terminal.tsx')
 })
 
+/** Every string the tree carries, in drawing order: Button labels and text, depth first. */
+const inOrder = (d: Drawn): string[] => [
+  ...(d.type === 'Button' && typeof d.props?.label === 'string' ? [d.props.label as string] : []),
+  ...((d.children ?? d.props?.children ?? []) as unknown[])
+    .flat(Infinity)
+    .flatMap(c => (typeof c === 'string' || typeof c === 'number' ? [String(c)] : c && typeof c === 'object' ? inOrder(c as Drawn) : [])),
+]
+
+test('a section heading reads icon, title, figures, then the fold arrow last, flush right, on each surface', async ($, on) => {
+  const draw = kitPane($, on)
+  const heading = (right: boolean, collapsed: boolean) => (k: Kit) =>
+    k.section({
+      id: 's',
+      icon: GLYPH.context,
+      title: 'Context',
+      right: right ? k.summary([['11%', 'of 1M']]) : null,
+      collapsed,
+      onToggle: () => undefined,
+      children: [k.note('n', 'the body')],
+    }) as never
+  const byKey = (key: string) =>
+    function find(d: Drawn): Drawn | undefined {
+      // A drawn tree keeps an element's key in its props.
+      return (d.key ?? d.props?.key) === key ? d : kids(d).map(find).find(Boolean)
+    }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const collapsed of [false, true]) {
+      const arrow = surface === 'terminal' ? (collapsed ? FOLD.closed : FOLD.open) : fold(collapsed)
+      for (const right of [true, false]) {
+        const where = `${surface}${collapsed ? ', folded' : ''}${right ? '' : ', no figures'}`
+        const section = byKey('section-s')(await draw(heading(right, collapsed), { surface, columns: 60 }))!
+        // The heading row's drawn strings: the title, the figures, and the arrow last, nothing after it.
+        const row = inOrder(kids(section)[0]!).filter(t => t.trim() && t !== BLANK)
+        const title = row.findIndex(t => t.includes('Context'))
+        expect(title, `title at ${where}`).toBeGreaterThanOrEqual(0)
+        if (right) expect(row.findIndex(t => t.includes('11%')), `figures after the title at ${where}`).toBeGreaterThan(title)
+        expect(row.indexOf(arrow), `arrow after the title and figures at ${where}`).toBe(row.length - 1)
+        // The arrow is the fold's Button, labelled with the arrow, so the desktop draws it and it presses.
+        const button = byKey('toggle-s')(section)
+        expect(button?.type, `toggle at ${where}`).toBe('Button')
+        expect(button?.props?.label, `toggle at ${where}`).toBe(arrow)
+      }
+    }
+  }
+})
+
 test('below 30 columns a section draws its header and figures only', async ($, on) => {
   const draw = kitPane($, on)
   const section = (k: Kit) => k.section({ id: 's', title: 'Limits', right: k.summary([['42%']]), children: [k.note('n', 'the body')] }) as never
@@ -358,4 +404,59 @@ test('a danger action on the desktop is a red word under a blank-labelled Button
   const term = await draw(build)
   expect(all(term).find(d => d.type === 'Button')?.props?.label).toBe('Proceed')
   expect(texts(term).find(t => shown(t) === 'Proceed')?.props).toMatchObject({ color: 'error' })
+})
+
+test('a Button drawn alike keeps its press handle across a redraw, and a press on it runs the latest onPress', async ($, on) => {
+  // Two sections; folding `a` between the renders changes a's arrow and leaves b's alone.
+  let folded = false
+  let pressedB = 0
+  let raw = false
+  on('ui.render', { component: 'Pane', requestId: 'kit' }, async ($$, e) => {
+    const els = raw ? $$.ui.resolve(e) : holdButtons($$.ui.resolve(e), e)
+    const k = kit(els as any, e.surface, e.props.bodyColumns, { focused: e.props.isFocused })
+    // A fresh closure each render, as a mod's are: the press must reach this render's.
+    const seen = folded
+    return h(
+      els.Box as never,
+      { flexDirection: 'column' },
+      k.section({ id: 'a', title: 'A', collapsed: folded, onToggle: () => undefined, children: null }),
+      k.section({ id: 'b', title: 'B', onToggle: () => void (pressedB += seen ? 10 : 1), children: null }),
+    ) as never
+  })
+  const pressOf = async (ui: { drawn: () => Promise<unknown> }, key: string) =>
+    (all((await ui.drawn()) as Drawn).find(d => d.type === 'Button' && d.props?.key === key) as { press?: { plugin: string; handle: number } } | undefined)?.press
+  const handleOf = async (ui: { drawn: () => Promise<unknown> }, key: string) => (await pressOf(ui, key))?.handle
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const held of [true, false]) {
+      raw = !held
+      folded = false
+      const ui = await $.ui.mount({
+        plugin: 'overview',
+        surface,
+        component: 'Pane',
+        requestId: 'kit',
+        props: { title: 'Kit', isFocused: true, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
+      })
+      const a1 = await handleOf(ui, 'toggle-a')
+      const b1 = await handleOf(ui, 'toggle-b')
+      expect(b1, `${surface}: b's toggle is drawn with a handle`).toBeDefined()
+      folded = true
+      await ui.redraw()
+      const a2 = await handleOf(ui, 'toggle-a')
+      const b2 = await handleOf(ui, 'toggle-b')
+      // A changed Button is a new one either way; an unchanged one keeps its handle only when held.
+      expect(a2, `${surface}: a's toggle changed`).not.toBe(a1)
+      if (held) {
+        expect(b2, `${surface}: b's toggle keeps the handle the first drawing had`).toBe(b1)
+        // The press the person made on the first drawing reaches the handler, and this render's closure.
+        pressedB = 0
+        // The pane is the test's own hook beneath the mod: its Buttons carry the test's plugin name.
+        await ui.press({ key: 'toggle-b', plugin: (await pressOf(ui, 'toggle-b'))!.plugin })
+        expect(pressedB, `${surface}: the press ran the latest onPress`).toBe(10)
+      } else {
+        expect(b2, `${surface}: without holdButtons the engine renumbers every Button`).not.toBe(b1)
+      }
+      await ui.unmount()
+    }
+  }
 })

@@ -1,13 +1,13 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { ago, basename, money, short, tokens } from '@kit/format'
-import { C, GLYPH, MUTED, TRACK, levelColor } from '@kit/tokens'
+import { C, GLYPH, MUTED, TRACK, TREE, levelColor } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { MEASURE, kit } from '@kit/ui'
 import type { Kit } from '@kit/ui'
 
 import type { Agent, BranchView, GitFile, GitInfo, GitPr, TreeRow } from '../types'
-import { activityChart, compact, contextParts, machine, prColor, shortTool } from './desktop'
+import { activityChart, agentMark, compact, contextParts, doingArg, doingMark, machine, prColor, shortTool, statusColor } from './desktop'
 import type { DesktopData } from './desktop'
 
 /*
@@ -34,19 +34,6 @@ const AGENT_ROWS = 12
 /** The most pull requests the Git section lists. */
 const GIT_PRS = 3
 
-/** An agent's status as the kit's status kind. */
-export const agentStatus = (status: string): StatusKind =>
-  status === 'running'
-    ? 'running'
-    : status === 'pending'
-      ? 'pending'
-      : status === 'completed'
-        ? 'done'
-        : status === 'failed'
-          ? 'failed'
-          : status === 'killed'
-            ? 'stopped'
-            : 'idle'
 
 /** A PR's icon key: its state, as GitHub draws it. */
 const prIcon = (pr: GitPr) => (pr.state === 'MERGED' ? 'pr-merged' : pr.state === 'CLOSED' ? 'pr-closed' : pr.isDraft ? 'pr-draft' : 'pr-open')
@@ -156,7 +143,6 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
           title: 'Activity',
           right: k.summary([
             [String(chart.peak), 'peak'],
-            chart.failures ? [String(chart.failures), 'failed', C.bad] : null,
             // Narrow, the cache share goes first: the header would be cut.
             k.width >= 50 ? [`${chart.allIn ? Math.round((chart.cacheIn / chart.allIn) * 100) : 0}%`, 'cached'] : null,
           ]),
@@ -173,8 +159,8 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
             // A chart taller than a row is its own block: its legend after one blank row.
             <Box key="legend" marginTop={k.space.block}>
               {k.legend('act', [
-                ...chart.named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n), ...chart.errNote(a.tools[t.name]!.err) })),
-                ...(chart.otherCount ? [{ label: 'Other', color: chart.OTHER, figure: String(chart.otherCount), ...chart.errNote(chart.otherErr) }] : []),
+                ...chart.named.map(t => ({ label: shortTool(t.name), color: t.color, figure: String(a.tools[t.name]!.n) })),
+                ...(chart.otherCount ? [{ label: 'Other', color: chart.OTHER, figure: String(chart.otherCount) }] : []),
               ])}
             </Box>,
           ],
@@ -191,14 +177,30 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
         right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
         children: [
-          ...tree.map(row => {
+          ...tree.flatMap(row => {
             const { agent } = row
             const x = d.extras[agent.id]
             const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
             const sub = fx.subSummary(row)
-            return k.item(`agent-${agent.id}`, {
+            // While it runs, a line under it with its latest tool call, under its text: the tool's
+            // glyph dim, its name, its argument dim. The tree's guides carry on through it, and a
+            // pipe under the mark when its children follow.
+            const doing =
+              agent.status === 'running' && x?.doing
+                ? (() => {
+                    const d0 = x.doing
+                    const guides = row.depth ? row.guides.map(g => (g ? TREE.pipe : TREE.blank)).join('') + (row.last ? TREE.blank : TREE.pipe) : ''
+                    const prefix = guides + (row.descendants > 0 && !row.folded ? TREE.pipe : TREE.blank)
+                    // The row less its tree, the glyph's two cells and the note's two-cell gap.
+                    const note = doingArg(d0, k.width - [...prefix].length - 4)
+                    return k.item(`doing-${agent.id}`, { tree: prefix, lead: doingMark(d0).glyph, text: d0.text, note })
+                  })()
+                : null
+            // Its kind of agent as a glyph, coloured by its status.
+            const line = k.item(`agent-${agent.id}`, {
               tree: row.depth ? k.tree(row.guides, row.last, row.depth) : undefined,
-              lead: agentStatus(agent.status),
+              lead: agentMark(agent.type).glyph,
+              leadColor: statusColor(agent.status),
               text: agent.description || agent.type,
               note: [agent.description ? agent.type : '', sub].filter(Boolean).join(' · '),
               // Narrow, the tokens go before the time.
@@ -207,6 +209,7 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
                 ms !== undefined ? { part: short(ms), drop: 1 } : null,
               ],
             })
+            return doing ? [line, doing] : [line]
           }),
           hidden > 0 ? k.note('agents-more', `… ${hidden} more`) : null,
         ],

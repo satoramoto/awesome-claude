@@ -213,13 +213,14 @@ test('a section header is the quiet rules look: a bold plain title, its figures 
     const title = await ui.find({ type: 'Text', text: 'Agents' })
     expect(title?.props, `title at ${columns}`).toMatchObject({ bold: true, wrap: 'truncate' })
     expect(title?.props.color, `title at ${columns}`).toBeUndefined()
-    // The header row: the title's column, then the figures, then the rule.
+    // The header row: the title's column, then the figures, then the rule, then the fold arrow last.
     const section = (await ui.find({ key: 'section-agents' })) as Drawn | undefined
     const row = kids(section ?? {})[0] ?? {}
-    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'right', 'rule'])
-    const [head, right, rule] = kids(row)
-    // The figures start on the shared column: arrow 2, icon 2, title column 10, 2 apart.
-    expect(head!.props?.width, `title column at ${columns}`).toBe(16)
+    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'right', 'rule', 'fold'])
+    const [head, right, rule, arrow] = kids(row)
+    expect(arrow!.props?.flexShrink, `arrow at ${columns}`).toBe(0)
+    // The figures start on the shared column: icon 2, title column 10, 2 apart.
+    expect(head!.props?.width, `title column at ${columns}`).toBe(14)
     const marks = texts(head!).filter(t => shown(t) !== 'Agents')
     expect(marks.length, `icon at ${columns}`).toBeGreaterThan(0)
     expect(marks.every(t => t.props?.dimColor === true), `icon at ${columns}`).toBe(true)
@@ -290,20 +291,20 @@ test('limits are readings: label, gauge, percent and reset, red from 90%', async
   await ui.unmount()
 })
 
-test('agents are a tree of status rows: running a blue ◐, done a green ✓, failed a red ✕', async ($, on) => {
+test('agents are a tree of rows marked by kind and coloured by status: running blue, done green, failed red', async ($, on) => {
   await session($, on)
   const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(40) })
-  const running = await ui.findAll({ type: 'Text', text: /^◐$/ })
-  expect(running.length).toBe(2)
-  expect(running.every(t => t.props.color === 'suggestion')).toBe(true)
-  expect((await ui.find({ type: 'Text', text: /^✓$/ }))?.props.color).toBe('success')
-  expect((await ui.find({ type: 'Text', text: /^✕$/ }))?.props.color).toBe('error')
+  // The developer ◆ and its worker ◇ run; Explore ⌕ finished; the reviewer ◎ failed.
+  expect((await ui.find({ type: 'Text', text: /^◆$/ }))?.props.color).toBe('suggestion')
+  expect((await ui.find({ type: 'Text', text: /^◇$/ }))?.props.color).toBe('suggestion')
+  expect((await ui.find({ type: 'Text', text: /^⌕$/ }))?.props.color).toBe('success')
+  expect((await ui.find({ type: 'Text', text: /^◎$/ }))?.props.color).toBe('error')
   // The worker sits under the lane that spawned it.
   expect(await ui.find({ type: 'Text', text: /^└─$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Worker: legend bar/ })).toBeDefined()
   // Folding the section leaves only its header.
   await ui.press({ key: 'toggle-agents' })
-  expect(await ui.find({ type: 'Text', text: /^◐$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^◆$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Agents' })).toBeDefined()
   await ui.unmount()
 })
