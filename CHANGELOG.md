@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- **Kit** (overview 0.7.1, issues 0.3.1, launcher 0.2.1, lab 0.2.1, filetree 0.5.1, blast-radius 0.4.1): a section heading's fold chevron sits last, flush right, after the icon, title and figures, on the desktop and the terminal.
 - **Kit and Storybook bench**: the bench now draws the desktop as the engine
   does: a Button shows its label only (dim with `dimColor`), never its
   children; every Input draws its submit button; vertical margin, padding and

@@ -213,13 +213,14 @@ test('a section header is the quiet rules look: a bold plain title, its figures 
     const title = await ui.find({ type: 'Text', text: 'Agents' })
     expect(title?.props, `title at ${columns}`).toMatchObject({ bold: true, wrap: 'truncate' })
     expect(title?.props.color, `title at ${columns}`).toBeUndefined()
-    // The header row: the title's column, then the figures, then the rule.
+    // The header row: the title's column, then the figures, then the rule, then the fold arrow last.
     const section = (await ui.find({ key: 'section-agents' })) as Drawn | undefined
     const row = kids(section ?? {})[0] ?? {}
-    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'right', 'rule'])
-    const [head, right, rule] = kids(row)
-    // The figures start on the shared column: arrow 2, icon 2, title column 10, 2 apart.
-    expect(head!.props?.width, `title column at ${columns}`).toBe(16)
+    expect(kids(row).map(keyOf), `header at ${columns}`).toEqual(['title', 'right', 'rule', 'fold'])
+    const [head, right, rule, arrow] = kids(row)
+    expect(arrow!.props?.flexShrink, `arrow at ${columns}`).toBe(0)
+    // The figures start on the shared column: icon 2, title column 10, 2 apart.
+    expect(head!.props?.width, `title column at ${columns}`).toBe(14)
     const marks = texts(head!).filter(t => shown(t) !== 'Agents')
     expect(marks.length, `icon at ${columns}`).toBeGreaterThan(0)
     expect(marks.every(t => t.props?.dimColor === true), `icon at ${columns}`).toBe(true)

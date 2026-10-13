@@ -139,8 +139,8 @@ Import shared code by alias; the build rewrites it:
 
 The look is an instrument inspector (think Premiere's Effect Controls):
 
-- One column of sections, each a collapsible header row (▾ title, figures on
-  the right) with its properties indented under it. Readings are label, thin flat
+- One column of sections, each a collapsible header row (icon, title, figures,
+  then the fold arrow ▾ last, flush right) with its properties indented under it. Readings are label, thin flat
   gauge, value, dim unit, in fixed columns.
 - No bubbles, panels, outlines, tinted boxes or game words (HP, LV, party).
   The one exception: a multi-line list item sits in a `tile`.
@@ -291,23 +291,28 @@ restraint over emphasis. The kit applies it; a mod never picks colours or
 weights for a header or a reading's text itself.
 
 ```
-▾ ◕ Context     31% of 200k ─────────────────────────
-  ━━━━━━━━━━━━━━━╸───────────────────────────────────
+◕ Context     31% of 200k ─────────────────────────── ▾
+  ━━━━━━━━━━━━━━━╸─────────────────────────────────────
   ━ System   17.3k   ━ MCP        6.4k   ━ Messages 37.3k
   ─ Free      106k   ─ Buffer      33k
 
-▸ ◔ Limits      96% weekly ──────────────────────────
+◔ Limits      96% weekly ──────────────────────────── ▸
 ```
 
-Header anatomy, left to right: the fold arrow (dim, a Button when the section
-folds), the icon (dim), the title (bold, default foreground) in a 10-cell
-column, 2 cells, the figures, one cell, then a dim `─` rule out to the edge.
-Every header's figures start on the same column, right after the titles, so the
-eye reads `Context 31%` without crossing the pane; the rule only takes the room
-left. Without figures, the rule follows the title. Narrow, the title's column
-gives way first (down to 12 cells of title), then the figures are cut with `…`.
-A header whose right side is controls (`keepRight`) keeps them on the right
-edge, the rule between.
+Header anatomy, left to right: the icon (dim, in the 2-cell gutter the body is
+indented by, so the title lines up with the readings under it), the title (bold,
+default foreground) in a 10-cell column, 2 cells, the figures, one cell, a dim
+`─` rule, one cell, then the fold arrow last, flush right (dim, a Button when
+the section folds; it never gives way). A header without an icon starts its
+title at the edge, where the icon would be. Every header's figures start on the
+same column, right after the titles, so the eye reads `Context 31%` without
+crossing the pane; the rule only takes the room left. Without figures, the rule
+follows the title. Narrow, the title's column gives way first (down to 12 cells
+of title), then the figures are cut with `…`. A header whose right side is
+controls (`keepRight`) keeps them on the right, the rule between and the arrow
+after them. The desktop's band reads the same way: icon, title, then the figures
+and the arrow (▼ ▶︎, a Button's label) at its right end; the body starts just
+inside the icon's column.
 
 The text roles are `TERM_ROLES` in `kit/ui.tsx`, the one place to tune the
 hierarchy. Two tones and one weight:
@@ -389,9 +394,10 @@ cell by default, two in CJK-configured terminals. Keep how many kinds we use sma
 
 ### Each primitive on the terminal
 
-- `section`: `▾ ◔ Title     figures ────`, as under "The look". Dim arrow (a Button
-  when `onToggle`, key `toggle-<id>`), dim icon, bold title in its column (key
-  `title`), the figures (key `right`), the rule (key `rule`); the title's column
+- `section`: `◔ Title     figures ──── ▾`, as under "The look". Dim icon, bold
+  title in its column (key `title`), the figures (key `right`), the rule (key
+  `rule`), then the dim arrow last (key `fold`; a Button when `onToggle`, key
+  `toggle-<id>`), which never gives way; the title's column
   gives way first, then the figures truncate. No band or box. `restated: true`
   draws the figures only while the body is hidden (folded, or under the floor),
   for figures that only restate the body. With `keepRight: true`
