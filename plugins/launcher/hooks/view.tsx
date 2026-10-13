@@ -59,7 +59,7 @@ const RULE_GAPS = 2
 
 /**
  * A desktop row's measure, in columns, to tell whether its address fits: the band's
- * inset and fold arrow before the title, the gap between parts, and the room a
+ * inset and its fold arrow (at the row's right end), the gap between parts, and the room a
  * native Button takes beyond its label.
  */
 const DESK_LEAD = 4
@@ -138,9 +138,9 @@ const percent = (cpu: number) => `${cpu < 10 ? cpu.toFixed(1).replace(/\.0$/, ''
  *
  *   yahaha/.claude/launch.json
  *
- *   ▸ app        ──── ✓ running    localhost:5173  ⣀⣤⣶⣤⣀⣀  Stop  Restart
+ *   app        ──── ✓ running    localhost:5173  ⣀⣤⣶⣤⣀⣀  Stop  Restart ▸
  *
- *   ▾ storybook  ──── ✕ failed     :6006                   Start
+ *   storybook  ──── ✕ failed     :6006                   Start         ▾
  *     command    npm --prefix app run storybook
  *     exit       1
  *

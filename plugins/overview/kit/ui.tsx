@@ -823,8 +823,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
 
   /**
    * A section as a properties inspector draws one (Premiere's Effect Controls):
-   * a collapsible header row (▾ title, figures on the right) and its properties
-   * indented under the arrow. No panel, outline or tint: rows and indentation do
+   * a collapsible header row (icon, title, figures, then the fold arrow last at
+   * the right end) and its properties indented under it, the terminal's under the
+   * title. The arrow (a Button, key `toggle-<id>`) folds it. No panel, outline or tint: rows and indentation do
    * the grouping. Collapsible when given `onToggle` (the mod keeps which are
    * folded in its state); folded, only the header row shows.
    */
@@ -856,11 +857,13 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   }) => {
     if (s.loading && !s.right) s = { ...s, right: summary([], { loading: true }) }
     if (terminal) {
-      // ▾ ◔ Title       figures ─────────────
-      //   body, two cells in, under the icon column
-      // A dim arrow and icon, the title bold, the figures on a shared column right
-      // after it (TITLE_COL), then a dim rule out to the edge. No band or box.
-      // Every section leaves one blank row under it, open or folded.
+      // ◔ Title       figures ─────────────── ▾
+      //   body, two cells in, under the title
+      // A dim icon, the title bold, the figures on a shared column right after it
+      // (TITLE_COL), a dim rule, then the dim fold arrow last, flush right. The icon
+      // takes the GUTTER the body is indented by, so a title lines up with the
+      // readings under it. No band or box. Every section leaves one blank row under
+      // it, open or folded.
       const arrow = s.collapsed ? FOLD.closed : FOLD.open
       const toggle =
         s.onToggle && Button ? (
@@ -868,18 +871,21 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         ) : (
           <Text dimColor>{arrow}</Text>
         )
-      const lead = GUTTER + (s.icon ? 2 : 0)
+      // The arrow keeps its cell whatever else gives way; `gap` is its room when the row has no gap of its own.
+      const arrowBox = (gap: number) => (
+        <Box key="fold" flexShrink={0} marginLeft={gap}>
+          {toggle}
+        </Box>
+      )
+      const lead = s.icon ? GUTTER : 0
       const titleCells = [...s.title].length
       const keeps = Math.min(titleCells, 12)
       // Under MIN_COLUMNS, the header and its figures only: the body is left out.
       const open = !s.collapsed && !floor
       const right = s.restated && open ? null : s.right
       const head = [
-        <Box key="arrow" width={GUTTER} flexShrink={0}>
-          {toggle}
-        </Box>,
         s.icon ? (
-          <Box key="icon" width={2} flexShrink={0}>
+          <Box key="icon" width={GUTTER} flexShrink={0}>
             {icon(s.icon, TERM_HEADER_ICON)}
           </Box>
         ) : null,
@@ -898,7 +904,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       const row = s.keepRight ? (
         // Controls on the right edge: they keep their width and only the title is cut.
         <Box flexDirection="row" gap={CELLS.item}>
-          <Box key="title" flexDirection="row" flexShrink={1} minWidth={lead}>
+          <Box key="title" flexDirection="row" flexShrink={1} minWidth={lead + 1}>
             {head}
           </Box>
           {rule}
@@ -907,6 +913,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
               {right}
             </Box>
           ) : null}
+          {arrowBox(0)}
         </Box>
       ) : (
         // The title's column gives way first (down to 12 cells of title), then the figures; the rule
@@ -928,6 +935,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
             </Box>
           ) : null}
           {rule}
+          {arrowBox(CELLS.item)}
         </Box>
       )
       return (
@@ -948,7 +956,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       ) : (
         <Text dimColor>{arrow}</Text>
       )
-    // The arrow and the icon each take a fixed column, so every title starts at the same x.
+    // The icon takes a fixed column, so every title starts at the same x; the figures and
+    // then the arrow sit at the right end, the arrow last and flush right. The arrow is a
+    // Button's label (the desktop draws a Button's label only), so it shows and is pressed.
     // One standard row above each section, and no other margin: sections sit one row apart.
     return (
       <Box key={`section-${s.id}`} flexDirection="column" marginTop={1}>
@@ -965,10 +975,6 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
           [
             // The title keeps its room; the right side gives way.
             <Box key="title" flexDirection="row" alignItems="center" flexShrink={0}>
-              {/* A minimum, not a width: the desktop draws a Button natively, with padding, and clips it to a box too narrow for that. */}
-              <Box minWidth={terminal ? GUTTER : 1.6} flexShrink={0}>
-                {toggle}
-              </Box>
               {s.icon ? (
                 <Box width={2} flexShrink={0} flexDirection="row" alignItems="center">
                   {icon(s.icon, MUTED)}
@@ -978,14 +984,20 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
                 {s.title}
               </Text>
             </Box>,
-            s.right ? (
-              <Box key="right" flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
-                {s.right}
+            <Box key="end" flexDirection="row" alignItems="center" justifyContent="flex-end" gap={SPACE.item} minWidth={0} flexShrink={1}>
+              {s.right ? (
+                <Box key="right" flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
+                  {s.right}
+                </Box>
+              ) : null}
+              {/* A minimum, not a width: the desktop draws a Button natively, with padding, and clips it to a box too narrow for that. */}
+              <Box key="fold" minWidth={1.6} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+                {toggle}
               </Box>
-            ) : null,
+            </Box>,
           ],
         )}
-        {/* A gentle indent: the body starts just past the band's fold arrow. */}
+        {/* A gentle indent: the body starts inside the icon's column, just past the band's inset. */}
         {s.collapsed ? null : (
           <Box flexDirection="column" paddingLeft={terminal ? GUTTER : BODY_INDENT} paddingRight={terminal ? 0 : INSET} marginTop={terminal ? 0 : 1} marginBottom={terminal ? 0 : 1}>
             {s.children}

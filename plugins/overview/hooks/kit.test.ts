@@ -4,7 +4,7 @@ import type { Engine } from 'claude-code/testing'
 
 import { TERM_GLYPH } from '../kit/icons'
 import { C, FILL, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '../kit/tokens'
-import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, kit } from '../kit/ui'
+import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, fold, kit } from '../kit/ui'
 import type { Kit } from '../kit/ui'
 
 // The kit's own tests. The build copies kit/ into each mod but leaves kit tests
@@ -274,6 +274,51 @@ test('a path is cut in the middle, keeping its end', async ($, on) => {
   expect(shown(item)).toContain('mods/…/terminal.tsx')
   const prop = await draw(k => k.prop('p', 'file', path, { path: true }) as never, { columns: 30 })
   expect(shown(prop)).toContain('…/terminal.tsx')
+})
+
+/** Every string the tree carries, in drawing order: Button labels and text, depth first. */
+const inOrder = (d: Drawn): string[] => [
+  ...(d.type === 'Button' && typeof d.props?.label === 'string' ? [d.props.label as string] : []),
+  ...((d.children ?? d.props?.children ?? []) as unknown[])
+    .flat(Infinity)
+    .flatMap(c => (typeof c === 'string' || typeof c === 'number' ? [String(c)] : c && typeof c === 'object' ? inOrder(c as Drawn) : [])),
+]
+
+test('a section heading reads icon, title, figures, then the fold arrow last, flush right, on each surface', async ($, on) => {
+  const draw = kitPane($, on)
+  const heading = (right: boolean, collapsed: boolean) => (k: Kit) =>
+    k.section({
+      id: 's',
+      icon: GLYPH.context,
+      title: 'Context',
+      right: right ? k.summary([['11%', 'of 1M']]) : null,
+      collapsed,
+      onToggle: () => undefined,
+      children: [k.note('n', 'the body')],
+    }) as never
+  const byKey = (key: string) =>
+    function find(d: Drawn): Drawn | undefined {
+      return d.key === key ? d : kids(d).map(find).find(Boolean)
+    }
+  for (const surface of ['terminal', 'desktop'] as const) {
+    for (const collapsed of [false, true]) {
+      const arrow = surface === 'terminal' ? (collapsed ? FOLD.closed : FOLD.open) : fold(collapsed)
+      for (const right of [true, false]) {
+        const where = `${surface}${collapsed ? ', folded' : ''}${right ? '' : ', no figures'}`
+        const section = byKey('section-s')(await draw(heading(right, collapsed), { surface, columns: 60 }))!
+        // The heading row's drawn strings: the title, the figures, and the arrow last, nothing after it.
+        const row = inOrder(kids(section)[0]!).filter(t => t.trim() && t !== BLANK)
+        const title = row.findIndex(t => t.includes('Context'))
+        expect(title, `title at ${where}`).toBeGreaterThanOrEqual(0)
+        if (right) expect(row.findIndex(t => t.includes('11%')), `figures after the title at ${where}`).toBeGreaterThan(title)
+        expect(row.indexOf(arrow), `arrow after the title and figures at ${where}`).toBe(row.length - 1)
+        // The arrow is the fold's Button, labelled with the arrow, so the desktop draws it and it presses.
+        const button = byKey('toggle-s')(section)
+        expect(button?.type, `toggle at ${where}`).toBe('Button')
+        expect(button?.props?.label, `toggle at ${where}`).toBe(arrow)
+      }
+    }
+  }
 })
 
 test('below 30 columns a section draws its header and figures only', async ($, on) => {
