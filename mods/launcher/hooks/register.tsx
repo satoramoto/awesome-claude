@@ -1,8 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { CommandRunInput, EngineInterface, HookStream, ProcessSpawnChunk, ProcessSpawnResult, Register } from 'claude-code'
 
+import { holdButtons } from '@kit/ui'
+
 import type { Adopted, KillConfirm, LaunchConfig, LaunchFile, Server, Status } from '../types'
-import { LOOK, commandOf, renderPane, urlOf } from './view'
+import { LOOK, commandOf, drawnServers, renderPane, urlOf } from './view'
 import type { PaneElements } from './view'
 
 const PANE = 'launcher'
@@ -431,8 +433,8 @@ const reconcileNow = async ($: EngineInterface) => {
       ...(took1 ? { adopted: true } : {}),
     }
   }
-  // Only a real change redraws.
-  if (JSON.stringify(next) !== JSON.stringify(old)) await update($, servers, () => next)
+  // Only a change the pane would draw redraws: a new CPU sample that reads the same doesn't.
+  if (JSON.stringify(drawnServers(next)) !== JSON.stringify(drawnServers(old))) await update($, servers, () => next)
 }
 
 /** Starts a configuration's server; answers what happened, in a line. */
@@ -834,13 +836,18 @@ export const register: Register = on => {
     // The row itself shows what happened; only a refusal or a failure needs a toast.
     const quiet = /^(Starting|Stopped|Took over|Kill-armed|Killed)/
     const say = (what: Promise<string>) => void what.then(text => (quiet.test(text) ? undefined : $.ui.toast(text))).catch(() => undefined)
+    const f = await read($, file)
+    const s = await read($, servers)
+    const o = await read($, open)
+    const armed = await read($, confirm)
     return renderPane(
-      $.ui.resolve(e) as PaneElements,
+      // Buttons keep their press handles across redraws, so a click made just before one still lands.
+      holdButtons($.ui.resolve(e), e) as PaneElements,
       e.surface,
       e.props.bodyColumns,
-      await read($, file),
-      await read($, servers),
-      await read($, open),
+      f,
+      s,
+      o,
       {
         start: name => say(start($, name)),
         stop: name => say(stop($, name)),
@@ -849,7 +856,7 @@ export const register: Register = on => {
         kill: name => say(killPress($, name)),
         toggle: name => void update($, open, o => (o.includes(name) ? o.filter(n => n !== name) : [...o, name])).catch(() => undefined),
       },
-      { focused: e.props.isFocused, confirm: await read($, confirm) },
+      { focused: e.props.isFocused, confirm: armed },
     )
   })
 }

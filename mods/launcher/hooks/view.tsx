@@ -132,6 +132,24 @@ const cells = (s: string) => [...s].length
 const percent = (cpu: number) => `${cpu < 10 ? cpu.toFixed(1).replace(/\.0$/, '') : Math.round(cpu)}%`
 
 /**
+ * What the pane can draw of each server: everything but its CPU and memory as
+ * kept, those as the figures and sparkline show them (the samples the line
+ * spans, its top, the last figure, the memory's). Two equal ones draw alike,
+ * so a refresh that changes neither need not redraw.
+ */
+export const drawnServers = (servers: Record<string, Server>) =>
+  Object.fromEntries(
+    Object.entries(servers).map(([name, { cpu, rss, ...s }]) => [
+      name,
+      {
+        ...s,
+        cpu: cpu ? [cpu.length >= 2, cpu.slice(-2 * SPARK_CELLS).map(percent), percent(Math.max(SPARK_FLOOR, ...cpu))] : null,
+        rss: rss ? bytes(rss) : null,
+      },
+    ]),
+  )
+
+/**
  * The pane, on every surface: the project as a plain line (on the desktop with how
  * many answer), then one foldable row per configuration. On the terminal each
  * row's state, address, CPU and buttons sit in columns shared by every row:

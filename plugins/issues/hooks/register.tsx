@@ -1,6 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { holdButtons } from '../kit/ui'
+
 import type { Issue, IssueList } from '../types'
 import { REFINED, cursorOf, renderApp, renderTerminal } from './view'
 import type { AppElements, TermElements } from './view'
@@ -266,16 +268,19 @@ export const register: Register = on => {
     const data = await read($, list)
     // The engine's clock, so ages read the same time a test holds still.
     const at = await $.clock.now()
-    if (e.surface === 'terminal')
-      return renderTerminal($.ui.resolve(e) as TermElements, data, e.props.bodyColumns, at, {
+    if (e.surface === 'terminal') {
+      const shown = { reading: await read($, reading), cursor: await read($, cursor) }
+      // Buttons keep their press handles across redraws, so a click made just before one still lands.
+      return renderTerminal(holdButtons($.ui.resolve(e), e) as TermElements, data, e.props.bodyColumns, at, {
         focused: e.props.isFocused,
-        reading: await read($, reading),
-        cursor: await read($, cursor),
+        ...shown,
         start: issue => ask($, startPrompt(issue), 'Start'),
       })
+    }
     const picked = await read($, selected)
+    const form = await read($, adding)
     const pick = (n: number) => update($, selected, s => (s.includes(n) ? s.filter(x => x !== n) : [...s, n]))
-    return renderApp($.ui.resolve(e) as AppElements, data, e.props.bodyColumns, at, {
+    return renderApp(holdButtons($.ui.resolve(e), e) as AppElements, data, e.props.bodyColumns, at, {
       add: title => void addIssue($, title).catch(() => undefined),
       refine: issue => ask($, refinePrompt(issue), 'Refine'),
       start: issue => ask($, startPrompt(issue), 'Start'),
@@ -289,7 +294,7 @@ export const register: Register = on => {
           await update($, selected, () => [])
         })().catch(() => undefined),
       selected: picked,
-      adding: await read($, adding),
+      adding: form,
       formKey,
     })
   })

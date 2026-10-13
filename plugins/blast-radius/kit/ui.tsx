@@ -35,6 +35,80 @@ export type Els = {
 }
 
 /**
+ * The Buttons one pane drew last, per scope: each by its key, with the props and
+ * children it was drawn with, the element built for them, and the latest press.
+ */
+type HeldButton = { look: string; made: unknown; element: RenderElement; frame: number; press: (e: any) => void }
+const heldButtons = new Map<string, { frame: number; buttons: Map<string, HeldButton> }>()
+
+/**
+ * The element table `els` with a `Button` that keeps each button's press handle
+ * from one drawing to the next, for the drawing `scope` names (the render event
+ * itself: its component, requestId and surface). Call it once per render, as
+ * the drawing starts (after the render's awaits), and draw every Button of that
+ * render with the table it returns (the kit's own included: pass it to `kit`).
+ *
+ * Why: the engine's JSX gives every Button it builds a new handle, and frees the
+ * old one as soon as a drawing leaves it out; a press reaches its `onPress` by
+ * that handle alone. So a redraw between drawing and click (the click focusing
+ * the pane, a timer's write) left the press on a freed handle, and it did
+ * nothing. Here a Button whose key, props and children match the last render's
+ * is that same element, its handle unchanged, its press running the latest
+ * `onPress`. One that changed is built anew (a stale press on it misses, as it
+ * should); one absent from the last render is forgotten.
+ */
+export const holdButtons = <E extends { Button?: unknown }>(els: E, scope: string | { component: string; requestId: string; surface: string }): E => {
+  const Made = els.Button as ((props: any, ...children: any[]) => RenderElement) | undefined
+  if (!Made) return els
+  const id = typeof scope === 'string' ? scope : `${scope.component}\u0000${scope.requestId}\u0000${scope.surface}`
+  const pane = heldButtons.get(id) ?? { frame: 0, buttons: new Map<string, HeldButton>() }
+  heldButtons.set(id, pane)
+  // A new render: keep only what the last one drew.
+  for (const [key, b] of pane.buttons) if (b.frame < pane.frame) pane.buttons.delete(key)
+  pane.frame += 1
+  const frame = pane.frame
+  const Button = (props: any, ...rest: any[]): RenderElement => {
+    const { children: given, onPress, ...plain } = props ?? {}
+    const children: unknown[] = rest.length ? rest : given === undefined ? [] : Array.isArray(given) ? given : [given]
+    const key = plain.key ?? plain.label ?? (children.length === 1 && typeof children[0] === 'string' ? children[0] : undefined)
+    if (typeof key !== 'string' || typeof onPress !== 'function') {
+      return (
+        <Made {...plain} onPress={onPress}>
+          {children}
+        </Made>
+      )
+    }
+    const look = JSON.stringify([plain, children])
+    const was = pane.buttons.get(key)
+    // A second Button on one key in one render is built apart: one element can't hold two presses.
+    if (was?.frame === frame) {
+      return (
+        <Made {...plain} onPress={onPress}>
+          {children}
+        </Made>
+      )
+    }
+    // The same look from the same constructor (another plugin may restyle the table's).
+    if (was && was.look === look && was.made === Made) {
+      was.frame = frame
+      was.press = onPress
+      return was.element
+    }
+    const b: HeldButton = { look, made: Made, frame, press: onPress, element: null as unknown as RenderElement }
+    b.element = (
+      <Made {...plain} onPress={(e: any) => b.press(e)}>
+        {children}
+      </Made>
+    )
+    pane.buttons.set(key, b)
+    return b.element
+  }
+  // Everything else read through to the table as it was (whatever kind of object it is).
+  // Defined, not assigned: the engine's table is frozen, and its read-only Button would refuse an assignment.
+  return Object.create(els, { Button: { value: Button, enumerable: true } }) as E
+}
+
+/**
  * A bar part: its value, its color, and the label its legend shows. `room: true`
  * marks room rather than use (free space, a reserve): the terminal draws it as
  * the bar's light rail in its colour, and a `bar: true` legend keys it with `─`.

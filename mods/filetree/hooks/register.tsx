@@ -6,10 +6,11 @@ import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import { ago, middle } from '@kit/format'
 import { C, MUTED, termInk, treePrefix } from '@kit/tokens'
-import { type Hint, kit, MARK } from '@kit/ui'
+import { type Hint, holdButtons, kit, MARK } from '@kit/ui'
 
 import type { Activity, FileNode, FileTree } from '../types'
 import { renderDesktop, statusColor, toneColor } from './desktop'
+import type { DesktopElements } from './desktop'
 import { BRANCH_ICON, chainOf, type GitAction, gitActions, readOnly, readTargets, resolve, TONES } from './git'
 import type { RowSpec, RowsProps, Seg } from './rows'
 import { fileIcon } from './icons'
@@ -1304,14 +1305,17 @@ export const register: Register = (on, options) => {
       return <Empty />
     }
     const unicode = glyphSetting === 'plain' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
-    const { Box, Text, Button, Input, Client } = $.ui.resolve(e)
     const t = await get($)
+    // One table for the whole render, its Buttons keeping their press handles across
+    // redraws, so a click made just before one still lands.
+    const els = holdButtons($.ui.resolve(e), e)
+    const { Box, Text, Button, Input, Client } = els
     const terminal = e.surface === 'terminal'
     const width = Math.max(24, e.props.bodyColumns)
     // The kit, told whether the pane has the keyboard: key hints show only then, and
     // the cursor row's mark is dim without it. No background or text hex reaches the
     // terminal: the pane draws on the terminal's own background in theme keys.
-    const k = kit($.ui.resolve(e), terminal ? 'terminal' : 'desktop', width, { focused: e.props.isFocused })
+    const k = kit(els, terminal ? 'terminal' : 'desktop', width, { focused: e.props.isFocused })
     const focused = k.focused
     // The desktop tab never hands the wheel or the scrollbar drag to the pane, so
     // there it draws every row and lets the engine scroll the body.
@@ -1418,9 +1422,9 @@ export const register: Register = (on, options) => {
     const shown = rows.slice(from, from + room - pinned.length)
     if (t.showSize) wantSizes($, [...pinned, ...shown].filter(r => r.node.kind === 'dir' && !(r.node.id in t.dirSizes)).map(r => r.node.id))
     if (e.surface === 'desktop') {
-      const els = $.ui.resolve(e)
       return renderDesktop(
-        els,
+        // The desktop's table, resolved above before the surface narrowed.
+        els as DesktopElements,
         {
           t,
           rows,

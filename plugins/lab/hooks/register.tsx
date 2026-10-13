@@ -1,4 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
+import { holdButtons } from '../kit/ui'
 
 import { GROUPS, byId, experiments, galleryExperiments } from './experiments'
 import type { Experiment } from './experiments'
@@ -73,7 +74,8 @@ export const register: Register = on => {
 
   // The index: every experiment by group, a row each that opens its pane.
   on('ui.render', { component: 'Pane', requestId: INDEX }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    // Buttons keep their press handles across redraws, so a click made just before one still lands.
+    const { Box, Button, Text } = holdButtons($.ui.resolve(e), e)
     return (
       <Box flexDirection="column" gap={1}>
         <Button key="gallery" variant="primary" label="Gallery" onPress={() => void openGallery($)} />
@@ -111,9 +113,11 @@ export const register: Register = on => {
 
   // One pane per experiment, and the gallery, all drawn by this hook.
   on('ui.render', { component: 'Pane', requestId: /^lab-/ }, async ($, e) => {
-    const { Box, Button, Text } = $.ui.resolve(e)
+    // One table for the whole render, the experiment's included, its Buttons keeping their press handles.
+    const table = holdButtons($.ui.resolve(e), e)
+    const { Box, Button, Text } = table
     const absent = new Set<string>()
-    const els = elementsOf($.ui.resolve(e), e.surface, absent)
+    const els = elementsOf(table, e.surface, absent)
     // An element constructor may refuse its props as it is called (a bad
     // hotkey): that is a verdict too, drawn in place of the experiment.
     const drawBody = (x: Experiment) => {

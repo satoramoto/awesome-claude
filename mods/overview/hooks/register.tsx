@@ -32,7 +32,9 @@ import type {
   WorkspacesGh,
 } from '../types'
 import { parseLeftRight, startedBy } from './branches'
+import { short } from '@kit/format'
 import { createPerf } from '@kit/perf'
+import { holdButtons } from '@kit/ui'
 
 import { renderDesktop } from './desktop'
 import type { AppElements, DesktopData, Helpers } from './desktop'
@@ -686,6 +688,15 @@ const noteDoing = async ($: EngineInterface, id: string, tool: string, args: Rec
 
 // Ticks once a second while any agent runs, so elapsed times move; stopped when none do.
 let ticker: Timer | undefined
+/** The running agents' elapsed times as their cards last showed them (`elapsedShown`). */
+let lastElapsed = ''
+
+/** Each running agent's elapsed time as its card draws it (`short`, whole minutes) at `t`. */
+export const elapsedShown = (list: Agent[], extras: Record<string, AgentExtra>, t: number): string =>
+  list
+    .filter(a => a.status === 'running' && extras[a.id]?.startedAt !== undefined)
+    .map(a => `${a.id} ${short(t - extras[a.id]!.startedAt!)}`)
+    .join('\n')
 
 const refreshAgents = async ($: EngineInterface): Promise<void> => {
   const extras = await read($, agentExtra)
@@ -700,8 +711,14 @@ const refreshAgents = async ($: EngineInterface): Promise<void> => {
   if (JSON.stringify(before) !== JSON.stringify(fresh)) await update($, agents, () => fresh)
   const running = fresh.some(a => a.status === 'running' || a.status === 'pending')
   if (running) {
-    // Elapsed times move only where someone can see them.
-    if (await isShown($)) await update($, now, () => Date.now())
+    // Elapsed times move only where someone can see them, and redraw only when one
+    // drawn would read differently (a card shows whole minutes).
+    const t = Date.now()
+    const elapsed = elapsedShown(fresh, extras, t)
+    if (elapsed !== lastElapsed && (await isShown($))) {
+      lastElapsed = elapsed
+      await update($, now, () => t)
+    }
     ticker ??= $.clock.every(TICK_MS, () => void perf.time('agents', () => refreshAgents($)).catch(() => undefined))
   } else if (ticker) {
     ticker.cancel()
@@ -894,7 +911,7 @@ const tick = async ($: EngineInterface) => {
   if (t - last.resources >= RESOURCES_EVERY) {
     last.resources = t
     const res = await perf.time('resources', () => sampleResources($)).catch(() => null)
-    if (res) await update($, resources, () => res)
+    if (res && !same(await read($, resources), res)) await update($, resources, () => res)
   }
   // The session's elapsed time moves even when nothing else does.
   if (t - last.clock >= EVERY.clock) {
@@ -1042,9 +1059,11 @@ export const register: Register = on => {
       perf: perf.snapshot(),
     }
     // The terminal draws the same inspector in cells; the app surfaces as boxes.
+    // Buttons keep their press handles across redraws, so a click made just before one still lands.
+    const els = holdButtons($.ui.resolve(e), e)
     if (e.surface === 'terminal') {
-      return perf.time('render', () => renderTerminal($.ui.resolve(e) as TermElements, data, TERM_HELPERS))
+      return perf.time('render', () => renderTerminal(els as TermElements, data, TERM_HELPERS))
     }
-    return perf.time('render', () => renderDesktop($.ui.resolve(e) as AppElements, data, HELPERS))
+    return perf.time('render', () => renderDesktop(els as AppElements, data, HELPERS))
   })
 }

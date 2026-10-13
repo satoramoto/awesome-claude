@@ -21,6 +21,7 @@
 // spelled literally, and helpers that take `$` are top-level functions.
 
 import type { EngineInterface, Register } from 'claude-code'
+import { holdButtons } from '@kit/ui'
 
 import { renderApp, renderTerminal } from './view'
 import type { AppElements, Held, Report, Risk } from './view'
@@ -37,7 +38,8 @@ let held: Held | null = null;
 
 /** The report for the surface, drawn with the kit: in cells on the terminal, as the app's elsewhere. */
 function draw($: $, e: any, state: Held, band: boolean) {
-  const els = $.ui.resolve(e);
+  // Buttons keep their press handles across redraws, so a click made just before one still lands.
+  const els = holdButtons($.ui.resolve(e), e);
   const columns = Number(e.props?.bodyColumns ?? 40);
   // The rows it has (the band's most, or the pane's body), so the list is cut before the actions are.
   const rows = Number(e.props?.maxRows ?? e.props?.scroll?.bodyRows) || undefined;
