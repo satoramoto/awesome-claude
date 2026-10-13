@@ -214,6 +214,20 @@ Each guard runs in a hook, reads the job's mode, and logs its decision.
 - Cross-machine or shared logs.
 - Classifying asks with a model. Routing uses observable signals only.
 
+## Prior art
+
+- trey's SINS ("SINS Is Not Scrum", April 2026; `~/The Source/trey/docs/sins.md`)
+  was Ryan's first attempt at this. Read it before trey is archived. Worth
+  carrying over:
+  - its `human-needed` parking (now the inbox);
+  - drivers never merging (approvals block);
+  - concurrency caps per driver;
+  - the 60-minute stale lock;
+  - stopping early at questions, conflicts with Ryan's vision, or scope
+    blow-ups;
+  - `/sins-rsi`'s token profiling (now the routing log).
+  What changes: SINS ran while Ryan was away; syn keeps him in the loop.
+
 ## Open questions
 
 1. Is "more than `self_limit` tool calls → send back" the right routing
