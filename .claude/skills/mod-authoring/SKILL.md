@@ -568,12 +568,13 @@ look done, run it in a real pty:
   16px lines so block glyphs touch) and look at it. Kill the tmux server and
   check `ps` when done.
 
-## Checks, in order
+## Checks
 
+After a change, run only these:
 1. `bun build.ts` (after any change under `mods/` or `kit/`).
-2. `claude plugin validate plugins/<name>`, and `claude plugin validate .` for the marketplace.
-3. `bunx tsc -p plugins/<name>` (needs the laid types; see `headless-verification`).
-4. `claude plugin test plugins/<name>` when the mod has a `*.test.ts`.
-5. Look at it in Storybook (`storybook-prototyping`), then in the real app.
+2. `bunx tsc -p plugins/<name>` (needs the laid types; see `headless-verification`).
 
-All must exit 0. Commit `mods/` and the rebuilt `plugins/` together.
+Both must exit 0. Commit `mods/` and the rebuilt `plugins/` together.
+
+`claude plugin validate`, `claude plugin test` and tests themselves belong to a
+separate test pass, written to a spec (see AGENTS.md). CI runs everything on the PR.
