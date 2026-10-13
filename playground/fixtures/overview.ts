@@ -101,7 +101,12 @@ export const busy = {
     { id: 'c', description: 'Worker: legend bar', type: 'worker', status: 'running', parentId: 'b' },
     { id: 'd', description: 'Review the branch', type: 'reviewer', status: 'failed' },
   ],
-  agentExtra: { a: { durationMs: 74_000, tokens: 41_000 }, b: { startedAt: now - 192_000, tokens: 88_000 }, c: { startedAt: now - 40_000 }, d: { durationMs: 12_000, tokens: 9_000 } },
+  agentExtra: {
+    a: { durationMs: 74_000, tokens: 41_000, doing: { text: 'Reading', path: 'kit/ui.tsx' } },
+    b: { startedAt: now - 192_000, tokens: 88_000, doing: { text: 'Bash: bun build.ts' } },
+    c: { startedAt: now - 40_000, doing: { text: 'Editing', path: 'mods/overview/hooks/desktop.tsx' } },
+    d: { durationMs: 12_000, tokens: 9_000 },
+  },
   git,
   gh,
   activity: {

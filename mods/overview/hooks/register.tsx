@@ -15,6 +15,7 @@ import type {
   Agent,
   AgentExtra,
   BranchView,
+  Doing,
   GhInfo,
   GitFile,
   GitInfo,
@@ -670,6 +671,18 @@ const storeLimits = async ($: EngineInterface, list: SessionRateLimit[]) => {
   if (!same(await read($, limits), fresh)) await update($, limits, () => fresh)
 }
 
+// The session's folder, read once, so an agent's paths can be drawn relative to it.
+let sessionCwd: string | undefined
+
+/** Keeps an agent's latest tool call in words, written only when it changed. */
+const noteDoing = async ($: EngineInterface, id: string, tool: string, args: Record<string, unknown>): Promise<void> => {
+  sessionCwd ??= await $.session.cwd().catch(() => undefined)
+  const doing = describeCall(tool, args, sessionCwd)
+  const old = (await read($, agentExtra))[id]?.doing
+  if (old && old.text === doing.text && old.path === doing.path) return
+  await update($, agentExtra, all => ({ ...all, [id]: { ...all[id], doing } }))
+}
+
 // Ticks once a second while any agent runs, so elapsed times move; stopped when none do.
 let ticker: Timer | undefined
 
@@ -713,6 +726,54 @@ export const editedPath = (tool: string, args: { file_path?: unknown; notebook_p
   if (!EDIT_TOOLS.includes(tool)) return undefined
   const path = args.file_path ?? args.notebook_path
   return typeof path === 'string' && path ? path : undefined
+}
+
+/** `path` relative to the session's folder when it's inside it, else as given. */
+const relative = (path: string, cwd: string | undefined): string =>
+  cwd && path.startsWith(`${cwd.replace(/\/$/, '')}/`) ? path.slice(cwd.replace(/\/$/, '').length + 1) : path
+
+/** A string argument, its first line, trimmed; empty when it isn't one. */
+const arg = (v: unknown): string => (typeof v === 'string' ? (v.trim().split('\n')[0] ?? '').trim() : '')
+
+/**
+ * A tool call in words, for an agent's "doing now" line: `Bash: bun build.ts`,
+ * `Editing` `kit/ui.tsx`, `Reading` `mods/launcher/…`, `Searching: TODO`.
+ * Paths are made relative to the session's folder.
+ */
+export const describeCall = (tool: string, args: Record<string, unknown>, cwd?: string): Doing => {
+  const path = (v: unknown, verb: string): Doing => {
+    const p = arg(v)
+    return p ? { text: verb, path: relative(p, cwd) } : { text: verb }
+  }
+  const said = (label: string, v: unknown): Doing => {
+    const s = arg(v)
+    return { text: s ? `${label}: ${s}` : label }
+  }
+  switch (tool) {
+    case 'Bash':
+      return said('Bash', args.command)
+    case 'Edit':
+    case 'MultiEdit':
+    case 'NotebookEdit':
+      return path(args.file_path ?? args.notebook_path, 'Editing')
+    case 'Write':
+      return path(args.file_path, 'Writing')
+    case 'Read':
+      return path(args.file_path, 'Reading')
+    case 'Grep':
+      return said('Searching', args.pattern)
+    case 'Glob':
+      return said('Finding', args.pattern)
+    case 'WebFetch':
+      return path(args.url, 'Fetching')
+    case 'WebSearch':
+      return said('Searching the web', args.query)
+    case 'Agent':
+    case 'Task':
+      return said('Starting agent', args.description)
+    default:
+      return { text: tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool) : tool }
+  }
 }
 
 /** The activity with one more tool call. */
@@ -866,6 +927,9 @@ export const register: Register = on => {
   // A tool that may have changed files (or pushed, or opened a PR) marks git stale;
   // a gh or push command marks the PRs stale too. Nothing waits on the bookkeeping.
   on('tool.call', async ($, e, next) => {
+    // A subagent's call, as it starts: what that agent is doing now.
+    const agentId = e.agentId
+    if (agentId) void noteDoing($, agentId, e.tool, e as unknown as Record<string, unknown>).catch(() => undefined)
     const ran = await next(e)
     if (!('deny' in ran && ran.deny)) {
       const path = editedPath(e.tool, e as { file_path?: unknown; notebook_path?: unknown })

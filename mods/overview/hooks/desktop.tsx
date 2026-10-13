@@ -1,11 +1,11 @@
 import type { Elements, RenderElement } from 'claude-code'
 
-import { bytes, money, short, tokens } from '@kit/format'
+import { bytes, middle, money, short, tokens } from '@kit/format'
 import type { PerfSnapshot } from '@kit/perf'
 import { C, GLYPH, GRAY, INK, MUTED, RAMP, TRACK, levelColor } from '@kit/tokens'
 import { EDGE, SPACE, kit } from '@kit/ui'
 
-import type { Activity, Agent, AgentExtra, BranchView, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot, WorkspacesGh } from '../types'
+import type { Activity, Agent, AgentExtra, BranchView, Doing, GhInfo, GitInfo, GitNote, GitPr, Limit, Resources, Snapshot, WorkspacesGh } from '../types'
 
 /*
  * The app mode: a properties inspector for the session, drawn as an instrument.
@@ -102,6 +102,13 @@ export const tagOf = (name: string): string => {
 /** An agent's status as its rail's colour: running blue, done green, failed red. */
 const statusColor = (status: string): string =>
   status === 'running' || status === 'pending' ? C.blue : status === 'completed' ? C.ok : status === 'failed' ? C.bad : MUTED
+
+/**
+ * An agent's "doing now" line in at most `cells` characters: the words, then the
+ * path cut in the middle (`Reading mods/…/register.tsx`) so its file stays in view.
+ */
+export const doingLine = (d: Doing, cells: number): string =>
+  d.path ? `${d.text} ${middle(d.path, Math.max(8, cells - [...d.text].length - 1))}` : d.text
 
 /**
  * A PR's state as one colour: merged purple; closed or draft grey; an open one green,
@@ -300,9 +307,10 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
         title: 'Agents',
         right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
-        // A tile per agent, two lines:
+        // A tile per agent, two lines, and a third while it runs:
         //   [status icon] description            12k  3m
         //   type                                 running
+        //   Editing kit/ui.tsx
         children: fx.buildTree(d.agents).map(({ agent, depth }, i) => {
           const x = d.extras[agent.id]
           const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
@@ -340,6 +348,14 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
                   [<Text key="type" color={GRAY.mid} wrap="truncate">{agent.type}</Text>],
                   [<Text key="s" color={color}>{agent.status.toLowerCase()}</Text>],
                 ),
+                // What it's doing now, while it runs: its latest tool call, dim, one line.
+                agent.status === 'running' && x?.doing ? (
+                  <Box key="l3" flexDirection="row" width="100%" minWidth={0} overflow="hidden">
+                    <Text color={GRAY.dark} wrap="truncate">
+                      {doingLine(x.doing, d.columns - depth * 2 - 4)}
+                    </Text>
+                  </Box>
+                ) : null,
               ])}
             </Box>
           )
