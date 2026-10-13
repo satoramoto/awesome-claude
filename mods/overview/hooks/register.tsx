@@ -928,6 +928,8 @@ export const perf = createPerf()
 
 /** The app mode's sections the person folded; kept for the session. */
 const collapsed = atom({ plugin: 'overview', key: 'collapsed' } as const, [])
+/** Whether a wide app pane flows its sections into columns; the footer's switch flips it. */
+const columns = atom({ plugin: 'overview', key: 'columns' } as const, true)
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
@@ -1053,6 +1055,8 @@ export const register: Register = on => {
       createPr: (branch: string) => void createPr($, branch).catch(() => undefined),
       toggle: (id: string) =>
         void update($, collapsed, list => (list.includes(id) ? list.filter(x => x !== id) : [...list, id])).catch(() => undefined),
+      columnsOn: await read($, columns),
+      toggleColumns: () => void update($, columns, was => !was).catch(() => undefined),
       columns: e.props.bodyColumns,
       rows: e.props.scroll?.bodyRows,
       at: Date.now(),

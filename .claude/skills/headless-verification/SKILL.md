@@ -5,7 +5,9 @@ description: How to check an awesome-claude mod works without opening the app (b
 
 # Verifying a mod headlessly
 
-Run these in order from the repo root; each must exit 0. Cap output
+After an ordinary change, only the build (1) and the type-check run (see
+AGENTS.md). The full sequence below is the test pass, run when asked or
+before a PR. Run these in order from the repo root; each must exit 0. Cap output
 (`2>&1 | tail -n 30`) and judge by the exit code, not by grepping.
 
 ## 1. Build

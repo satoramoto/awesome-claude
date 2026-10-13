@@ -254,3 +254,32 @@ test('on a wide desktop pane the listed paths sit in columns, each once and in o
   await drive(clock, call)
   await wide.unmount()
 })
+
+test("the footer's columns switch turns a wide pane's paths to one stack, and the setting stays in the mod's state for the next drawing", async ($, on) => {
+  // What the mod writes to its `columns` state, as the host sees it.
+  const writes: unknown[] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.plugin === 'blast-radius' && e.key === 'columns') writes.push(e.value)
+    return next(e)
+  })
+  const clock = engine(on)
+  const { call, ui: narrow } = await hold($, clock, 'desktop')
+  // A sidebar's width: nothing to switch.
+  expect(await narrow.find({ key: 'flow-toggle' })).toBeUndefined()
+  await narrow.unmount()
+  const flowed = async (ui: any) => everyOf((await ui.drawn()) as Drawn).filter(d => d.type === 'Box' && /^lines-col-\d+$/.test(keyOf(d))).length
+  const mount = () => drive(clock, $.ui.mount({ plugin: 'blast-radius', surface: 'desktop', ...PANE, props: { ...PANE.props, bodyColumns: 120 } } as any))
+  const wide: any = await mount()
+  expect(await flowed(wide)).toBe(2)
+  expect((await wide.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'columns' })
+  await drive(clock, wide.press({ key: 'flow-toggle' }))
+  expect(writes).toEqual([false])
+  await wide.unmount()
+  // Drawn again (a reload keeps the mod's state): one stack, the switch dim.
+  const again: any = await mount()
+  expect(await flowed(again)).toBe(0)
+  expect((await again.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'single column', dimColor: true })
+  await drive(clock, again.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await again.unmount()
+})

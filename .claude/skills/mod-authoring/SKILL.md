@@ -141,12 +141,18 @@ The look is an instrument inspector (think Premiere's Effect Controls):
 
 - A wide desktop pane flows its sections into columns: draw them through
   `k.flow('sections', [...])` (or `flow(Box, e.surface, columns, key, blocks)`
-  in a hook without the kit). Past 114 reported columns two, past 172 three
-  (`FLOW_MIN` 56, `FLOW_MAX` 3), each section whole, read down then across,
+  in a hook without the kit). From 82 reported columns two, from 124 three
+  (`FLOW_MIN` 40, `FLOW_MAX` 3), each section whole, read down then across,
   balanced by estimated rows; narrower, and always on the terminal, the blocks
   come back unchanged. Size anything you cut by hand to `k.flowColumns(n).width`,
   not the pane's columns. Blocks that space themselves apart in one stack (a
   list's tiles) drop their margin when flowing and pass `{ gap }` instead.
+  The column view has a switch: keep `columns: boolean` (atom initial `true`) in
+  the mod's state contract, pass `kit(els, surface, columns, { flow: { on, toggle } })`
+  (toggle flips the atom from the press), and end the desktop pane with `k.perf(...)`
+  or `k.footer()`: a quiet `columns` / dim `single column` action, drawn only
+  where the pane is wide enough to split. Off, `k.flow` gives one stack; the bare
+  `flow(...)` and `flowColumns(...)` take `{ single: true }`.
 - One column of sections (per flow column), each a collapsible header row (icon, title, figures,
   then the fold arrow ▾ last, flush right) with its properties indented under it. Readings are label, thin flat
   gauge, value, dim unit, in fixed columns.
@@ -562,12 +568,13 @@ look done, run it in a real pty:
   16px lines so block glyphs touch) and look at it. Kill the tmux server and
   check `ps` when done.
 
-## Checks, in order
+## Checks
 
+After a change, run only these:
 1. `bun build.ts` (after any change under `mods/` or `kit/`).
-2. `claude plugin validate plugins/<name>`, and `claude plugin validate .` for the marketplace.
-3. `bunx tsc -p plugins/<name>` (needs the laid types; see `headless-verification`).
-4. `claude plugin test plugins/<name>` when the mod has a `*.test.ts`.
-5. Look at it in Storybook (`storybook-prototyping`), then in the real app.
+2. `bunx tsc -p plugins/<name>` (needs the laid types; see `headless-verification`).
 
-All must exit 0. Commit `mods/` and the rebuilt `plugins/` together.
+Both must exit 0. Commit `mods/` and the rebuilt `plugins/` together.
+
+`claude plugin validate`, `claude plugin test` and tests themselves belong to a
+separate test pass, written to a spec (see AGENTS.md). CI runs everything on the PR.

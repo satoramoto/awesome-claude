@@ -11,33 +11,43 @@ For the engine's API itself, the engine's `plugin-authoring` skill.
 
 Run `bun install` once in a fresh clone or worktree.
 
+**A change** runs `bun build.ts` and `bunx tsc -p plugins/<mod>` for the mod
+it touched, then commits. Nothing else. Validate and tests are their own step,
+a test pass you run when asked or before a PR, and CI runs everything on the
+PR. Version bumps and the changelog also happen once, when the PR is opened
+(see below), not on every commit.
+
 | Command | What it checks | When to run |
 | --- | --- | --- |
 | `bun build.ts` | the mods compile into `plugins/` | after any change under `mods/` or `kit/` |
 | `bun run watch` (`bun build.ts --watch`) | the same, again on every save | while working, with the mods loaded in a session |
-| `claude plugin validate plugins/<mod>` | the engine accepts the compiled mod: its hooks, calls, state reads and writes against its contract | after building a mod you changed |
-| `claude plugin validate .` | the marketplace (`.claude-plugin/marketplace.json`) lists every `plugins/` folder with matching versions | after adding a mod or changing a version |
-| `bunx tsc -p plugins/<mod>` | the compiled mod, tests included, type-checks (needs the engine's types in `plugins/<mod>/.claude-plugin/types/`, laid when the mod loads; see `headless-verification`) | any `.ts`/`.tsx` change |
-| `claude plugin test plugins/<mod>` | the mod's `*.test.ts`: its panes mounted on each surface through the engine's test kit, acted on and read | any change to a mod that has tests |
+| `bunx tsc -p plugins/<mod>` | the compiled mod, tests included, type-checks (needs the engine's types in `plugins/<mod>/.claude-plugin/types/`, laid when the mod loads; see `headless-verification`) | after any `.ts`/`.tsx` change |
+| `claude plugin validate plugins/<mod>` | the engine accepts the compiled mod: its hooks, calls, state reads and writes against its contract | test pass; after a state-contract change |
+| `claude plugin validate .` | the marketplace (`.claude-plugin/marketplace.json`) lists every `plugins/` folder with matching versions | when opening a PR (after the bumps) |
+| `claude plugin test plugins/<mod>` | the mod's `*.test.ts`: its panes mounted on each surface through the engine's test kit, acted on and read | test pass only |
 | `bun run playground` | whole mods drawn in the browser from their own render hooks and sample data; runs `bun build.ts` and `claude plugin validate` on each save | while wiring up a mod |
 | `bun run storybook` | each kit component, and each mod scenario, as a story with controls; surface, theme, frame and width in the toolbar | while designing how something looks |
 
 `bun run playground` and `bun run storybook` take their port from `PORT`
 (5173 and 6006 by default).
 
-Tests are render and behaviour tests through the engine's test kit
-(`claude-code/testing`): mount the mod's component on the terminal and the
-desktop and check what it draws and what its buttons do. Don't write tests that
-restate a function's code.
+Tests are written to a spec, as their own step, not alongside a change: the
+behaviours a mod promises, with cases enumerated from their boundaries
+(partitions and edges, each surface, state transitions, failure paths). They're
+render and behaviour tests through the engine's test kit (`claude-code/testing`):
+mount the mod's component on the terminal and the desktop and check what it
+draws and what its buttons do. Don't write tests that restate a function's
+code or pin details the spec doesn't promise.
 
 A new mod appears in `plugins/` only after `bun build.ts`, and needs an entry
 in `.claude-plugin/marketplace.json` (`name`, `source: ./plugins/<mod>`,
-`description`, `version`). Any change to a mod's compiled output
-(`plugins/<mod>/`, so a `kit/` change too) bumps its version, in its
-`plugin.json` and in `.claude-plugin/marketplace.json`: marketplace installs only
-update when the version changes. CI fails a PR that changes a mod's output
-without raising its version above the base's, or whose two versions differ.
-Add a `CHANGELOG.md` entry with the bump.
+`description`, `version`). When a PR is opened, every mod whose compiled output
+(`plugins/<mod>/`, so a `kit/` change too) differs from the base gets its
+version raised once above the base's, in its `plugin.json` and in
+`.claude-plugin/marketplace.json`, with one `CHANGELOG.md` entry for the PR.
+Marketplace installs only update when the version changes, and CI fails a PR
+that changes a mod's output without raising its version above the base's, or
+whose two versions differ. Don't bump on every commit.
 
 ## Design rules
 

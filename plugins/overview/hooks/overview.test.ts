@@ -553,3 +553,24 @@ test('a wide desktop pane lays the sections out in columns, each section once in
   // The terminal never splits.
   expect(flowed(await draw('terminal', 180))).toEqual([])
 })
+
+test("the footer's columns switch turns a wide pane to one stack, and the setting stays in the mod's state for the next drawing", async ($, on) => {
+  // What the mod writes to its `columns` state, as the host sees it.
+  const writes: unknown[] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.plugin === 'overview' && e.key === 'columns') writes.push(e.value)
+    return next(e)
+  })
+  await session($, on, 'lane')
+  const ui = await $.ui.mount({ plugin: 'overview', surface: 'desktop', ...pane(120) })
+  expect(flowed((await ui.drawn()) as Drawn).length).toBe(2)
+  expect((await ui.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'columns' })
+  await ui.press({ key: 'flow-toggle' })
+  expect(writes).toEqual([false])
+  await ui.unmount()
+  // Drawn again (a reload keeps the mod's state): one stack, the switch dim.
+  const again = await $.ui.mount({ plugin: 'overview', surface: 'desktop', ...pane(120) })
+  expect(flowed((await again.drawn()) as Drawn)).toEqual([])
+  expect((await again.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'single column', dimColor: true })
+  await again.unmount()
+})

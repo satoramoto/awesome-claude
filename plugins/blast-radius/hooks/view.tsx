@@ -10,6 +10,7 @@ import type { Elements, RenderElement } from 'claude-code'
 
 import { C, GRAY } from '../kit/tokens'
 import { EDGE, SPACE, TERM_ROLES, kit } from '../kit/ui'
+import type { FlowSwitch } from '../kit/ui'
 
 /** What a risky command is, from the classifier. */
 export type Risk = {
@@ -188,9 +189,9 @@ const item = (kind: Risk['kind'], line: string): { icon: string; before?: string
  *   Paths: build                                    (grey)
  *   [Proceed] [Cancel]  Claude is waiting on your answer
  */
-export const renderApp = (els: AppElements, state: Held, columns: number, opts: { band?: boolean } = {}): RenderElement => {
+export const renderApp = (els: AppElements, state: Held, columns: number, opts: { band?: boolean; flow?: FlowSwitch } = {}): RenderElement => {
   const { Box, Text, Button, Code } = els
-  const k = kit(els, 'desktop', columns)
+  const k = kit(els, 'desktop', columns, { flow: opts.flow })
   const report = state.report!
   const { kind } = state.risk
   const decide = decider(state)
@@ -234,8 +235,10 @@ export const renderApp = (els: AppElements, state: Held, columns: number, opts: 
     )
   })
 
-  return (
-    <Box flexDirection="column" width="100%" minWidth={0} paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={1}>
+  // The column view's switch, on a pane wide enough for columns: a footer band across the pane, under the body's edges.
+  const footer = k.footer()
+  const page = (
+    <Box key="page" flexDirection="column" width="100%" minWidth={0} paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={1}>
       {row(
         'head',
         [
@@ -298,5 +301,13 @@ export const renderApp = (els: AppElements, state: Held, columns: number, opts: 
         </Box>
       </Box>
     </Box>
+  )
+  return footer ? (
+    <Box flexDirection="column" width="100%" minWidth={0}>
+      {page}
+      {footer}
+    </Box>
+  ) : (
+    page
   )
 }

@@ -269,6 +269,8 @@ declare module 'claude-code' {
       activity: Activity
       /** The app mode's section ids the person folded. */
       collapsed: string[]
+      /** Whether a wide app pane flows its sections into columns (the footer's switch); on until flipped. */
+      columns: boolean
       /** The session's share of the machine; null until two samples give rates. */
       resources: Resources | null
       /** Branches the session started or began on, oldest first. */

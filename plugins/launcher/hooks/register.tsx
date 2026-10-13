@@ -17,6 +17,8 @@ const servers = atom({ plugin: 'launcher', key: 'servers' } as const, {})
 const open = atom({ plugin: 'launcher', key: 'open' } as const, [])
 const adopted = atom({ plugin: 'launcher', key: 'adopted' } as const, {})
 const confirm = atom({ plugin: 'launcher', key: 'confirm' } as const, null)
+/** Whether a wide app pane flows its rows into columns; the footer's switch flips it. */
+const columns = atom({ plugin: 'launcher', key: 'columns' } as const, true)
 
 // ---- reading .claude/launch.json ----
 
@@ -840,6 +842,7 @@ export const register: Register = on => {
     const s = await read($, servers)
     const o = await read($, open)
     const armed = await read($, confirm)
+    const columnsOn = await read($, columns)
     return renderPane(
       // Buttons keep their press handles across redraws, so a click made just before one still lands.
       holdButtons($.ui.resolve(e), e) as PaneElements,
@@ -856,7 +859,11 @@ export const register: Register = on => {
         kill: name => say(killPress($, name)),
         toggle: name => void update($, open, o => (o.includes(name) ? o.filter(n => n !== name) : [...o, name])).catch(() => undefined),
       },
-      { focused: e.props.isFocused, confirm: armed },
+      {
+        focused: e.props.isFocused,
+        confirm: armed,
+        flow: { on: columnsOn, toggle: () => void update($, columns, was => !was).catch(() => undefined) },
+      },
     )
   })
 }

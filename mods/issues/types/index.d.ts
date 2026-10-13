@@ -58,6 +58,8 @@ declare module 'claude-code' {
       reading: boolean
       /** The issue the terminal's cursor is on (the one whose row holds the focus), by number. */
       cursor: number | null
+      /** Whether a wide app pane flows the tiles into columns (the footer's switch); on until flipped. */
+      columns: boolean
     }
   }
 }

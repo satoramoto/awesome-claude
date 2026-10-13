@@ -100,6 +100,8 @@ declare module 'claude-code' {
       adopted: Record<string, Adopted>
       /** The row whose Kill waits for its confirming press, if any. */
       confirm: KillConfirm | null
+      /** Whether a wide app pane flows its rows into columns (the footer's switch); on until flipped. */
+      columns: boolean
     }
   }
 }

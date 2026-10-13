@@ -255,3 +255,25 @@ test('on a wide desktop pane the index groups and the gallery sit in columns, ea
   expect(gallery.length).toBe(3)
   expect(gallery.flat()).toEqual(galleryExperiments().map(x => `x-${x.id}`))
 })
+
+test("the footer's columns switch turns a wide index to one stack, and the setting stays in the mod's state for the next drawing", async ($, on) => {
+  // What the mod writes to its `columns` state, as the host sees it.
+  const writes: unknown[] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.plugin === 'lab' && e.key === 'columns') writes.push(e.value)
+    return next(e)
+  })
+  const mount = (): Promise<Ui> => $.ui.mount({ plugin: 'lab', surface: 'desktop', component: 'Pane', props: { ...PANE, bodyColumns: 120 }, requestId: 'lab', viewport: VIEWPORT } as any)
+  const flowed = (tree: Drawn) => everyOf(tree).filter(d => d.type === 'Box' && /^groups-col-\d+$/.test(keyOf(d))).length
+  const ui = await mount()
+  expect(flowed((await ui.drawn()) as Drawn)).toBe(2)
+  expect((await ui.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'columns' })
+  await ui.press({ key: 'flow-toggle' })
+  expect(writes).toEqual([false])
+  await ui.unmount()
+  // Drawn again (a reload keeps the mod's state): one stack, the switch dim.
+  const again = await mount()
+  expect(flowed((await again.drawn()) as Drawn)).toBe(0)
+  expect((await again.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'single column', dimColor: true })
+  await again.unmount()
+})
