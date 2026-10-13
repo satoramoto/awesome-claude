@@ -394,9 +394,9 @@ const cellsOf = (x: unknown): number | undefined => {
 /**
  * The narrowest a flow column gets, in the pane's reported columns: about the
  * widest a desktop sidebar is drawn (Storybook's 110), halved, so a section in a
- * column reads as it does in a roomy sidebar. Two columns from 114, three from 172.
+ * column reads as it does in a roomy sidebar. Two columns from 82 (about 640px), three from 124 (about 970px).
  */
-export const FLOW_MIN = 56
+export const FLOW_MIN = 40
 /** The most columns a flow splits into: more makes every section a sliver. */
 export const FLOW_MAX = 3
 /** The gutter between flow columns: a group's room, as between groups of items in a row. No rule or panel marks it. */

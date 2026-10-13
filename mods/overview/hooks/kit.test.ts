@@ -477,9 +477,9 @@ test('flow keeps a sidebar one stack, and a wide desktop pane balanced columns o
   const pane = (k: Kit) => ({ type: 'Box', props: { flexDirection: 'column' }, children: k.flow('flow', sections(k)) }) as never
 
   // A sidebar's width: the sections as given, no columns.
-  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 100 }))).toEqual([])
+  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 80 }))).toEqual([])
   // Two columns: the tall section alone, the five short ones beside it, so the columns end about even.
-  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 120 }))).toEqual([['tall'], ['b', 'c', 'd', 'e', 'f']])
+  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 100 }))).toEqual([['tall'], ['b', 'c', 'd', 'e', 'f']])
   // Three: still whole sections, read down then across.
   const three = columnsOf(await draw(pane, { surface: 'desktop', columns: 180 }))
   expect(three.length).toBe(3)

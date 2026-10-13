@@ -141,8 +141,8 @@ The look is an instrument inspector (think Premiere's Effect Controls):
 
 - A wide desktop pane flows its sections into columns: draw them through
   `k.flow('sections', [...])` (or `flow(Box, e.surface, columns, key, blocks)`
-  in a hook without the kit). Past 114 reported columns two, past 172 three
-  (`FLOW_MIN` 56, `FLOW_MAX` 3), each section whole, read down then across,
+  in a hook without the kit). From 82 reported columns two, from 124 three
+  (`FLOW_MIN` 40, `FLOW_MAX` 3), each section whole, read down then across,
   balanced by estimated rows; narrower, and always on the terminal, the blocks
   come back unchanged. Size anything you cut by hand to `k.flowColumns(n).width`,
   not the pane's columns. Blocks that space themselves apart in one stack (a

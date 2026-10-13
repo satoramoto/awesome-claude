@@ -1,6 +1,6 @@
 {
   "name": "issues",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "description": "A pane listing the open GitHub issues of the session's repository",
   "author": { "name": "Ryan Gavin" },
   "types": "./types/index.d.ts"
