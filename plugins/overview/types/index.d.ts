@@ -40,6 +40,16 @@ export type AgentExtra = {
   tokens?: number
   /** `agent.spawn`'s `parentAgentId`: the loop that spawned it, for when the list leaves `parentId` out. */
   parentId?: string
+  /** Its latest tool call, from its loop's `tool.call`: what it's doing now (drawn while it runs). */
+  doing?: Doing
+}
+
+/** An agent's latest tool call in words: `Bash: bun build.ts`, or a verb and a path (`Editing`, `kit/ui.tsx`). */
+export type Doing = {
+  /** The words before the path, or the whole line when there's no path. */
+  text: string
+  /** A path or URL, cut in the middle where the line is too long. */
+  path?: string
 }
 
 /** One drawn row of the Tasks tree. */

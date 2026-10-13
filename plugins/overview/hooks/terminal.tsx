@@ -1,13 +1,13 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import { ago, basename, money, short, tokens } from '../kit/format'
-import { C, GLYPH, MUTED, TRACK, levelColor } from '../kit/tokens'
+import { C, GLYPH, MUTED, TRACK, TREE, levelColor } from '../kit/tokens'
 import type { StatusKind } from '../kit/tokens'
 import { MEASURE, kit } from '../kit/ui'
 import type { Kit } from '../kit/ui'
 
 import type { Agent, BranchView, GitFile, GitInfo, GitPr, TreeRow } from '../types'
-import { activityChart, compact, contextParts, machine, prColor, shortTool } from './desktop'
+import { activityChart, compact, contextParts, doingLine, machine, prColor, shortTool } from './desktop'
 import type { DesktopData } from './desktop'
 
 /*
@@ -191,12 +191,22 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
         right: k.summary([[String(d.agents.length), 'started'], running ? [String(running), 'running', C.blue] : null]),
         ...fold('agents'),
         children: [
-          ...tree.map(row => {
+          ...tree.flatMap(row => {
             const { agent } = row
             const x = d.extras[agent.id]
             const ms = agent.status === 'running' && x?.startedAt !== undefined ? d.at - x.startedAt : x?.durationMs
             const sub = fx.subSummary(row)
-            return k.item(`agent-${agent.id}`, {
+            // While it runs, a dim line under it with its latest tool call, under its text:
+            // the tree's guides carry on through it, and a pipe under the mark when its children follow.
+            const doing =
+              agent.status === 'running' && x?.doing
+                ? (() => {
+                    const guides = row.depth ? row.guides.map(g => (g ? TREE.pipe : TREE.blank)).join('') + (row.last ? TREE.blank : TREE.pipe) : ''
+                    const prefix = guides + (row.descendants > 0 && !row.folded ? TREE.pipe : TREE.blank)
+                    return k.item(`doing-${agent.id}`, { tree: prefix, text: doingLine(x.doing, k.width - [...prefix].length), dim: true })
+                  })()
+                : null
+            const line = k.item(`agent-${agent.id}`, {
               tree: row.depth ? k.tree(row.guides, row.last, row.depth) : undefined,
               lead: agentStatus(agent.status),
               text: agent.description || agent.type,
@@ -207,6 +217,7 @@ export const renderTerminal = (els: TermElements, d: DesktopData, fx: TermHelper
                 ms !== undefined ? { part: short(ms), drop: 1 } : null,
               ],
             })
+            return doing ? [line, doing] : [line]
           }),
           hidden > 0 ? k.note('agents-more', `… ${hidden} more`) : null,
         ],
