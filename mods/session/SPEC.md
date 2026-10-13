@@ -156,10 +156,30 @@ Each guard runs in a hook, reads the job's mode, and logs its decision.
 17. When a guard denies or sends back, the reason is the context. Rules are
     never repeated in prose.
 
+## The machine is data
+
+- The lifecycle (states, transitions labelled by events, guards on edges) and
+  the modes (policy records, and each state's status per mode) live in one
+  JSON definition file: `~/.claude/session/machine.json`, with a per-repo
+  override at `.claude/session.json`. The mod reads it, and reloads it when it
+  changes.
+- **A small web app built on zen's graph primitives edits that file:** add or
+  remove states, connect them with an event label, attach guards, and set each
+  state's status per mode. It's the first real consumer of zen's graph API, and
+  building it is how those primitives get finalized.
+- The mod validates the file on load: every edge names known states, every
+  guard is a known guard, every mode sets every policy field. An invalid file
+  is refused, and the last good one stays active with the error shown in the
+  pane.
+
 ## Pane
 
 18. **The head** shows the session state (`talking`, `thinking`, `delegated`)
     and the mode, with a control to switch mode.
+18a. **A graph view** draws the machine from the definition (kit SVG, since the
+     desktop pane draws SVG but can't host web components). States the current
+     mode skips are dim; each job in flight sits as a token on its current
+     state; active states are highlighted.
 19. **Each job in flight** is one row: owner icon (coloured by state), the
     ask's first words, the state, and what it's waiting on. A running job
     shows its current tool call, as overview's agent cards do.
