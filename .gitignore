@@ -1,4 +1,6 @@
 .claude/worktrees
+# The main session's curated base context for its assistant agents.
+.claude/base-context.md
 node_modules/
 # Laid by the engine beside a mod it loads.
 .claude-plugin/types/
