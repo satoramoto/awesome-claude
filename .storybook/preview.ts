@@ -134,8 +134,9 @@ const preview: Preview = {
       toolbar: { title: 'Frame', icon: 'sidebaralt', items: ['pane', 'sidebar'], dynamicTitle: true },
     },
     columns: {
+      // 115 and 180 are an expanded desktop pane, about 900px and 1400px across: wide enough for two and three flow columns.
       description: 'Pane width in cells',
-      toolbar: { title: 'Width', icon: 'expand', items: ['28', '36', '46', '60', '80', '100', '110'], dynamicTitle: true },
+      toolbar: { title: 'Width', icon: 'expand', items: ['28', '36', '46', '60', '80', '100', '110', '115', '180'], dynamicTitle: true },
     },
   },
   initialGlobals: { surface: 'desktop', theme: 'dark', columns: '100', frame: 'sidebar' },

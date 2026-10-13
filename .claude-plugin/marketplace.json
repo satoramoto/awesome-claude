@@ -9,35 +9,35 @@
     {
       "name": "overview",
       "source": "./plugins/overview",
-      "version": "0.7.1",
+      "version": "0.7.2",
       "description": "A session overview pane: context, cost, time, turns, tools, files, subagents, limits and git; cells in the terminal, charts in the desktop app",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "issues",
       "source": "./plugins/issues",
-      "version": "0.3.1",
+      "version": "0.3.2",
       "description": "A pane listing the open GitHub issues of the session's repository",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "launcher",
       "source": "./plugins/launcher",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": "The project's dev servers from .claude/launch.json in a pane: start, stop and restart each, see which answer and read their output",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "lab",
       "source": "./plugins/lab",
-      "version": "0.2.1",
+      "version": "0.2.2",
       "description": "Experiments that probe what the rendering engine accepts: SVG, animation, interaction and every element, each in its own pane",
       "author": { "name": "Ryan Gavin" }
     },
     {
       "name": "filetree",
       "source": "./plugins/filetree",
-      "version": "0.5.1",
+      "version": "0.5.2",
       "description": "An IDE-style file tree that shows what Claude reads, writes and commits, with git status and lines changed. Fork of data-goblin/claude-code-filetree (MIT)",
       "author": { "name": "Kurt Buhler" },
       "homepage": "https://github.com/data-goblin/claude-code-filetree",
@@ -46,7 +46,7 @@
     {
       "name": "blast-radius",
       "source": "./plugins/blast-radius",
-      "version": "0.4.1",
+      "version": "0.4.2",
       "description": "Holds risky shell commands (rm -rf, git reset --hard, git clean, force push, migrations) and shows what they would change, with Proceed and Cancel. Fork of Anthropic's claude-code-playground (Apache-2.0)",
       "author": { "name": "Anthropic PBC" },
       "homepage": "https://github.com/anthropics/claude-code-playground/tree/main/claude-code/mods/blast-radius",

@@ -399,3 +399,32 @@ test('on the terminal, a failed refresh keeps the last-good issues with an amber
   expect(await ui.find({ type: 'Text', text: /^✕$/ })).toBeUndefined()
   await ui.unmount()
 })
+
+type Drawn = { type?: string; key?: string; props?: Record<string, any>; children?: unknown[] }
+const kidsOf = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).filter((c): c is Drawn => !!c && typeof c === 'object')
+const everyOf = (d: Drawn): Drawn[] => [d, ...kidsOf(d).flatMap(everyOf)]
+const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+
+test('on a wide desktop pane the issues sit in columns, each tile whole and once, in order; a sidebar keeps one list', async ($, on) => {
+  engine(on)
+  await open($)
+  const columnsAt = async (surface: 'terminal' | 'desktop', bodyColumns: number) => {
+    const ui = await $.ui.mount({ plugin: 'issues', surface, ...PANE, props: { ...PANE.props, bodyColumns } })
+    const tree = (await ui.drawn()) as Drawn
+    await ui.unmount()
+    const cols = everyOf(tree).filter(d => d.type === 'Box' && /^issues-col-\d+$/.test(keyOf(d)))
+    return {
+      cols: cols.map(c => everyOf(c).map(keyOf).filter(k => /^issue-\d+$/.test(k))),
+      // The repository's line stays above the columns, across the pane.
+      headInColumn: cols.some(c => everyOf(c).some(d => keyOf(d) === 'repo')),
+    }
+  }
+  expect((await columnsAt('desktop', 60)).cols).toEqual([])
+  for (const width of [120, 180]) {
+    // Two issues: two columns at most, whatever the width.
+    const { cols, headInColumn } = await columnsAt('desktop', width)
+    expect(cols).toEqual([['issue-24'], ['issue-23']])
+    expect(headInColumn).toBe(false)
+  }
+  expect((await columnsAt('terminal', 180)).cols).toEqual([])
+})

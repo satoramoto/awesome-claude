@@ -200,6 +200,8 @@ export const renderPane = (
   }
 
   const all = file.configs.map(c => ({ c, s: serverOf(c, servers) }))
+  // A row's width on the desktop: the pane's, or a flow column's when the pane is wide enough for columns.
+  const lane = k.flowColumns(all.length).width
   const answering = all.filter(x => x.s.status === 'running' || x.s.status === 'elsewhere').length
   const failed = all.filter(x => x.s.status === 'failed').length
 
@@ -371,7 +373,7 @@ export const renderPane = (
             {look.word}
           </Text>
         </Box>
-        {need <= columns ? (
+        {need <= lane ? (
           <Box key={`where-${c.name}`} flexDirection="row" minWidth={0} flexShrink={1}>
             {where(address)}
           </Box>
@@ -413,7 +415,7 @@ export const renderPane = (
       proc
         ? terminal
           ? k.prop(`process-${c.name}`, 'process', proc, { path: true })
-          : k.prop(`process-${c.name}`, 'process', middle(proc, Math.max(16, columns - DESK_PROP_LABEL)))
+          : k.prop(`process-${c.name}`, 'process', middle(proc, Math.max(16, lane - DESK_PROP_LABEL)))
         : null,
       note ? line(`note-${c.name}`, note) : null,
       s.status === 'failed' && s.code !== null ? k.prop(`exit-${c.name}`, 'exit', <Text {...k.ink(C.bad)}>{String(s.code)}</Text>) : null,
@@ -493,7 +495,8 @@ export const renderPane = (
         {head}
         {rows.length ? null : <Text dimColor>{empty}</Text>}
       </Box>
-      {rows}
+      {/* In columns when the pane is wide; one stack at a sidebar's width. */}
+      {k.flow('sections', rows)}
     </Box>
   )
 }

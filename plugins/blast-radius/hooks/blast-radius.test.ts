@@ -227,3 +227,30 @@ test('in a narrow terminal band, a long file path is cut in the middle and keeps
   await drive(clock, call)
   await ui.unmount()
 })
+
+type Drawn = { type?: string; key?: string; props?: Record<string, any>; children?: unknown[] }
+const kidsOf = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).filter((c): c is Drawn => !!c && typeof c === 'object')
+const everyOf = (d: Drawn): Drawn[] => [d, ...kidsOf(d).flatMap(everyOf)]
+const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+
+test('on a wide desktop pane the listed paths sit in columns, each once and in order; the head, summary and buttons stay across', async ($, on) => {
+  const clock = engine(on)
+  // The sidebar's width first, holding the call; then the same hold drawn in a wide pane.
+  const { call, ui: narrow } = await hold($, clock, 'desktop')
+  const columnsOf = async (ui: any) => {
+    const tree = (await ui.drawn()) as Drawn
+    const cols = everyOf(tree).filter(d => d.type === 'Box' && /^lines-col-\d+$/.test(keyOf(d)))
+    // Only the paths flow: the head, the summary and the buttons are never inside a column.
+    for (const c of cols) expect(everyOf(c).some(d => ['buttons', 'sum', 'head'].includes(keyOf(d)))).toBe(false)
+    return cols.map(c => everyOf(c).map(keyOf).filter(k => /^l\d+$/.test(k)))
+  }
+  expect(await columnsOf(narrow)).toEqual([])
+  await narrow.unmount()
+  const wide = await drive(clock, $.ui.mount({ plugin: 'blast-radius', surface: 'desktop', ...PANE, props: { ...PANE.props, bodyColumns: 120 } } as any))
+  expect(await columnsOf(wide)).toEqual([['l0'], ['l1']])
+  expect(await wide.find({ type: 'Text', text: 'build/index.html' })).toBeDefined()
+  expect(await wide.find({ type: 'Text', text: 'build/assets/index.js' })).toBeDefined()
+  await drive(clock, wide.press({ key: 'cancel' }))
+  await drive(clock, call)
+  await wide.unmount()
+})

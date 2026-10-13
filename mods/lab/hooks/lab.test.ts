@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DESKTOP_REFUSED, SURFACES, experiments, galleryExperiments } from './experiments'
+import { DESKTOP_REFUSED, GROUPS, SURFACES, experiments, galleryExperiments } from './experiments'
 
 /*
  * Mounts every experiment's pane on every surface and records what the engine
@@ -222,4 +222,36 @@ test('a Client post comes back as props', async $ => {
     expect(await ui.find({ type: 'Text', text: `pong 1 via ${surface}`, in: 'echo' })).toBeDefined()
     await ui.unmount()
   }
+})
+
+type Drawn = { type?: string; key?: string; props?: Record<string, any>; children?: unknown[] }
+const kidsOf = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).filter((c): c is Drawn => !!c && typeof c === 'object')
+const everyOf = (d: Drawn): Drawn[] => [d, ...kidsOf(d).flatMap(everyOf)]
+const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+
+/** The flow columns `requestId`'s pane draws at `bodyColumns` on `surface`, each with the keys in it that match `block`, in order. */
+const flowAt = async ($: any, requestId: string, flow: string, block: RegExp, surface: string, bodyColumns: number) => {
+  const ui: Ui = await $.ui.mount({ plugin: 'lab', surface, component: 'Pane', props: { ...PANE, bodyColumns }, requestId, viewport: VIEWPORT })
+  const tree = (await ui.drawn()) as Drawn
+  await ui.unmount()
+  return everyOf(tree)
+    .filter(d => d.type === 'Box' && new RegExp(`^${flow}-col-\\d+$`).test(keyOf(d)))
+    .map(c => everyOf(c).map(keyOf).filter(k => block.test(k)))
+}
+
+test('on a wide desktop pane the index groups and the gallery sit in columns, each block once in order; narrow and on the terminal, one stack', { timeoutMs: 30_000 }, async $ => {
+  const groups = GROUPS.map(g => `group-${g}`)
+  expect(await flowAt($, 'lab', 'groups', /^group-/, 'desktop', 80)).toEqual([])
+  expect(await flowAt($, 'lab', 'groups', /^group-/, 'terminal', 180)).toEqual([])
+  for (const [width, n] of [[120, 2], [180, 3]] as const) {
+    const cols = await flowAt($, 'lab', 'groups', /^group-/, 'desktop', width)
+    expect(cols.length).toBe(n)
+    expect(cols.flat()).toEqual(groups)
+  }
+  const ids = new Set(galleryExperiments().map(x => `x-${x.id}`))
+  const block = { test: (k: string) => ids.has(k) } as RegExp
+  expect(await flowAt($, 'lab-gallery', 'gallery', block, 'desktop', 80)).toEqual([])
+  const gallery = await flowAt($, 'lab-gallery', 'gallery', block, 'desktop', 180)
+  expect(gallery.length).toBe(3)
+  expect(gallery.flat()).toEqual(galleryExperiments().map(x => `x-${x.id}`))
 })

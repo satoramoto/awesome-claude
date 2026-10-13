@@ -796,3 +796,27 @@ test('on a narrow desktop a running row keeps its state word whole; its URL goes
   await wide.unmount()
   await launcher($, 'stop app')
 })
+
+type Drawn = { type?: string; key?: string; props?: Record<string, any>; children?: unknown[] }
+const kidsOf = (d: Drawn) => ((d.children ?? d.props?.children ?? []) as unknown[]).flat(Infinity).filter((c): c is Drawn => !!c && typeof c === 'object')
+const everyOf = (d: Drawn): Drawn[] => [d, ...kidsOf(d).flatMap(everyOf)]
+const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+
+test('on a wide desktop pane the configurations sit in columns, each section whole and once, in order; a sidebar and the terminal keep one stack', async ($, on) => {
+  engine(on, { launch: SHARED, procs: SHARED_PROCS })
+  await launcher($, 'list')
+  const columnsAt = async (surface: 'terminal' | 'desktop', bodyColumns: number) => {
+    const ui = await mountAt($, surface, bodyColumns)
+    const tree = (await ui.drawn()) as Drawn
+    await ui.unmount()
+    return everyOf(tree)
+      .filter(d => d.type === 'Box' && /^sections-col-\d+$/.test(keyOf(d)))
+      .map(c => everyOf(c).map(keyOf).filter(k => k.startsWith('section-')).map(k => k.slice('section-'.length)))
+  }
+  expect(await columnsAt('desktop', 80)).toEqual([])
+  const two = await columnsAt('desktop', 120)
+  expect(two.length).toBe(2)
+  expect(two.flat()).toEqual(['app', 'storybook', 'storybook-wt'])
+  expect(await columnsAt('desktop', 180)).toEqual([['app'], ['storybook'], ['storybook-wt']])
+  expect(await columnsAt('terminal', 180)).toEqual([])
+})

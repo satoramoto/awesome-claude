@@ -103,6 +103,15 @@ const terminalSheet = (name: keyof typeof scenes): StoryObj => ({
   },
 })
 
+/**
+ * The desktop pane expanded: at about 900px (115 columns) the sections split into
+ * two columns, at about 1400px (180) into three, read down then across. The canvas
+ * must be that wide to show it; a narrower window draws the columns that fit.
+ */
+const wide = (name: keyof typeof scenes, columns: '115' | '180'): StoryObj => ({ ...scenario(name), globals: { surface: 'desktop', frame: 'pane', columns } })
+export const BusyWide900 = wide('busy', '115')
+export const BusyWide1400 = wide('busy', '180')
+
 export const BusyTerminalWidths = terminalSheet('busy')
 export const NearLimitTerminalWidths = terminalSheet('nearLimit')
 export const FailedRefreshTerminalWidths = terminalSheet('failedRefresh')

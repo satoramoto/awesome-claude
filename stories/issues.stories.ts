@@ -59,3 +59,6 @@ export const RefreshFailed = scenario('refreshFailed')
 export const Focused = scenario('cursor', { focused: true })
 /** The same cursor without the keyboard: its mark dim, the title its own weight, no hints. */
 export const Blurred = scenario('cursor')
+/** The desktop pane expanded to about 900px and 1400px: the issue tiles in two and three columns under the repository's line. */
+export const BusyWide900: StoryObj = { ...scenario('busy'), globals: { surface: 'desktop', frame: 'pane', columns: '115' } }
+export const BusyWide1400: StoryObj = { ...scenario('busy'), globals: { surface: 'desktop', frame: 'pane', columns: '180' } }

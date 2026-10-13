@@ -139,7 +139,15 @@ Import shared code by alias; the build rewrites it:
 
 The look is an instrument inspector (think Premiere's Effect Controls):
 
-- One column of sections, each a collapsible header row (icon, title, figures,
+- A wide desktop pane flows its sections into columns: draw them through
+  `k.flow('sections', [...])` (or `flow(Box, e.surface, columns, key, blocks)`
+  in a hook without the kit). Past 114 reported columns two, past 172 three
+  (`FLOW_MIN` 56, `FLOW_MAX` 3), each section whole, read down then across,
+  balanced by estimated rows; narrower, and always on the terminal, the blocks
+  come back unchanged. Size anything you cut by hand to `k.flowColumns(n).width`,
+  not the pane's columns. Blocks that space themselves apart in one stack (a
+  list's tiles) drop their margin when flowing and pass `{ gap }` instead.
+- One column of sections (per flow column), each a collapsible header row (icon, title, figures,
   then the fold arrow ▾ last, flush right) with its properties indented under it. Readings are label, thin flat
   gauge, value, dim unit, in fixed columns.
 - No bubbles, panels, outlines, tinted boxes or game words (HP, LV, party).

@@ -229,6 +229,8 @@ export const activityChart = (a: Activity) => {
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
   const { Box, Text } = els
   const k = kit(els, 'desktop', d.columns)
+  // A section's width: the pane's, or a flow column's when the pane is wide (at most six sections share it).
+  const lane = k.flowColumns(6).width
   const a = d.activity
   const snap = d.snap
   const fold = (id: string) => ({ collapsed: d.collapsed.includes(id), onToggle: () => d.toggle(id) })
@@ -384,7 +386,7 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
                         </Box>,
                         <Text key="t" wrap="truncate">
                           {doing.text}
-                          {doing.arg ? <Text color={GRAY.mid}>{` ${doingArg(doing, d.columns - depth * 2 - 6)}`}</Text> : null}
+                          {doing.arg ? <Text color={GRAY.mid}>{` ${doingArg(doing, lane - depth * 2 - 6)}`}</Text> : null}
                         </Text>,
                       ],
                       [],
@@ -408,7 +410,8 @@ export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): Re
   })
 
   return k.pinned(
-    [context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting],
+    // In columns when the pane is wide; one stack at a sidebar's width.
+    k.flow('sections', [context, limits, activity, agents, ...renderBranches(els, k, d, fold), accounting]),
     k.perf(d.perf, { lead: machine(k, d.resources) }),
     d.rows,
   )
