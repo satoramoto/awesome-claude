@@ -533,7 +533,8 @@ test('two configurations on one port: only the one whose process holds it runs, 
   expect(text).toContain('storybook-wt  running elsewhere  http://localhost:6006')
 
   for (const surface of ['terminal', 'desktop'] as const) {
-    const ui = await mountAt($, surface, 100)
+    // One stack on the desktop (below the column split), so each row has room for its URL.
+    const ui = await mountAt($, surface, surface === 'desktop' ? 80 : 100)
     // The terminal's word is the short one; the desktop's says which.
     const taken = surface === 'terminal' ? { key: 'word-storybook', text: 'taken' } : { key: 'state-storybook', text: 'port taken' }
     expect(await ui.find(taken), `taken on the ${surface}`).toBeDefined()
@@ -620,7 +621,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`on the ${surface}, a taken-over server reads running with Stop, and Stop signals its pid`, async ($, on) => {
     const world = engine(on)
     await launcher($)
-    const ui = await mountAt($, surface, 100)
+    // One stack on the desktop (below the column split), so the row has room for its URL.
+    const ui = await mountAt($, surface, surface === 'desktop' ? 80 : 100)
     await ui.press({ key: 'adopt-storybook' })
     await launcher($, 'list')
     expect(await ui.find({ key: surface === 'terminal' ? 'word-storybook' : 'state-storybook', text: /^running$/ })).toBeDefined()
