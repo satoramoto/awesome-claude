@@ -52,3 +52,6 @@ export const Stopped = scenario(fixtures.stopped)
 export const Long = scenario(fixtures.long)
 export const NoFile = scenario(fixtures.noFile)
 export const Reading = scenario(fixtures.reading)
+/** The desktop pane expanded to about 900px and 1400px: the configurations in two and three columns, each section whole. */
+export const MeasuredWide900: StoryObj = { ...scenario(measured), globals: { surface: 'desktop', frame: 'pane', columns: '115' } }
+export const MeasuredWide1400: StoryObj = { ...scenario(measured), globals: { surface: 'desktop', frame: 'pane', columns: '180' } }

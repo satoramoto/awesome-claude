@@ -381,6 +381,173 @@ const cellsOf = (x: unknown): number | undefined => {
   return undefined
 }
 
+/*
+ * Flow: a pane's sections in columns when the desktop gives it the width.
+ *
+ * The engine tells a render its pane's width (`e.props.bodyColumns`; on the desktop
+ * the pane's width over its code font's advance), and draws again when it changes.
+ * At a sidebar's width the sections stack as they always have; past two of
+ * FLOW_MIN (plus the gutter) they split into two columns, past three into three.
+ * The terminal always stacks: its panes dock beside the transcript and are narrow.
+ */
+
+/**
+ * The narrowest a flow column gets, in the pane's reported columns: about the
+ * widest a desktop sidebar is drawn (Storybook's 110), halved, so a section in a
+ * column reads as it does in a roomy sidebar. Two columns from 114, three from 172.
+ */
+export const FLOW_MIN = 56
+/** The most columns a flow splits into: more makes every section a sliver. */
+export const FLOW_MAX = 3
+/** The gutter between flow columns: a group's room, as between groups of items in a row. No rule or panel marks it. */
+const FLOW_GAP = SPACE.group
+
+/** How a flow is told to lay out; each defaults to the kit's FLOW_MIN, FLOW_MAX. */
+export type FlowOptions = {
+  /** The narrowest column, in reported columns. */
+  min?: number
+  /** The most columns. */
+  max?: number
+  /**
+   * Each block's height in rows, where the caller knows better than the kit's
+   * estimate (`undefined` entries are estimated). In the order the blocks are given.
+   */
+  rows?: (number | undefined)[]
+  /**
+   * The room between blocks in a column, in the desktop's vertical units, for
+   * blocks that space themselves apart in one stack (a list's tiles, each with a
+   * margin above all but the first): in columns they drop that margin and the
+   * column spaces them, so every column's first block starts on one line.
+   */
+  gap?: number
+}
+
+/**
+ * How many columns a flow of `blocks` blocks takes at `columns` across on
+ * `surface`, and each column's width in reported columns: 1 and the whole width
+ * on the terminal, at a sidebar's width, or with fewer than two blocks.
+ */
+export const flowColumns = (surface: RenderSurface, columns: number, blocks: number, o: FlowOptions = {}) => {
+  const min = o.min ?? FLOW_MIN
+  const max = o.max ?? FLOW_MAX
+  const fit = surface === 'terminal' ? 1 : Math.floor((Math.floor(columns) + FLOW_GAP) / (min + FLOW_GAP))
+  const count = Math.max(1, Math.min(fit, max, blocks))
+  return { count, width: count === 1 ? columns : Math.floor((columns - FLOW_GAP * (count - 1)) / count) }
+}
+
+/** A drawn element's own props and children, as the engine's JSX and Storybook's both build them. */
+const partsOf = (x: any): { type?: string; p: Record<string, any>; kids: unknown[] } => {
+  const p = (x?.props ?? {}) as Record<string, any>
+  const given = x?.children ?? p.children ?? []
+  return { type: x?.type, p, kids: (Array.isArray(given) ? given : [given]).flat(Infinity as 1).filter(c => c != null && c !== false) }
+}
+
+/**
+ * About how many rows tall an element draws on the desktop: a Text or a Button a
+ * row, a column Box its children stacked, a row Box its tallest child, a `height`
+ * as given; vertical margins, padding and gaps at half a row a unit, as the
+ * desktop draws them. Only good enough to balance columns, never to size them.
+ */
+export const rowsOf = (x: unknown): number => {
+  if (x == null || x === false) return 0
+  if (typeof x === 'string' || typeof x === 'number') return 1
+  if (Array.isArray(x)) return x.reduce((n: number, c) => n + rowsOf(c), 0)
+  if (typeof x !== 'object') return 0
+  const { type, p, kids } = partsOf(x)
+  if (p.display === 'none' || p.position === 'absolute') return 0
+  const num = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0)
+  // Vertical spacing in half rows (the desktop's unit for it), as rows.
+  const around =
+    (num(p.marginTop) + num(p.marginBottom) + 2 * num(p.marginY) + 2 * num(p.margin) + num(p.paddingTop) + num(p.paddingBottom) + 2 * num(p.paddingY) + 2 * num(p.padding)) / 2
+  let own: number
+  if (typeof p.height === 'number') own = p.height
+  else if (type === 'Box') {
+    const sizes = kids.map(rowsOf)
+    if (p.flexDirection === 'column') own = sizes.reduce((a, b) => a + b, 0) + (num(p.rowGap ?? p.gap) * Math.max(0, sizes.length - 1)) / 2
+    else own = Math.max(0, ...sizes)
+  } else own = 1
+  return Math.max(own, num(p.minHeight)) + around
+}
+
+/**
+ * Splits `heights` into `n` runs in order, so the tallest run is as short as it
+ * can be: blocks read top to bottom, then left to right, and the columns end
+ * about even. Returns each run's first index.
+ */
+const balance = (heights: number[], n: number): number[] => {
+  const m = heights.length
+  const sum = [0]
+  for (const h of heights) sum.push(sum[sum.length - 1]! + h)
+  // best[j][i]: the tallest column laying the first i blocks in j columns; cut[j][i] where the last column starts.
+  const best = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(Infinity))
+  const cut = Array.from({ length: n + 1 }, () => new Array<number>(m + 1).fill(0))
+  best[0]![0] = 0
+  for (let j = 1; j <= n; j++) {
+    for (let i = j; i <= m; i++) {
+      // Every column holds at least one block.
+      for (let s = j - 1; s < i; s++) {
+        const tall = Math.max(best[j - 1]![s]!, sum[i]! - sum[s]!)
+        // Ties go to the later cut, so earlier columns take more and the last isn't the tall one.
+        if (tall <= best[j]![i]!) {
+          best[j]![i] = tall
+          cut[j]![i] = s
+        }
+      }
+    }
+  }
+  const starts: number[] = []
+  let i = m
+  for (let j = n; j >= 1; j--) {
+    starts.unshift(cut[j]![i]!)
+    i = cut[j]![i]!
+  }
+  return starts
+}
+
+/**
+ * Lays `blocks` (a pane's sections, a list's tiles) out in columns when the pane
+ * is wide enough (see `flowColumns`); otherwise gives them back as they were, so
+ * a narrow pane draws exactly what it drew before. Spread the result where the
+ * blocks went: `{flow(Box, e.surface, columns, 'sections', [a, b, c])}`.
+ *
+ * A block is never split across columns. They read top to bottom, then left to
+ * right, cut where the columns come out most even by `rowsOf`'s estimate (or the
+ * `rows` given). Each column is a plain column Box (key `<key>-col-<n>`), each
+ * block in it spanning the column's width; the gutter between is FLOW_GAP, with
+ * no rule, panel or outline.
+ */
+export const flow = (
+  Box: Els['Box'],
+  surface: RenderSurface,
+  columns: number,
+  key: string,
+  blocks: (RenderElement | null | false | undefined)[],
+  o: FlowOptions = {},
+): (RenderElement | null)[] => {
+  const shown = blocks.map((b, i) => ({ b, rows: o.rows?.[i] })).filter((x): x is { b: RenderElement; rows: number | undefined } => x.b != null && x.b !== false)
+  const { count } = flowColumns(surface, columns, shown.length, o)
+  if (count < 2) return blocks.map(b => b || null)
+  const starts = balance(
+    shown.map(x => x.rows ?? rowsOf(x.b)),
+    count,
+  )
+  const runs = starts.map((s, c) => shown.slice(s, starts[c + 1] ?? shown.length))
+  return [
+    <Box key={key} flexDirection="row" width="100%" columnGap={FLOW_GAP} alignItems="flex-start">
+      {runs.map((run, c) => (
+        // Columns share the row equally, growing from no width, as a legend's do (the desktop doesn't stretch a nested box).
+        <Box key={`${key}-col-${c}`} flexDirection="column" flexGrow={1} flexShrink={1} width={0} minWidth={0} {...(o.gap ? { rowGap: o.gap } : {})}>
+          {run.map((x, i) => (
+            <Box key={`${key}-${c}-${i}`} flexDirection="column" width="100%" minWidth={0}>
+              {x.b}
+            </Box>
+          ))}
+        </Box>
+      ))}
+    </Box>,
+  ]
+}
+
 export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOptions = {}) => {
   const { Box, Text, Button, Svg } = els
   const terminal = surface === 'terminal'
@@ -1778,6 +1945,10 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     pill,
     section,
     columns: columnsChart,
+    /** The pane's sections in columns when the desktop pane is wide (see `flow` above); as given otherwise. */
+    flow: (key: string, blocks: (RenderElement | null | false | undefined)[], o?: FlowOptions): (RenderElement | null)[] => flow(Box, surface, columns, key, blocks, o),
+    /** How many flow columns `blocks` blocks take at this pane's width, and each one's width (see `flowColumns`). */
+    flowColumns: (blocks: number, o?: FlowOptions) => flowColumns(surface, columns, blocks, o),
     perf: perfFooter,
     status,
     item,

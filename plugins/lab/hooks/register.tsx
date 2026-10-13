@@ -1,5 +1,5 @@
 import type { EngineInterface, Register } from 'claude-code'
-import { holdButtons } from '../kit/ui'
+import { flow, flowColumns, holdButtons } from '../kit/ui'
 
 import { GROUPS, byId, experiments, galleryExperiments } from './experiments'
 import type { Experiment } from './experiments'
@@ -82,8 +82,9 @@ export const register: Register = on => {
         <Text dimColor>
           {experiments.length} experiments on what the {e.surface} surface draws. Each opens in a pane of its own.
         </Text>
-        {GROUPS.map(group => (
-          <Box flexDirection="column">
+        {/* The groups in columns when the desktop pane is wide; one stack otherwise. */}
+        {flow(Box, e.surface, e.props.bodyColumns, 'groups', GROUPS.map(group => (
+          <Box key={`group-${group}`} flexDirection="column">
             <Text bold>{group}</Text>
             {experiments
               .filter(x => x.group === group)
@@ -106,7 +107,7 @@ export const register: Register = on => {
                 )
               })}
           </Box>
-        ))}
+        )), { gap: 1 })}
       </Box>
     )
   })
@@ -130,12 +131,24 @@ export const register: Register = on => {
     if (e.requestId === GALLERY) {
       return (
         <Box flexDirection="column" gap={1}>
-          {galleryExperiments().map(x => (
-            <Box flexDirection="column">
-              <Text dimColor wrap="truncate-end">{`${x.id} — ${x.question}`}</Text>
-              {drawBody(x)}
-            </Box>
-          ))}
+          {/* The experiments in columns when the desktop pane is wide, each clipped to its column; one stack otherwise. */}
+          {flow(
+            Box,
+            e.surface,
+            e.props.bodyColumns,
+            'gallery',
+            galleryExperiments().map((x, _i, all) => (
+              <Box
+                key={`x-${x.id}`}
+                flexDirection="column"
+                {...(flowColumns(e.surface, e.props.bodyColumns, all.length).count > 1 ? { minWidth: 0, overflow: 'hidden' } : {})}
+              >
+                <Text dimColor wrap="truncate-end">{`${x.id} — ${x.question}`}</Text>
+                {drawBody(x)}
+              </Box>
+            )),
+            { gap: 1 },
+          )}
         </Box>
       )
     }

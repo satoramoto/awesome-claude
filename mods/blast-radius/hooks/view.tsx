@@ -266,7 +266,8 @@ export const renderApp = (els: AppElements, state: Held, columns: number, opts: 
       )}
       {lines.length || report.more ? (
         <Box key="list" flexDirection="column" width="100%" minWidth={0} marginTop={SPACE.block / 2}>
-          {lines}
+          {/* In columns when the pane is wide (each line whole, read down then across); one stack otherwise. */}
+          {k.flow('lines', lines)}
           {report.more
             ? row('more', [
                 lead(null),

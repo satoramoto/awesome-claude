@@ -460,3 +460,31 @@ test('a Button drawn alike keeps its press handle across a redraw, and a press o
     }
   }
 })
+
+test('flow keeps a sidebar one stack, and a wide desktop pane balanced columns of whole sections in reading order', async ($, on) => {
+  const draw = kitPane($, on)
+  // One tall section, then five short ones.
+  const sections = (k: Kit) => [
+    k.section({ id: 'tall', title: 'Tall', children: Array.from({ length: 30 }, (_, i) => k.prop(`t${i}`, 'row', String(i))) }),
+    ...['b', 'c', 'd', 'e', 'f'].map(id => k.section({ id, title: id, children: [k.prop(`${id}0`, 'row', '0')] })),
+  ]
+  const every = (d: Drawn): Drawn[] => [d, ...kids(d).flatMap(every)]
+  const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+  const columnsOf = (tree: Drawn) =>
+    every(tree)
+      .filter(d => d.type === 'Box' && /^flow-col-\d+$/.test(keyOf(d)))
+      .map(col => every(col).map(keyOf).filter(key => key.startsWith('section-')).map(key => key.slice('section-'.length)))
+  const pane = (k: Kit) => ({ type: 'Box', props: { flexDirection: 'column' }, children: k.flow('flow', sections(k)) }) as never
+
+  // A sidebar's width: the sections as given, no columns.
+  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 100 }))).toEqual([])
+  // Two columns: the tall section alone, the five short ones beside it, so the columns end about even.
+  expect(columnsOf(await draw(pane, { surface: 'desktop', columns: 120 }))).toEqual([['tall'], ['b', 'c', 'd', 'e', 'f']])
+  // Three: still whole sections, read down then across.
+  const three = columnsOf(await draw(pane, { surface: 'desktop', columns: 180 }))
+  expect(three.length).toBe(3)
+  expect(three[0]).toEqual(['tall'])
+  expect(three.flat()).toEqual(['tall', 'b', 'c', 'd', 'e', 'f'])
+  // The terminal stacks at any width.
+  expect(columnsOf(await draw(pane, { surface: 'terminal', columns: 180 }))).toEqual([])
+})

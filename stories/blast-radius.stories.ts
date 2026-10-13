@@ -157,3 +157,5 @@ export const GitClean = scenario('clean')
 export const ForcePush = scenario('forcePush')
 export const Migrate = scenario('migrate')
 export const Band = scenario('band')
+/** The desktop pane expanded to about 1400px: the listed paths in columns, the head, summary and buttons across. */
+export const RmWide1400: StoryObj = { ...scenario('rm'), globals: { surface: 'desktop', frame: 'pane', columns: '180' } }

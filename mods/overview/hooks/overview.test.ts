@@ -510,3 +510,46 @@ test('the desktop draws the inspector without outlines: every section header a f
   expect(kids(hide!)).toEqual([])
   await ui.unmount()
 })
+
+/** The flow columns a drawn tree has (keys `<flow>-col-<n>`), each with the section ids in it, in order. */
+const flowed = (tree: Drawn, flow = 'sections') => {
+  const every = (d: Drawn): Drawn[] => [d, ...kids(d).flatMap(every)]
+  const ids = (d: Drawn) =>
+    every(d)
+      .map(x => String(keyOf(x) ?? ''))
+      .filter(k => k.startsWith('section-'))
+      .map(k => k.slice('section-'.length))
+  return every(tree)
+    .filter(d => d.type === 'Box' && new RegExp(`^${flow}-col-\\d+$`).test(String(keyOf(d))))
+    .map(ids)
+}
+
+test('a wide desktop pane lays the sections out in columns, each section once in reading order; a sidebar and the terminal keep one stack', async ($, on) => {
+  await session($, on, 'lane')
+  const draw = async (surface: 'terminal' | 'desktop', columns: number) => {
+    const ui = await $.ui.mount({ plugin: 'overview', surface, ...pane(columns) })
+    const tree = (await ui.drawn()) as Drawn
+    await ui.unmount()
+    return tree
+  }
+  const every = (d: Drawn): Drawn[] => [d, ...kids(d).flatMap(every)]
+  const order = (tree: Drawn) => every(tree).map(x => String(keyOf(x) ?? '')).filter(k => k.startsWith('section-')).map(k => k.slice('section-'.length))
+
+  // A sidebar's width: one stack, as before.
+  const narrow = await draw('desktop', 60)
+  expect(flowed(narrow)).toEqual([])
+  const stack = order(narrow)
+  // (No tool calls in this session, so no Activity.)
+  expect(stack).toEqual(['context', 'limits', 'agents', 'workspaces', 'accounting'])
+
+  // Expanded: two columns, then three, splitting between sections and keeping their order.
+  for (const [columns, n] of [[120, 2], [180, 3]] as const) {
+    const cols = flowed(await draw('desktop', columns))
+    expect(cols.length, `${columns} columns`).toBe(n)
+    for (const col of cols) expect(col.length).toBeGreaterThan(0)
+    expect(cols.flat()).toEqual(stack)
+  }
+
+  // The terminal never splits.
+  expect(flowed(await draw('terminal', 180))).toEqual([])
+})

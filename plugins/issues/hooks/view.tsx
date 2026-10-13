@@ -103,10 +103,12 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
   )
 
   const picked = (issue: Issue) => act.selected.includes(issue.number)
+  // In columns when the pane is wide: the columns space the tiles, so none keeps a margin of its own.
+  const flowing = list.issues.length > 0 && k.flowColumns(list.issues.length).count > 1
   const tile = (issue: Issue, i: number) => {
     const refined = issue.labels.some(l => l.name === REFINED)
     return (
-      <Box key={`issue-${issue.number}`} width="100%" marginTop={i === 0 ? 0 : SPACE.block}>
+      <Box key={`issue-${issue.number}`} width="100%" marginTop={i === 0 || flowing ? 0 : SPACE.block}>
         {k.tile(`tile-${issue.number}`, [
           // The title line, then a little room before the rest of the tile.
           <Box key="l1" width="100%" marginBottom={SPACE.block / 2}>
@@ -199,7 +201,7 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
 
   const body: (RenderElement | null)[] = list.note
     ? [<Text key="note" dimColor>{list.note}</Text>]
-    : [form, bar, ...(list.issues.length ? list.issues.map(tile) : [<Text key="none" dimColor>No open issues.</Text>])]
+    : [form, bar, ...(list.issues.length ? k.flow('issues', list.issues.map(tile), { gap: SPACE.block }) : [<Text key="none" dimColor>No open issues.</Text>])]
 
   // One repository, so no foldable header: its name as a plain line, the counts on the right.
   const head = row('repo', [<Text key="r" color={GRAY.mid} wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
