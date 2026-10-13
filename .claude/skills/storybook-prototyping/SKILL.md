@@ -79,7 +79,7 @@ It lays out like the desktop app, so problems show here first:
 - The sidebar frame's body starts 12.5px in from the divider, as the app's does.
 
 It doesn't emulate the engine's validator (a prop the desktop refuses still
-draws here), real data, timers or `gh`. Run the build and validate too.
+draws here), real data, timers or `gh`. The engine's validator runs in the test pass and on CI.
 
 ## Run it and look
 

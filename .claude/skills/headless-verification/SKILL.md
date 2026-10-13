@@ -1,6 +1,6 @@
 ---
 name: headless-verification
-description: How to check an awesome-claude mod works without opening the app (build, claude plugin validate, tsc, claude plugin test with render tests on each surface, a headless claude -p smoke run), then for real in the desktop app. Use whenever you finish or debug a change under mods/ or kit/, write or fix a mod's *.test.ts, need the engine's types for tsc, or need to know why the engine refused a hook or a tree.
+description: How to check an awesome-claude mod works without opening the app (build, claude plugin validate, tsc, claude plugin test with render tests on each surface, a headless claude -p smoke run), then for real in the desktop app. Use for a test pass (when asked, or before a PR), when debugging why a mod misbehaves, when writing or fixing a mod's *.test.ts, need the engine's types for tsc, or need to know why the engine refused a hook or a tree.
 ---
 
 # Verifying a mod headlessly
