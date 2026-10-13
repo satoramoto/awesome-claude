@@ -44,12 +44,16 @@ export type AgentExtra = {
   doing?: Doing
 }
 
-/** An agent's latest tool call in words: `Bash: bun build.ts`, or a verb and a path (`Editing`, `kit/ui.tsx`). */
+/** The kind of tool a call is, for its icon (desktop) or glyph (terminal). */
+export type DoingKind = 'bash' | 'edit' | 'read' | 'search' | 'web' | 'agent' | 'mcp' | 'other'
+
+/** An agent's latest tool call: its kind, a name or verb (`Bash`, `Editing`) and its argument (`bun build.ts`, `kit/ui.tsx`). */
 export type Doing = {
-  /** The words before the path, or the whole line when there's no path. */
+  kind: DoingKind
+  /** The tool's name or verb, drawn at normal weight. */
   text: string
-  /** A path or URL, cut in the middle where the line is too long. */
-  path?: string
+  /** Its command, path, URL or pattern, drawn dim and cut in the middle where the line is too long. */
+  arg?: string
 }
 
 /** One drawn row of the Tasks tree. */

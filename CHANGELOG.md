@@ -3,7 +3,7 @@
 ## Unreleased
 
 - **Kit** (overview 0.7.1, issues 0.3.1, launcher 0.2.1, lab 0.2.1, filetree 0.5.1, blast-radius 0.4.1): a section heading's fold chevron sits last, flush right, after the icon, title and figures, on the desktop and the terminal.
-- **`overview`** (0.7.1): a running agent's card has a dim line saying what it's doing now (its current tool call, e.g. `Bash: bun build.ts`), on the desktop and the terminal.
+- **`overview`** (0.7.1): an agent's card is one row: an icon for its kind of agent (code, tools, zap, checklist, telescope, tasklist, robot, book) coloured by its status, with the type and status as its tooltip, then the title and elapsed time; while it runs, a second row says what it's doing now: an icon for the kind of tool, its name, then its command or path dim and cut in the middle. The terminal draws one glyph per kind instead. Activity no longer shows failed calls. The kit gains Octicons for these (terminal, pencil, globe, plug, dot-fill, code, tools, zap, checklist, telescope, tasklist, hubot, book).
 - **Kit and Storybook bench**: the bench now draws the desktop as the engine
   does: a Button shows its label only (dim with `dimColor`), never its
   children; every Input draws its submit button; vertical margin, padding and

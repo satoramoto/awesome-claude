@@ -291,20 +291,20 @@ test('limits are readings: label, gauge, percent and reset, red from 90%', async
   await ui.unmount()
 })
 
-test('agents are a tree of status rows: running a blue ◐, done a green ✓, failed a red ✕', async ($, on) => {
+test('agents are a tree of rows marked by kind and coloured by status: running blue, done green, failed red', async ($, on) => {
   await session($, on)
   const ui = await $.ui.mount({ plugin: 'overview', surface: 'terminal', ...pane(40) })
-  const running = await ui.findAll({ type: 'Text', text: /^◐$/ })
-  expect(running.length).toBe(2)
-  expect(running.every(t => t.props.color === 'suggestion')).toBe(true)
-  expect((await ui.find({ type: 'Text', text: /^✓$/ }))?.props.color).toBe('success')
-  expect((await ui.find({ type: 'Text', text: /^✕$/ }))?.props.color).toBe('error')
+  // The developer ◆ and its worker ◇ run; Explore ⌕ finished; the reviewer ◎ failed.
+  expect((await ui.find({ type: 'Text', text: /^◆$/ }))?.props.color).toBe('suggestion')
+  expect((await ui.find({ type: 'Text', text: /^◇$/ }))?.props.color).toBe('suggestion')
+  expect((await ui.find({ type: 'Text', text: /^⌕$/ }))?.props.color).toBe('success')
+  expect((await ui.find({ type: 'Text', text: /^◎$/ }))?.props.color).toBe('error')
   // The worker sits under the lane that spawned it.
   expect(await ui.find({ type: 'Text', text: /^└─$/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Worker: legend bar/ })).toBeDefined()
   // Folding the section leaves only its header.
   await ui.press({ key: 'toggle-agents' })
-  expect(await ui.find({ type: 'Text', text: /^◐$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^◆$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: 'Agents' })).toBeDefined()
   await ui.unmount()
 })

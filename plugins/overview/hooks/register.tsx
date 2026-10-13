@@ -16,6 +16,7 @@ import type {
   AgentExtra,
   BranchView,
   Doing,
+  DoingKind,
   GhInfo,
   GitFile,
   GitInfo,
@@ -679,7 +680,7 @@ const noteDoing = async ($: EngineInterface, id: string, tool: string, args: Rec
   sessionCwd ??= await $.session.cwd().catch(() => undefined)
   const doing = describeCall(tool, args, sessionCwd)
   const old = (await read($, agentExtra))[id]?.doing
-  if (old && old.text === doing.text && old.path === doing.path) return
+  if (old && old.kind === doing.kind && old.text === doing.text && old.arg === doing.arg) return
   await update($, agentExtra, all => ({ ...all, [id]: { ...all[id], doing } }))
 }
 
@@ -736,43 +737,44 @@ const relative = (path: string, cwd: string | undefined): string =>
 const arg = (v: unknown): string => (typeof v === 'string' ? (v.trim().split('\n')[0] ?? '').trim() : '')
 
 /**
- * A tool call in words, for an agent's "doing now" line: `Bash: bun build.ts`,
- * `Editing` `kit/ui.tsx`, `Reading` `mods/launcher/…`, `Searching: TODO`.
+ * A tool call for an agent's "doing now" line: its kind, a name or verb and its
+ * argument (`Bash` `bun build.ts`, `Editing` `kit/ui.tsx`, `Searching` `TODO`).
  * Paths are made relative to the session's folder.
  */
 export const describeCall = (tool: string, args: Record<string, unknown>, cwd?: string): Doing => {
-  const path = (v: unknown, verb: string): Doing => {
-    const p = arg(v)
-    return p ? { text: verb, path: relative(p, cwd) } : { text: verb }
-  }
-  const said = (label: string, v: unknown): Doing => {
-    const s = arg(v)
-    return { text: s ? `${label}: ${s}` : label }
+  const doing = (kind: DoingKind, text: string, v: unknown, isPath = false): Doing => {
+    const a = arg(v)
+    return a ? { kind, text, arg: isPath ? relative(a, cwd) : a } : { kind, text }
   }
   switch (tool) {
     case 'Bash':
-      return said('Bash', args.command)
+      return doing('bash', 'Bash', args.command)
     case 'Edit':
     case 'MultiEdit':
     case 'NotebookEdit':
-      return path(args.file_path ?? args.notebook_path, 'Editing')
+      return doing('edit', 'Editing', args.file_path ?? args.notebook_path, true)
     case 'Write':
-      return path(args.file_path, 'Writing')
+      return doing('edit', 'Writing', args.file_path, true)
     case 'Read':
-      return path(args.file_path, 'Reading')
+      return doing('read', 'Reading', args.file_path, true)
     case 'Grep':
-      return said('Searching', args.pattern)
+      return doing('search', 'Searching', args.pattern)
     case 'Glob':
-      return said('Finding', args.pattern)
+      return doing('search', 'Finding', args.pattern)
     case 'WebFetch':
-      return path(args.url, 'Fetching')
+      return doing('web', 'Fetching', args.url)
     case 'WebSearch':
-      return said('Searching the web', args.query)
+      return doing('web', 'Searching the web', args.query)
     case 'Agent':
     case 'Task':
-      return said('Starting agent', args.description)
+      return doing('agent', 'Starting agent', args.description)
     default:
-      return { text: tool.startsWith('mcp__') ? (tool.split('__').pop() ?? tool) : tool }
+      // An MCP tool by its own name, its server dim after it: `search_issues` `github`.
+      if (tool.startsWith('mcp__')) {
+        const [, server, ...name] = tool.split('__')
+        return name.length ? { kind: 'mcp', text: name.join('__'), arg: server } : { kind: 'mcp', text: tool }
+      }
+      return { kind: 'other', text: tool }
   }
 }
 
