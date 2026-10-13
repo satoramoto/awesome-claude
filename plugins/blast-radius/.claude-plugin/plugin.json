@@ -1,10 +1,11 @@
 {
   "name": "blast-radius",
-  "version": "0.4.3",
+  "version": "0.4.4",
   "description": "Holds risky shell commands (rm -rf, git reset --hard, git clean, force push, migrations) and shows what they would change, with Proceed and Cancel buttons.",
   "author": {
     "name": "Claude Code DevRel"
   },
+  "types": "./types/index.d.ts",
   "keywords": [
     "mods",
     "safety",

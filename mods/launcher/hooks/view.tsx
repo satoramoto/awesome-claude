@@ -4,6 +4,7 @@ import { basename, bytes, middle } from '@kit/format'
 import { C, GRAY, MUTED, STATUS } from '@kit/tokens'
 import type { StatusKind } from '@kit/tokens'
 import { CELLS, EDGE, MEASURE, SPACE, kit } from '@kit/ui'
+import type { FlowSwitch } from '@kit/ui'
 
 import type { KillConfirm, LaunchConfig, LaunchFile, Server, Status } from '../types'
 
@@ -177,13 +178,13 @@ export const renderPane = (
   servers: Record<string, Server>,
   open: string[],
   act: Actions,
-  opts: { focused?: boolean; confirm?: KillConfirm | null } = {},
+  opts: { focused?: boolean; confirm?: KillConfirm | null; flow?: FlowSwitch } = {},
 ): RenderElement => {
   const { Box, Text, Link } = els
   const terminal = surface === 'terminal'
   // On the terminal the rows keep to the measure, so a row's state and controls stay
-  // near its name however wide the pane.
-  const k = kit(els, surface, columns, { focused: opts.focused, ...(terminal ? { measure: MEASURE } : {}) })
+  // near its name however wide the pane. The column view's switch is the app surfaces' alone.
+  const k = kit(els, surface, columns, { focused: opts.focused, ...(terminal ? { measure: MEASURE } : { flow: opts.flow }) })
   if (!file) return terminal ? k.note('reading', 'Reading .claude/launch.json…', 'loading') : <Text dimColor>Reading .claude/launch.json…</Text>
   if (file.note) {
     return (
@@ -497,6 +498,8 @@ export const renderPane = (
       </Box>
       {/* In columns when the pane is wide; one stack at a sidebar's width. */}
       {k.flow('sections', rows)}
+      {/* The column view's switch, on a pane wide enough for columns. */}
+      {k.footer()}
     </Box>
   )
 }

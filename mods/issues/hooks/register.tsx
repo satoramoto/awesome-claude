@@ -17,6 +17,8 @@ const selected = atom({ plugin: 'issues', key: 'selected' } as const, [])
 const adding = atom({ plugin: 'issues', key: 'adding' } as const, null)
 const reading = atom({ plugin: 'issues', key: 'reading' } as const, false)
 const cursor = atom({ plugin: 'issues', key: 'cursor' } as const, null)
+/** Whether a wide app pane flows the tiles into columns; the footer's switch flips it. */
+const columns = atom({ plugin: 'issues', key: 'columns' } as const, true)
 /** Bumped after each add, so the quick-add field is drawn afresh, empty. */
 let formKey = 0
 
@@ -279,6 +281,7 @@ export const register: Register = on => {
     }
     const picked = await read($, selected)
     const form = await read($, adding)
+    const columnsOn = await read($, columns)
     const pick = (n: number) => update($, selected, s => (s.includes(n) ? s.filter(x => x !== n) : [...s, n]))
     return renderApp(holdButtons($.ui.resolve(e), e) as AppElements, data, e.props.bodyColumns, at, {
       add: title => void addIssue($, title).catch(() => undefined),
@@ -296,6 +299,7 @@ export const register: Register = on => {
       selected: picked,
       adding: form,
       formKey,
+      flow: { on: columnsOn, toggle: () => void update($, columns, was => !was).catch(() => undefined) },
     })
   })
 }

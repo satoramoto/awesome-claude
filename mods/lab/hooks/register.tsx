@@ -1,5 +1,6 @@
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import { flow, flowColumns, holdButtons } from '@kit/ui'
+import { flow, flowColumns, holdButtons, kit } from '@kit/ui'
 
 import { GROUPS, byId, experiments, galleryExperiments } from './experiments'
 import type { Experiment } from './experiments'
@@ -7,6 +8,15 @@ import type { Experiment } from './experiments'
 const INDEX = 'lab'
 const PREFIX = 'lab-'
 const GALLERY = 'lab-gallery'
+
+/** Whether a wide app pane flows the index's groups and the gallery into columns; the footer's switch flips it. */
+const columns = atom({ plugin: 'lab', key: 'columns' } as const, true)
+
+/** The column view's switch for a render: as the state holds it, and a press that flips it. */
+const flowSwitch = async ($: EngineInterface) => ({
+  on: await read($, columns),
+  toggle: () => void update($, columns, was => !was).catch(() => undefined),
+})
 
 /** Every experiment the desktop accepts, in one pane, for checking paint by eye. */
 const openGallery = ($: EngineInterface) => $.ui.open({ id: GALLERY, title: 'Lab: gallery' })
@@ -74,8 +84,12 @@ export const register: Register = on => {
 
   // The index: every experiment by group, a row each that opens its pane.
   on('ui.render', { component: 'Pane', requestId: INDEX }, async ($, e) => {
+    const sw = await flowSwitch($)
     // Buttons keep their press handles across redraws, so a click made just before one still lands.
-    const { Box, Button, Text } = holdButtons($.ui.resolve(e), e)
+    const table = holdButtons($.ui.resolve(e), e)
+    const { Box, Button, Text } = table
+    // The kit draws the footer with the column view's switch (wide app panes only).
+    const k = kit(table as never, e.surface, e.props.bodyColumns, { flow: sw })
     return (
       <Box flexDirection="column" gap={1}>
         <Button key="gallery" variant="primary" label="Gallery" onPress={() => void openGallery($)} />
@@ -107,7 +121,8 @@ export const register: Register = on => {
                 )
               })}
           </Box>
-        )), { gap: 1 })}
+        )), { gap: 1, single: !sw.on })}
+        {k.footer()}
       </Box>
     )
   })
@@ -129,6 +144,8 @@ export const register: Register = on => {
       }
     }
     if (e.requestId === GALLERY) {
+      const sw = await flowSwitch($)
+      const k = kit(table as never, e.surface, e.props.bodyColumns, { flow: sw })
       return (
         <Box flexDirection="column" gap={1}>
           {/* The experiments in columns when the desktop pane is wide, each clipped to its column; one stack otherwise. */}
@@ -141,14 +158,15 @@ export const register: Register = on => {
               <Box
                 key={`x-${x.id}`}
                 flexDirection="column"
-                {...(flowColumns(e.surface, e.props.bodyColumns, all.length).count > 1 ? { minWidth: 0, overflow: 'hidden' } : {})}
+                {...(flowColumns(e.surface, e.props.bodyColumns, all.length, { single: !sw.on }).count > 1 ? { minWidth: 0, overflow: 'hidden' } : {})}
               >
                 <Text dimColor wrap="truncate-end">{`${x.id} — ${x.question}`}</Text>
                 {drawBody(x)}
               </Box>
             )),
-            { gap: 1 },
+            { gap: 1, single: !sw.on },
           )}
+          {k.footer()}
         </Box>
       )
     }

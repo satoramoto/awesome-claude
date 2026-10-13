@@ -326,7 +326,17 @@ export type KitOptions = {
    * stays empty. Left out, sections span the pane (a file tree wants every cell).
    */
   measure?: number
+  /**
+   * The column view's switch, as the mod holds it in its own state (key
+   * `columns`, default on): off, `flow` gives one stack at any width. With a
+   * `toggle`, a wide desktop pane's footer (`perf`, `footer`) draws the quiet
+   * action that flips it (see `flowToggle`).
+   */
+  flow?: FlowSwitch
 }
+
+/** The column view's switch: `on` as the mod's state holds it, `toggle` to flip it from a press. */
+export type FlowSwitch = { on: boolean; toggle?: () => void }
 
 /**
  * A part of a list row's right cluster that says when it gives way: at narrow
@@ -420,17 +430,23 @@ export type FlowOptions = {
    * column spaces them, so every column's first block starts on one line.
    */
   gap?: number
+  /** One stack at any width: the column view switched off (KitOptions' `flow`). */
+  single?: boolean
 }
+
+/** Whether a pane `columns` across on `surface` is wide enough to split into flow columns at all. */
+export const flowSplits = (surface: RenderSurface, columns: number, o: Pick<FlowOptions, 'min'> = {}) =>
+  surface !== 'terminal' && Math.floor((Math.floor(columns) + FLOW_GAP) / ((o.min ?? FLOW_MIN) + FLOW_GAP)) >= 2
 
 /**
  * How many columns a flow of `blocks` blocks takes at `columns` across on
  * `surface`, and each column's width in reported columns: 1 and the whole width
- * on the terminal, at a sidebar's width, or with fewer than two blocks.
+ * on the terminal, at a sidebar's width, with fewer than two blocks, or `single`.
  */
 export const flowColumns = (surface: RenderSurface, columns: number, blocks: number, o: FlowOptions = {}) => {
   const min = o.min ?? FLOW_MIN
   const max = o.max ?? FLOW_MAX
-  const fit = surface === 'terminal' ? 1 : Math.floor((Math.floor(columns) + FLOW_GAP) / (min + FLOW_GAP))
+  const fit = surface === 'terminal' || o.single ? 1 : Math.floor((Math.floor(columns) + FLOW_GAP) / (min + FLOW_GAP))
   const count = Math.max(1, Math.min(fit, max, blocks))
   return { count, width: count === 1 ? columns : Math.floor((columns - FLOW_GAP * (count - 1)) / count) }
 }
@@ -553,6 +569,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   const terminal = surface === 'terminal'
   /** Whether the pane has the keyboard; unknown counts as yes. */
   const paneFocused = opts.focused !== false
+  /** A flow's options with the column view's switch applied: off, one stack. */
+  const flowOpts = (o: FlowOptions = {}): FlowOptions => (opts.flow?.on === false ? { ...o, single: true } : o)
   /** Under MIN_COLUMNS the terminal draws section headers only. */
   const floor = terminal && Math.floor(columns) < MIN_COLUMNS
   /** A text role's props on the terminal (see TERM_ROLES). */
@@ -1474,20 +1492,47 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       share('perf-since', terminal ? GLYPH.time : '⏱', short(snap.sinceMs), ''),
       ...rows.map(r => share(`perf-${r.name}`, PERF_GLYPH[r.name] ?? '•', r.avgMs > 0 ? ms(r.avgMs) : `${r.perMin}/m`, '', tone(r))),
     ]
-    const band = (row: RenderElement[]) =>
-      terminal ? (
-        <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">
-          {row}
-        </Box>
-      ) : (
-        rounded(
-          FILL.head,
-          { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: 'space-between', alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, height: BAND_ROWS, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
-          row,
-        )
-      )
     // One row: the lead (when given) and the uptime, or the jobs; what doesn't fit is cut.
-    return band(opts.lead?.length ? [...opts.lead, items[0]!] : items)
+    // The column view's switch last, flush right, where the pane is wide enough to split.
+    const toggle = flowToggle()
+    return footBand([...(opts.lead?.length ? [...opts.lead, items[0]!] : items), ...(toggle ? [toggle] : [])])
+  }
+
+  /** A footer's band: one row, cut where it doesn't fit; on the app surfaces a fixed-height fill, its ends on the inset. */
+  const footBand = (row: RenderElement[], justify = 'space-between') =>
+    terminal ? (
+      <Box flexDirection="row" columnGap={2} marginTop={1} overflow="hidden">
+        {row}
+      </Box>
+    ) : (
+      rounded(
+        FILL.head,
+        { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: justify, alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, height: BAND_ROWS, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
+        row,
+      )
+    )
+
+  /**
+   * The column view's switch (KitOptions' `flow`): a quiet action, its label
+   * alone as the desktop draws a Button, `columns` while on and a dim `single
+   * column` while off. Only on an app surface wide enough to split
+   * (`flowSplits`) and with a `toggle` to press; null elsewhere, where it would
+   * do nothing.
+   */
+  const flowToggle = (): RenderElement | null => {
+    const sw = opts.flow
+    if (!sw?.toggle || !Button || !flowSplits(surface, columns)) return null
+    return action({ key: 'flow-toggle', label: sw.on ? 'columns' : 'single column', quiet: !sw.on, onPress: sw.toggle })
+  }
+
+  /**
+   * A pane's footer for a mod with no perf figures: the column view's switch
+   * alone, flush right on the band. Null when there's nothing to draw (the
+   * terminal, a sidebar's width, no `flow` toggle given).
+   */
+  const footer = (): RenderElement | null => {
+    const toggle = flowToggle()
+    return toggle ? footBand([toggle], 'flex-end') : null
   }
 
   /**
@@ -1946,9 +1991,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     section,
     columns: columnsChart,
     /** The pane's sections in columns when the desktop pane is wide (see `flow` above); as given otherwise. */
-    flow: (key: string, blocks: (RenderElement | null | false | undefined)[], o?: FlowOptions): (RenderElement | null)[] => flow(Box, surface, columns, key, blocks, o),
+    flow: (key: string, blocks: (RenderElement | null | false | undefined)[], o?: FlowOptions): (RenderElement | null)[] => flow(Box, surface, columns, key, blocks, flowOpts(o)),
     /** How many flow columns `blocks` blocks take at this pane's width, and each one's width (see `flowColumns`). */
-    flowColumns: (blocks: number, o?: FlowOptions) => flowColumns(surface, columns, blocks, o),
+    flowColumns: (blocks: number, o?: FlowOptions) => flowColumns(surface, columns, blocks, flowOpts(o)),
+    flowToggle,
+    footer,
     perf: perfFooter,
     status,
     item,

@@ -3,7 +3,8 @@
 //
 // Modified in the awesome-claude fork (2026): renamed from blast-radius.mjs to
 // register.tsx and typed for TypeScript; the drawing moved to view.tsx, which
-// keeps upstream's terminal drawing and adds a desktop one. The holding,
+// keeps upstream's terminal drawing and adds a desktop one, with the kit's
+// column view switch kept in the mod's state (`columns`). The holding,
 // classifying and measuring logic is upstream's, unchanged.
 //
 // Blast Radius: holds a risky Bash command and shows what it would change.
@@ -20,6 +21,7 @@
 // The host reads `on(...)` and `$.noun.method(...)` from source, so they are
 // spelled literally, and helpers that take `$` are top-level functions.
 
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import { holdButtons } from '../kit/ui'
 
@@ -36,14 +38,20 @@ const LIST_MAX = 10;
 // The call being held, or null. One at a time: Bash calls in a turn run in order.
 let held: Held | null = null;
 
+/** Whether a wide app pane flows the report's lines into columns; the pane's footer switch flips it. */
+const columnsView = atom({ plugin: "blast-radius", key: "columns" } as const, true);
+
 /** The report for the surface, drawn with the kit: in cells on the terminal, as the app's elsewhere. */
-function draw($: $, e: any, state: Held, band: boolean) {
+async function draw($: $, e: any, state: Held, band: boolean) {
+  const columnsOn = await read($, columnsView);
   // Buttons keep their press handles across redraws, so a click made just before one still lands.
   const els = holdButtons($.ui.resolve(e), e);
   const columns = Number(e.props?.bodyColumns ?? 40);
   // The rows it has (the band's most, or the pane's body), so the list is cut before the actions are.
   const rows = Number(e.props?.maxRows ?? e.props?.scroll?.bodyRows) || undefined;
-  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band, focused: e.props?.isFocused, rows }) :renderApp(els as unknown as AppElements, state, columns, { band });
+  // The switch is drawn in the pane alone; the band above the prompt keeps to the hold.
+  const flow = { on: columnsOn, ...(band ? {} : { toggle: () => void update($, columnsView, (was) => !was).catch(() => undefined) }) };
+  return e.surface === "terminal" ? renderTerminal(els, state, columns, { band, focused: e.props?.isFocused, rows }) :renderApp(els as unknown as AppElements, state, columns, { band, flow });
 }
 
 export const register: Register = (on) => {

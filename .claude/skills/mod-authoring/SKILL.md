@@ -147,6 +147,12 @@ The look is an instrument inspector (think Premiere's Effect Controls):
   come back unchanged. Size anything you cut by hand to `k.flowColumns(n).width`,
   not the pane's columns. Blocks that space themselves apart in one stack (a
   list's tiles) drop their margin when flowing and pass `{ gap }` instead.
+  The column view has a switch: keep `columns: boolean` (atom initial `true`) in
+  the mod's state contract, pass `kit(els, surface, columns, { flow: { on, toggle } })`
+  (toggle flips the atom from the press), and end the desktop pane with `k.perf(...)`
+  or `k.footer()`: a quiet `columns` / dim `single column` action, drawn only
+  where the pane is wide enough to split. Off, `k.flow` gives one stack; the bare
+  `flow(...)` and `flowColumns(...)` take `{ single: true }`.
 - One column of sections (per flow column), each a collapsible header row (icon, title, figures,
   then the fold arrow ▾ last, flush right) with its properties indented under it. Readings are label, thin flat
   gauge, value, dim unit, in fixed columns.

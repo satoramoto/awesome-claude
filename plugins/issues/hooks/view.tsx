@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import { ago } from '../kit/format'
 import { C, GRAY, MUTED, treePrefix } from '../kit/tokens'
 import { BLANK, EDGE, SPACE, kit } from '../kit/ui'
-import type { RightPart } from '../kit/ui'
+import type { FlowSwitch, RightPart } from '../kit/ui'
 
 import type { Issue, IssueList, LinkedPr } from '../types'
 
@@ -40,6 +40,8 @@ export type Actions = {
   adding: string | null
   /** Changes after each add, so the field comes back empty. */
   formKey: number
+  /** The column view's switch: on, a wide pane flows the tiles into columns. */
+  flow?: FlowSwitch
 }
 
 /**
@@ -52,7 +54,7 @@ export type Actions = {
  */
 export const renderApp = (els: AppElements, list: IssueList | null, columns: number, at: number, act: Actions): RenderElement => {
   const { Box, Text, Link, Button, Input } = els
-  const k = kit(els, 'desktop', columns)
+  const k = kit(els, 'desktop', columns, { flow: act.flow })
   if (!list) return <Text dimColor>Reading issues…</Text>
   const { open, fresh } = counts(list, at)
 
@@ -205,13 +207,23 @@ export const renderApp = (els: AppElements, list: IssueList | null, columns: num
 
   // One repository, so no foldable header: its name as a plain line, the counts on the right.
   const head = row('repo', [<Text key="r" color={GRAY.mid} wrap="truncate">{list.repo || 'Issues'}</Text>], [list.note ? null : k.summary([[open, 'open', OPEN], fresh ? [String(fresh), 'today'] : null])])
-  return (
-    <Box flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={SPACE.block}>
+  // The column view's switch, on a pane wide enough for columns: a footer band across the pane, under the body's edges.
+  const footer = k.footer()
+  const page = (
+    <Box key="page" flexDirection="column" paddingLeft={EDGE.left} paddingRight={EDGE.right} marginTop={SPACE.block}>
       <Box key="head" width="100%" marginBottom={SPACE.block}>
         {head}
       </Box>
       {body}
     </Box>
+  )
+  return footer ? (
+    <Box flexDirection="column">
+      {page}
+      {footer}
+    </Box>
+  ) : (
+    page
   )
 }
 

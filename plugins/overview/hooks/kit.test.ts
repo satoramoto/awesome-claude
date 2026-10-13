@@ -488,3 +488,56 @@ test('flow keeps a sidebar one stack, and a wide desktop pane balanced columns o
   // The terminal stacks at any width.
   expect(columnsOf(await draw(pane, { surface: 'terminal', columns: 180 }))).toEqual([])
 })
+
+test('the column view switch shows only on a pane wide enough to split; pressed, a wide pane draws one stack, pressed again columns', async ($, on) => {
+  let columnsOn = true
+  on('ui.render', { component: 'Pane', requestId: 'kit' }, async ($$, e) => {
+    const els = holdButtons($$.ui.resolve(e), e)
+    const k = kit(els as any, e.surface, e.props.bodyColumns, { flow: { on: columnsOn, toggle: () => void (columnsOn = !columnsOn) } })
+    const sections = ['a', 'b', 'c', 'd'].map(id => k.section({ id, title: id, children: [k.prop(`${id}0`, 'row', '0')] }))
+    return h(els.Box as never, { flexDirection: 'column' }, ...k.flow('flow', sections), k.footer()) as never
+  })
+  const open = (surface: 'terminal' | 'desktop', columns: number) =>
+    $.ui.mount({
+      plugin: 'overview',
+      surface,
+      component: 'Pane',
+      requestId: 'kit',
+      props: { title: 'Kit', isFocused: true, bodyColumns: columns, placement: 'dock', scroll: { offset: 0, bodyRows: 60 }, view: {} },
+    })
+  const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+  const read = async (ui: { drawn: () => Promise<unknown> }) => {
+    const tree = (await ui.drawn()) as Drawn
+    return {
+      columns: all(tree).filter(d => d.type === 'Box' && /^flow-col-\d+$/.test(keyOf(d))).length,
+      toggle: all(tree).find(d => d.type === 'Button' && keyOf(d) === 'flow-toggle'),
+    }
+  }
+  // A sidebar's width, and the terminal at any width: nothing to switch, so no switch.
+  for (const [surface, columns] of [['desktop', 80], ['terminal', 180]] as const) {
+    const ui = await open(surface, columns)
+    expect((await read(ui)).toggle, `${surface} at ${columns}`).toBeUndefined()
+    await ui.unmount()
+  }
+  // Wide: columns, and the switch says so, its label alone and lit.
+  const ui = await open('desktop', 100)
+  let now = await read(ui)
+  expect(now.columns).toBe(2)
+  expect(now.toggle?.props).toMatchObject({ label: 'columns' })
+  expect(now.toggle?.props?.dimColor).toBeUndefined()
+  expect(kids(now.toggle!)).toEqual([])
+  // Off: one stack at the same width, the switch dim.
+  await ui.press({ key: 'flow-toggle', plugin: (now.toggle as { press?: { plugin: string } }).press!.plugin })
+  expect(columnsOn).toBe(false)
+  await ui.redraw()
+  now = await read(ui)
+  expect(now.columns).toBe(0)
+  expect(now.toggle?.props).toMatchObject({ label: 'single column', dimColor: true })
+  // On again: the columns are back.
+  await ui.press({ key: 'flow-toggle', plugin: (now.toggle as { press?: { plugin: string } }).press!.plugin })
+  await ui.redraw()
+  now = await read(ui)
+  expect(now.columns).toBe(2)
+  expect(now.toggle?.props).toMatchObject({ label: 'columns' })
+  await ui.unmount()
+})

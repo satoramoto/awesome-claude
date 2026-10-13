@@ -34,6 +34,10 @@ export type DesktopData = {
   collapsed: string[]
   /** Folds or unfolds a section. */
   toggle: (id: string) => void
+  /** The column view's switch: on, a wide pane flows its sections into columns. */
+  columnsOn: boolean
+  /** Flips the column view. */
+  toggleColumns: () => void
   /** The pane's width in cells. */
   columns: number
   /** The pane's height in rows, so the footer can sit on its bottom edge. */
@@ -228,7 +232,7 @@ export const activityChart = (a: Activity) => {
 
 export const renderDesktop = (els: AppElements, d: DesktopData, fx: Helpers): RenderElement => {
   const { Box, Text } = els
-  const k = kit(els, 'desktop', d.columns)
+  const k = kit(els, 'desktop', d.columns, { flow: { on: d.columnsOn, toggle: d.toggleColumns } })
   // A section's width: the pane's, or a flow column's when the pane is wide (at most six sections share it).
   const lane = k.flowColumns(6).width
   const a = d.activity

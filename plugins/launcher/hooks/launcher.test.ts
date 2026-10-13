@@ -820,3 +820,26 @@ test('on a wide desktop pane the configurations sit in columns, each section who
   expect(await columnsAt('desktop', 180)).toEqual([['app'], ['storybook'], ['storybook-wt']])
   expect(await columnsAt('terminal', 180)).toEqual([])
 })
+
+test("the footer's columns switch turns a wide pane to one stack, and the setting stays in the mod's state for the next drawing", async ($, on) => {
+  // What the mod writes to its `columns` state, as the host sees it.
+  const writes: unknown[] = []
+  on('state.set', async (_$, e, next) => {
+    if (e.plugin === 'launcher' && e.key === 'columns') writes.push(e.value)
+    return next(e)
+  })
+  engine(on, { launch: SHARED, procs: SHARED_PROCS })
+  await launcher($, 'list')
+  const flowed = (tree: Drawn) => everyOf(tree).filter(d => d.type === 'Box' && /^sections-col-\d+$/.test(keyOf(d))).length
+  const ui = await mountAt($, 'desktop', 120)
+  expect(flowed((await ui.drawn()) as Drawn)).toBe(2)
+  expect((await ui.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'columns' })
+  await ui.press({ key: 'flow-toggle' })
+  expect(writes).toEqual([false])
+  await ui.unmount()
+  // Drawn again (a reload keeps the mod's state): one stack, the switch dim.
+  const again = await mountAt($, 'desktop', 120)
+  expect(flowed((await again.drawn()) as Drawn)).toBe(0)
+  expect((await again.find({ key: 'flow-toggle' }))?.props).toMatchObject({ label: 'single column', dimColor: true })
+  await again.unmount()
+})
