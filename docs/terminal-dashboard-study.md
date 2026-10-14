@@ -2,7 +2,7 @@
 
 What well-regarded terminal UIs do, pattern by pattern, and what our kit should
 take from them. Written October 2026 for the terminal side of the kit (`kit/ui.tsx`,
-`kit/tokens.ts`), while the kit moves to the `rules` look: a bold orange title and
+`kit/tokens.ts`, which now live in zen at `src/harness/claude-code/kit/`), while the kit moves to the `rules` look: a bold orange title and
 icon with a dim `─` rule out to the figures, plain labels, bold values, and dim
 italic units.
 

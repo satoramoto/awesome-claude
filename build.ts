@@ -3,14 +3,20 @@
 // plugin's folder, so the kit is copied in beside the mod and `@kit/…` imports
 // become relative paths. Nothing else changes; the output stays readable source.
 //
-//   bun build.ts            compile every mod once
-//   bun build.ts --watch    and again whenever mods/ or kit/ change
+// The kit is zen's (src/harness/claude-code/kit, see zen.ts): from the pinned
+// @satoramoto/zen in node_modules, or from the zen checkout ZEN names.
+//
+//   bun build.ts                            compile every mod once
+//   bun build.ts --watch                    and again whenever mods/ or the kit change
+//   ZEN=~/Code/satoramoto/zen bun build.ts  with the kit from a zen checkout
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, watch, writeFileSync } from 'node:fs'
 import { dirname, join, relative } from 'node:path'
 
+import { zenKit } from './zen'
+
 const ROOT = import.meta.dir
 const MODS = join(ROOT, 'mods')
-const KIT = join(ROOT, 'kit')
+const KIT = zenKit(ROOT)
 const OUT = join(ROOT, 'plugins')
 // Laid by the engine beside a mod it loads; never copied.
 const SKIP = new Set(['node_modules', 'types-laid'])
@@ -92,6 +98,6 @@ if (import.meta.main) {
     }
     watch(MODS, { recursive: true }, again)
     watch(KIT, { recursive: true }, again)
-    console.log('watching mods/ and kit/')
+    console.log(`watching mods/ and ${KIT}`)
   }
 }

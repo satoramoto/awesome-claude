@@ -1,14 +1,33 @@
 ---
 name: storybook-prototyping
-description: Rapid visual prototyping of awesome-claude mods and kit components in Storybook, with sample states (fixtures), the surface/theme/frame/width toolbar and screenshots. Use whenever you design, restyle or check how a mod's pane or a kit component looks, add a scenario or story, or need to see a layout at a narrow width or in the terminal, before or instead of loading the mod in the real app.
+description: Rapid visual prototyping of awesome-claude mods in Storybook, with sample states (fixtures), the surface/theme/frame/width toolbar and screenshots, drawn by zen's Claude Code bench. Use whenever you design, restyle or check how a mod's pane looks, add a scenario or story, or need to see a layout at a narrow width or in the terminal, before or instead of loading the mod in the real app. Kit components themselves are prototyped in zen's Storybook.
 ---
 
 # Prototyping in Storybook
 
-Storybook draws each kit component and each mod scenario from the mod's own
-`ui.render` hook, with a stand-in engine (`playground/engine.ts`). It's the
-fastest loop for how things look. It is an emulator: the real app is the final
-truth (see the `headless-verification` skill for that check).
+Storybook draws each mod scenario from the mod's own `ui.render` hook, with a
+stand-in engine. It's the fastest loop for how things look. It is an emulator:
+the real app is the final truth (see the `headless-verification` skill for that
+check).
+
+**The bench and the kit's own stories live in zen** (`github:satoramoto/zen`,
+`src/harness/claude-code/bench/` and `stories/`). Here Storybook and the
+playground import the bench through the `@bench` alias (`render`, `text`,
+`client`, `engine`, `host`) and the kit through `@kit`, both from the pinned
+`node_modules/@satoramoto/zen/src/harness/claude-code/`, or from a zen checkout
+when `ZEN` is set (`ZEN=~/Code/satoramoto/zen bun run storybook`). The engine's
+`claude-code` module is aliased to the bench's `engine.ts`. What the bench
+emulates and doesn't, and the kit's component sheets (`Harness/Claude Code/Kit`,
+each primitive at 30 to 100 columns, the glyphs, the file types, the skins), are
+in zen: see "The bench and Storybook" in
+[`docs/harness-claude-code.md`](https://github.com/satoramoto/zen/blob/main/docs/harness-claude-code.md).
+A new kit component gets its story there, in zen.
+
+What stays here: this repo's fixtures, its mod stories, the lab and engine
+stories, and `playground/mods.ts`, which tells the bench where a `Client`'s
+module is found (every file under `mods/<mod>/hooks/`; set with
+`configureClients({ resolve: modsResolver })` in `.storybook/preview.ts` and
+`playground/main.ts`).
 
 Run `bun install` once per clone or worktree first.
 
@@ -43,43 +62,20 @@ export const Empty = scenario('empty')
 `scenario` loads the fixture into the stand-in state, collects the mod's hooks
 (`collect`), draws its panes for the toolbar's surface and width (`panes`),
 and redraws on every state change, so buttons that `update` state work.
-Kit components have their own stories in `stories/kit.stories.ts` with
-controls; add one there when you add a component to `kit/ui.tsx`.
+`Mods/Terminal Look` (`stories/terminal-look.stories.ts`) draws overview,
+issues and launcher (and filetree) side by side on each terminal theme; add a
+mod there when its terminal look should be compared with the others.
 
 ## The toolbar
 
 - **Surface**: `desktop` or `terminal` (the hook gets that `e.surface`).
-- **Theme**: `light` or `dark` (desktop only).
+- **Theme**: `light` or `dark`, and the ANSI themes on the terminal.
 - **Frame**: `sidebar` (a copy of the desktop app's side pane beside a transcript) or a plain `pane`.
-- **Width**: the pane's width in cells (28 to 110), passed as `bodyColumns`.
+- **Width**: the pane's width in cells (28 to 180), passed as `bodyColumns`.
 
 Check every new look at a narrow width (28, 36) and a wide one, on both
-surfaces, in the sidebar frame, in both themes.
-
-## What the bench emulates
-
-It lays out like the desktop app, so problems show here first:
-
-- A Box lays its children in a row unless given `flexDirection="column"`, as Ink's does.
-- Text never wraps (unless `wrap="wrap"`) and keeps its spaces. Long text needs `wrap="truncate"`.
-- A box doesn't shrink below its content unless it has `minWidth={0}`: a row
-  that overflows the frame means a Box between the text and the row is missing it.
-- Columns fit the canvas: if the chosen width doesn't fit the window, the pane
-  narrows and the story is told the columns that fit, as in the app.
-- A desktop Button is its label, plain text (dim with `dimColor`), never its
-  children: the app draws no children, so a coloured or bold Text, or an icon,
-  inside a Button doesn't show there. Draw an icon beside or under the Button.
-- A desktop Input has its submit as a button beside the field, always, labelled
-  `submitLabel` or "submit"; the terminal shows `↵ label` only while focused.
-- Desktop units as the app draws them (`unit()` in `playground/render.ts`): a
-  column 7.8px for every horizontal prop, a row 19px for `height`/`minHeight`/
-  `top`/`bottom`, and half a row (9.5px, `SPACING_ROW`) for vertical margin,
-  padding and row gap. `gap` is both: column gap in columns, row gap in half rows.
-- A `transparent` border colour draws in the text's colour, as in the app.
-- The sidebar frame's body starts 12.5px in from the divider, as the app's does.
-
-It doesn't emulate the engine's validator (a prop the desktop refuses still
-draws here), real data, timers or `gh`. The engine's validator runs in the test pass and on CI.
+surfaces, in the sidebar frame, in both themes, and on the terminal in all its
+themes.
 
 ## Run it and look
 

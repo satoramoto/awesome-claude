@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
-import { collect, engine } from '../playground/host'
-import type { Node } from '../playground/render'
+import { collect, engine } from '@bench/host'
+import type { Node } from '@bench/render'
+
 import * as mod from '../mods/lab/hooks/register'
 import { show, where } from './show'
 

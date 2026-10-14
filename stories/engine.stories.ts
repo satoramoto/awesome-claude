@@ -1,7 +1,8 @@
 import type { Meta, StoryContext, StoryObj } from '@storybook/html'
 
-import { configureClients } from '../playground/client'
-import { collect, messages } from '../playground/host'
+import { configureClients } from '@bench/client'
+import { collect, messages } from '@bench/host'
+
 import * as lab from '../mods/lab/hooks/register'
 import { DESKTOP_REFUSED, GROUPS, experiments } from '../mods/lab/hooks/experiments'
 import type { Experiment, Group, Surface } from '../mods/lab/hooks/experiments'

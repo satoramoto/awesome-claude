@@ -1,8 +1,9 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
-import { load, onChange } from '../playground/engine'
+import { load, onChange } from '@bench/engine'
+import { collect, panes } from '@bench/host'
+
 import * as fixtures from '../playground/fixtures/launcher'
-import { collect, panes } from '../playground/host'
 import * as mod from '../mods/launcher/hooks/register'
 import { show, where } from './show'
 

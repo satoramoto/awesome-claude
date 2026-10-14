@@ -5,7 +5,12 @@ import { join, relative, resolve } from 'node:path'
 import { defineConfig } from 'vite'
 import type { Plugin, ViteDevServer } from 'vite'
 
+import { zenBench, zenHarness, zenKit } from '../zen'
+
 const ROOT = resolve(__dirname, '..')
+/** zen's kit and bench (see zen.ts): the pinned package, or the checkout ZEN names. */
+const KIT = zenKit(ROOT)
+const BENCH = zenBench(ROOT)
 
 /** Runs a command, capped at `ms`; resolves its exit code and output. */
 const run = (cmd: string[], ms: number) =>
@@ -22,7 +27,7 @@ const run = (cmd: string[], ms: number) =>
   })
 
 /**
- * After each save under mods/ or kit/: compile the mods into plugins/
+ * After each save under mods/ or the kit: compile the mods into plugins/
  * (`bun build.ts`), then have the engine validate the mod that changed
  * (`claude plugin validate plugins/<mod>`), and show the result in the page.
  */
@@ -60,12 +65,12 @@ const checks = (): Plugin => {
   return {
     name: 'awesome-checks',
     configureServer(server) {
-      server.watcher.add([join(ROOT, 'mods'), join(ROOT, 'kit')])
+      server.watcher.add([join(ROOT, 'mods'), KIT])
       server.watcher.on('change', file => {
         const rel = relative(ROOT, file)
         const mod = rel.match(/^mods\/([^/]+)\//)?.[1]
         if (mod) void check(server, mod)
-        else if (rel.startsWith('kit/')) for (const m of readdirSync(join(ROOT, 'mods'))) void check(server, m)
+        else if (!relative(KIT, file).startsWith('..')) for (const m of readdirSync(join(ROOT, 'mods'))) void check(server, m)
       })
     },
   }
@@ -75,13 +80,14 @@ export default defineConfig({
   root: __dirname,
   resolve: {
     alias: {
-      'claude-code': resolve(__dirname, 'engine.ts'),
-      '@kit': resolve(ROOT, 'kit'),
+      'claude-code': join(BENCH, 'engine.ts'),
+      '@kit': KIT,
+      '@bench': BENCH,
     },
   },
   // A string here stops Vite reading each mod's tsconfig.json, which extends the
   // types the engine lays down only once a mod has loaded.
   esbuild: { jsx: 'transform', jsxFactory: 'h', jsxFragment: 'Fragment', tsconfigRaw: '{ "compilerOptions": {} }' },
-  server: { fs: { allow: [ROOT] } },
+  server: { fs: { allow: [ROOT, zenHarness(ROOT)] } },
   plugins: [checks()],
 })

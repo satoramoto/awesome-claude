@@ -1,6 +1,6 @@
 {
   "name": "lab",
-  "version": "0.2.4",
+  "version": "0.2.5",
   "description": "Experiments that probe what the rendering engine accepts: SVG, animation, interaction and every element, each in its own pane",
   "author": { "name": "Ryan Gavin" },
   "types": "./types/index.d.ts"
