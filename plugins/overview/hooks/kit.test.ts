@@ -7,8 +7,9 @@ import { C, FILL, GLYPH, INK, RAMP, STATUS, TRACK, TREE } from '../kit/tokens'
 import { BAND_ROWS, BLANK, FOLD, MARK, METER, PERF_GLYPH, SPARK, TERM_ROLES, fold, holdButtons, kit } from '../kit/ui'
 import type { Kit } from '../kit/ui'
 
-// The kit's own tests. The build copies kit/ into each mod but leaves kit tests
-// out, so they live here, in the overview mod, and draw through the engine's test
+// The kit's own tests, through the engine. The build copies zen's kit
+// (src/harness/claude-code/kit) into each mod but leaves kit tests out, so these
+// live here, in the overview mod, and draw through the engine's test
 // kit: a hook beneath the mod answers a Pane the mod doesn't (requestId `kit`)
 // with what `build` makes from the kit, and the surface's table checks the tree.
 

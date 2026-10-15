@@ -1,12 +1,18 @@
 import { addons } from '@storybook/preview-api'
 import type { Decorator, Preview } from '@storybook/html'
 
-import { CELL, Fragment, TERMINAL_THEMES, h } from '../playground/render'
-import type { TerminalTheme } from '../playground/render'
+import { configureClients } from '@bench/client'
+import { CELL, Fragment, TERMINAL_THEMES, h } from '@bench/render'
+import type { TerminalTheme } from '@bench/render'
+
+import { modsResolver } from '../playground/mods'
 
 // The kit, the mods and their surface modules compile against a global `h` and `Fragment`, as in the engine.
 ;(globalThis as any).h = h
 ;(globalThis as any).Fragment = Fragment
+
+// A Client's module is found among this repo's mods (zen's bench knows none of its own).
+configureClients({ resolve: modsResolver })
 
 /** The canvas's margin around the frame, each side. */
 const GUTTER = 16

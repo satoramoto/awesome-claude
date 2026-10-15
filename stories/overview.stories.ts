@@ -1,10 +1,11 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
-import { load, onChange } from '../playground/engine'
+import { load, onChange } from '@bench/engine'
+import { collect, panes } from '@bench/host'
+import { draw } from '@bench/render'
+import type { Node } from '@bench/render'
+
 import * as fixtures from '../playground/fixtures/overview'
-import { collect, panes } from '../playground/host'
-import { draw } from '../playground/render'
-import type { Node } from '../playground/render'
 import * as mod from '../mods/overview/hooks/register'
 import { show, where } from './show'
 

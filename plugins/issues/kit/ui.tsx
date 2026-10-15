@@ -306,11 +306,12 @@ export const TERM_ROLES: Readonly<Record<'title' | 'label' | 'value' | 'strong' 
 }
 
 /**
- * The header icon's colour on the terminal: dim, as the fold arrow. Orange is kept
- * to the bold title word: a one-cell orange glyph reads too close to an amber
- * status glyph (warn `▲`, ahead `↑`) in the row under it.
+ * The header icon's colour on the terminal: dim (MUTED), as the fold arrow, since
+ * grey is what icons mean. The title beside it is bold in the default foreground,
+ * so a header carries no hue that could be read as a status in the rows under
+ * it. Read when drawing, so a skin worn later is the one drawn.
  */
-const TERM_HEADER_ICON = MUTED
+const termHeaderIcon = () => MUTED
 
 /** What the kit is told about the pane beyond its surface and width. */
 export type KitOptions = {
@@ -1145,7 +1146,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
       const head = [
         s.icon ? (
           <Box key="icon" width={GUTTER} flexShrink={0}>
-            {icon(s.icon, TERM_HEADER_ICON)}
+            {icon(s.icon, termHeaderIcon())}
           </Box>
         ) : null,
         <Box key="name" flexShrink={1} minWidth={0}>

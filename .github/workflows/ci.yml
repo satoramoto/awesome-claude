@@ -18,7 +18,7 @@ jobs:
 
       - name: Compile mods into plugins/
         run: bun build.ts
-      - name: plugins/ is up to date with mods/ and kit/
+      - name: plugins/ is up to date with mods/ and the pinned zen kit
         # New files too: `git diff` alone misses a compiled file that was never committed.
         run: |
           git status --porcelain -- plugins

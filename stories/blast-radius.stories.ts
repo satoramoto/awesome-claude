@@ -1,7 +1,8 @@
 import type { Meta, StoryObj } from '@storybook/html'
 
-import { collect, elements, engine } from '../playground/host'
-import type { Node } from '../playground/render'
+import { collect, elements, engine } from '@bench/host'
+import type { Node } from '@bench/render'
+
 import * as mod from '../mods/blast-radius/hooks/register'
 import { show, where } from './show'
 

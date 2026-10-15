@@ -1,7 +1,13 @@
-import { load, onChange } from './engine'
-import { messages } from './host'
-import { CELL, Fragment, draw, h } from './render'
-import type { Node, Surface } from './render'
+import { configureClients } from '@bench/client'
+import { load, onChange } from '@bench/engine'
+import { messages } from '@bench/host'
+import { CELL, Fragment, draw, h } from '@bench/render'
+import type { Node, Surface } from '@bench/render'
+
+import { modsResolver } from './mods'
+
+// The bench draws; this repo's mods are where its Clients' modules are found.
+configureClients({ resolve: modsResolver })
 
 // The mods and their surface modules compile against a global `h` and `Fragment`, as in the engine.
 ;(globalThis as any).h = h

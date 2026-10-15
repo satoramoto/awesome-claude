@@ -10,14 +10,22 @@ AGENTS.md). The full sequence below is the test pass, run when asked or
 before a PR. Run these in order from the repo root; each must exit 0. Cap output
 (`2>&1 | tail -n 30`) and judge by the exit code, not by grepping.
 
+The kit the mods draw with, the engine's limits and the testing API in brief
+live in zen (`github:satoramoto/zen`, `src/harness/claude-code/`; "What the
+engine and the desktop accept" and "Checks" in
+[`docs/harness-claude-code.md`](https://github.com/satoramoto/zen/blob/main/docs/harness-claude-code.md)).
+Kit changes are checked in zen (its typecheck and vitest); this skill is how
+this repo checks its mods, kit copy included.
+
 ## 1. Build
 
 ```bash
 bun build.ts
 ```
 
-Compiles every `mods/<mod>/` into `plugins/<mod>/` (kit copied in, `@kit/…`
-rewritten). Run it after any change under `mods/` or `kit/`; everything below
+Compiles every `mods/<mod>/` into `plugins/<mod>/` (zen's kit copied in from
+the pinned `@satoramoto/zen`, or from `$ZEN` when set; `@kit/…` rewritten). Run
+it after any change under `mods/` or to the zen pin; everything below
 reads `plugins/`, never `mods/`. Commit the rebuilt `plugins/`: CI fails otherwise.
 
 ## 2. Validate
