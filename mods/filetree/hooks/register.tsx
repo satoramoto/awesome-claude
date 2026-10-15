@@ -107,7 +107,8 @@ let pointer = true
 let view = { from: 0, max: 0 }
 let nativeScroll = false
 let lastSync = 0
-let noDock = false
+// The pane opens only when asked for (/filetree), never by itself at session start.
+let noDock = true
 let home = ''
 let platform: Promise<'linux' | 'darwin' | 'win32'> | null = null
 let dirty: { root: string; files: Record<string, Change> } = { root: '', files: {} }
