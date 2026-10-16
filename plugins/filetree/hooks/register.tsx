@@ -1,7 +1,11 @@
 // Changed in this fork (awesome-claude) for the desktop version: the desktop surface draws hooks/desktop.tsx.
 // The terminal draws in the kit's terminal design system: a section header, TREE
 // connectors, the kit's status colours as theme keys, and its note lines.
-import { type BuiltinToolResults, type EngineInterface, type Register, type Timer, update } from 'claude-code'
+//
+// Another mod can draw the tree in a tab of its own pane: it calls `attach` (see
+// there). syns' dashboard does, copying this folder. Every function that takes `$`
+// stays in this file: the engine follows `$` within one file only.
+import { type BuiltinToolResults, type Elements, type EngineInterface, type Hook, type Register, type RenderElement, type RenderInput, type Timer, update } from 'claude-code'
 import { LINUX_LAUNCH, openCommand, openWithCommand } from './open'
 
 import { ago, middle } from '../kit/format'
@@ -44,7 +48,8 @@ import {
 
 const TREE = { plugin: 'filetree', key: 'tree' } as const
 const ACTIVITY = { plugin: 'filetree', key: 'activity' } as const
-const PANE = 'filetree'
+/** The pane the tree draws in: its own, or a host's (see `attach`). */
+let PANE = 'filetree'
 /** The tab's name. The folder is the section header's title, so the tab doesn't repeat it. */
 const TAB = 'Files'
 /** Each activity tone's terminal colour: the kit's meaning for it (desktop's toneColor), as a theme key. */
@@ -1063,55 +1068,91 @@ function shortPath(path: string): string {
   return home && inside(home, path) ? `~${path.slice(home.length)}` : path
 }
 
-export const register: Register = (on, options) => {
-  glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
-  const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
-  showReads = activity.includes('reads')
-  showWrites = activity.includes('writes')
-  followClaude = options?.follow !== 'off'
-  sizeDefault = options?.column === 'size'
-  openWithSetting = typeof options?.open === 'string' ? options.open : ''
-  on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
-    const windows = (await $.env.get('OS')) === 'Windows_NT'
-    useDrives(windows)
-    home = posix(((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/[\\/]+$/, ''))
-    activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
-    void (async () => {
-      pointer = await finePointerOk($)
-      try {
-        const remote = Boolean((await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')))
-        noNerd = !remote && (windows || (await fontState($, 'f04eb')) !== 'ok')
-      } catch {
-        noNerd = true
-      }
-      const t = await get($)
-      if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
-      if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
-      await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
-      const cwd = await cwdOf($)
-      if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
-      else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
-    })()
-    return next(e)
-  })
+/**
+ * The tree's first look in a session: whether the pointer is fine, whether a Nerd
+ * Font is there, and what the last session left (a flash, a preview, git steps
+ * still running) cleared.
+ */
+async function firstLook($: EngineInterface): Promise<void> {
+  pointer = await finePointerOk($)
+  try {
+    const remote = Boolean((await $.env.get('SSH_CONNECTION')) || (await $.env.get('SSH_TTY')))
+    noNerd = !remote && ((await $.env.get('OS')) === 'Windows_NT' || (await fontState($, 'f04eb')) !== 'ok')
+  } catch {
+    noNerd = true
+  }
+  const t = await get($)
+  if (t.flashOn) await patch($, () => ({ flash: [], flashDim: [], flashOn: false, flashTones: {} }))
+  if (t.preview) await patch($, () => ({ preview: '', previewTop: 0 }))
+  await setActivities($, cur => cur.map(a => (a.state === 'running' ? { ...a, state: 'failed', label: `${a.kind} interrupted` } : a)))
+}
 
-  on('command.run', { command: 'filetree' }, async ($, e) => {
-    // The layout checks are the terminal's: the desktop app docks the pane itself and
-    // reports no fullscreen layout, so a session no terminal draws skips them.
-    const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
-    if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
-    if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
-    noDock = false
-    const arg = (e.args ?? '').trim()
-    const cwd = await cwdOf($)
-    follow = !arg
-    const root = arg ? resolve(cwd, arg, home) : cwd
-    await reset($, root, true)
-    return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
-  })
+/** The pane of a mod that draws the tree in its own pane (a tab of it) rather than filetree's; null in filetree's own. */
+let host: string | null = null
+/** Whether a host's tree is on screen: set as it draws, cleared by `hideTree`. */
+let onScreen = false
+/** Whether a host's tree has caught up since it came on screen. */
+let caughtUp = false
+/** Whether a host's tree has made the session's reads and its first look. */
+let looked = false
+/** A host's pinned folder (`pinTree`); null, the tree follows the cwd. */
+let pinned: string | null = null
 
-  on('tool.call', async ($, e, next) => {
+/** The reads every session needs before the tree reads anything: the OS, home, the last activity's id. */
+async function sessionReads($: EngineInterface): Promise<void> {
+  useDrives((await $.env.get('OS')) === 'Windows_NT')
+  home = posix(((await $.env.get('HOME')) || (await $.env.get('USERPROFILE')) || '').replace(/[\\/]+$/, ''))
+  activityId = Math.max(activityId, ...(await activities($)).map(a => a.id))
+}
+
+/**
+ * A host's tree just drew, so it's on screen. The first draw since it came on
+ * screen catches up, on a timer since a drawing writes nothing: the session's
+ * reads and the first look the first time, then the folder listed (the cwd, or
+ * the pinned one) when the tree isn't on it, or what changed while it was off.
+ */
+function drawnInHost($: EngineInterface): void {
+  onScreen = true
+  if (caughtUp) return
+  caughtUp = true
+  $.clock.after(0, () => void catchUp($).catch(() => undefined))
+}
+
+async function catchUp($: EngineInterface): Promise<void> {
+  if (!looked) {
+    looked = true
+    await sessionReads($)
+    await firstLook($)
+  }
+  const cwd = await cwdOf($)
+  follow = pinned === null
+  const want = pinned === null ? cwd : resolve(cwd, pinned, home)
+  const t = await get($)
+  if (t.root !== want || t.nodes.length === 0) await reset($, want)
+  else await sync($)
+}
+
+/** For a host: the tree went off screen (another tab, the pane hidden); its hooks pass through until it draws again. */
+export function hideTree(): void {
+  onScreen = false
+  caughtUp = false
+}
+
+/** For a host: the folder the tree shows from its next draw (`root`, pinned), or the cwd, followed (null). */
+export function pinTree(root: string | null): void {
+  pinned = root
+  caughtUp = false
+}
+
+/** In a host's pane while the tree is off screen: every hook then passes straight through. */
+function hidden(): boolean {
+  return host !== null && !onScreen
+}
+
+/** The tree's watch on Claude's edits, writes and Bash commands (git steps, files changed, reads). */
+const watchTool: Hook<'tool.call'> = async ($, e, next) => {
+  {
+    if (hidden()) return next(e)
     if (e.tool !== 'Edit' && e.tool !== 'Write' && e.tool !== 'NotebookEdit' && e.tool !== 'Bash') return next(e)
     const command = e.tool === 'Bash' ? e.command : ''
     const cwd = e.tool === 'Bash' ? await cwdOf($) : ''
@@ -1159,9 +1200,84 @@ export const register: Register = (on, options) => {
       if (file) void touched($, [file], 'orange', showWrites)
     }
     return result
+  }
+}
+
+/** filetree's own pane: `/filetree` opens it, and the tree reads its folder as the session starts. */
+export const register: Register = (on, options) => {
+  attach(on, options)
+
+  on('session.start', async ($, e, next) => {
+    await $.command.register({ name: 'filetree', description: 'Show the file tree; args: [path] (no path = cwd)' })
+    await sessionReads($)
+    void (async () => {
+      await firstLook($)
+      const t = await get($)
+      const cwd = await cwdOf($)
+      if (!t.root || t.nodes.length === 0 || (follow && t.root !== cwd)) await reset($, cwd)
+      else if (!noDock) await $.ui.open({ id: PANE, title: TAB })
+    })()
+    return next(e)
+  })
+
+  on('command.run', { command: 'filetree' }, async ($, e) => {
+    // The layout checks are the terminal's: the desktop app docks the pane itself and
+    // reports no fullscreen layout, so a session no terminal draws skips them.
+    const terminal = await $.session.surfaces().then(s => s.includes('terminal'), () => true)
+    if (terminal && !e.presentation.isFullscreen) return { text: 'filetree shows in the sidebar, which needs the fullscreen layout. Run /tui fullscreen, then /filetree.' }
+    if (terminal && e.presentation.columns < 110) return { text: 'filetree shows in the sidebar, which needs a terminal at least 110 columns wide. Widen it, then run /filetree.' }
+    noDock = false
+    const arg = (e.args ?? '').trim()
+    const cwd = await cwdOf($)
+    follow = !arg
+    const root = arg ? resolve(cwd, arg, home) : cwd
+    await reset($, root, true)
+    return { text: `File tree on ${shortPath(root)}${follow ? ' (follows the cwd)' : ''}.` }
+  })
+}
+
+/**
+ * Every hook of the tree but filetree's own pane's (its session start and
+ * `/filetree`, in `register`). A host, a mod that draws the tree in a tab of its
+ * own pane (syns' dashboard copies this folder), calls it with that `pane` and
+ * after its own render hook for the pane, so its render is the outer one: it
+ * draws its tabs and, for the tree's tab, `next(e)` draws the tree (with
+ * `e.props.scroll.bodyRows` less its own rows). The tree then reads nothing until
+ * it first draws, and the host calls `hideTree` when it goes off screen; while
+ * off screen every hook passes straight through, so nothing is read or watched.
+ */
+export const attach = (on: Parameters<Register>[0], options: Parameters<Register>[1], pane?: string) => {
+  host = pane ?? null
+  if (host) PANE = host
+  glyphSetting = typeof options?.glyphs === 'string' ? options.glyphs : 'auto'
+  const activity = typeof options?.activity === 'string' ? options.activity : 'reads and writes'
+  showReads = activity.includes('reads')
+  showWrites = activity.includes('writes')
+  followClaude = options?.follow !== 'off'
+  sizeDefault = options?.column === 'size'
+  openWithSetting = typeof options?.open === 'string' ? options.open : ''
+
+  // Matched, as a host may have an unmatched tool.call hook of its own, and a plugin takes one.
+  on('tool.call', { tool: /^(Edit|Write|NotebookEdit|Bash)$/ }, watchTool)
+
+  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
+    if (!host && e.surface === 'terminal' && e.props.placement === 'inline') {
+      noDock = true
+      void $.ui.close({ id: PANE }).catch(() => undefined)
+      const { Box: Empty } = $.ui.resolve(e)
+      return <Empty />
+    }
+    if (host) drawnInHost($)
+    const t = await get($)
+    // One table for the whole render, its Buttons keeping their press handles across
+    // redraws, so a click made just before one still lands. In a host's pane, a scope
+    // of its own: the host's render holds its own Buttons under the render's.
+    return drawTree($, e, holdButtons($.ui.resolve(e), host ? `${PANE}\u0000tree\u0000${e.surface}` : e), t)
   })
 
   on('tool.call', { tool: 'Read' }, async ($, e, next) => {
+    if (hidden()) return next(e)
     const result = await next(e)
     if (result.deny || result.isError || e.tool !== 'Read' || !showReads) return result
     void touched($, [posix(e.file_path)], 'purple', true)
@@ -1169,6 +1285,7 @@ export const register: Register = (on, options) => {
   })
 
   on('ui.message', async ($, e, next) => {
+    if (hidden()) return next(e)
     if (e.requestId !== PANE || e.element !== 'rows' || !e.data || typeof e.data !== 'object') return next(e)
     const data = e.data as { press?: unknown; key?: unknown; ctrl?: unknown; shift?: unknown; scrollTo?: unknown; copy?: unknown }
     void sync($)
@@ -1222,6 +1339,7 @@ export const register: Register = (on, options) => {
   })
 
   on('classic.SessionStart', async ($, e, next) => {
+    if (hidden()) return next(e)
     const result = await next(e)
     if (e.source === 'clear' || e.source === 'resume' || e.source === 'fork') {
       void (async () => {
@@ -1235,25 +1353,28 @@ export const register: Register = (on, options) => {
   })
 
   on('classic.CwdChanged', async ($, e, next) => {
+    if (hidden()) return next(e)
     const result = await next(e)
     void followCwd($)
     return result
   })
 
   on('classic.FileChanged', async ($, e, next) => {
+    if (hidden()) return next(e)
     const result = await next(e)
     if (/[\\/]\.git[\\/]|[\\/](index|HEAD)$/.test(e.file_path)) $.clock.after(300, () => void sync($, true))
     return result
   })
 
   on('ui.focus', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
+    if (hidden()) return next(e)
     const result = await next(e)
     void sync($)
     return result
   })
 
   on('ui.scroll', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (nativeScroll) return next(e)
+    if (nativeScroll || hidden()) return next(e)
     const t = await get($)
     if (t.preview) {
       await scrollPreview($, Math.sign(e.by) * Math.max(3, Math.abs(e.by)))
@@ -1265,6 +1386,7 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.submit', async ($, e, next) => {
+    if (hidden()) return next(e)
     void settleBackground($, e.text)
     if (!(await followCwd($))) void sync($)
     const t = await get($)
@@ -1293,23 +1415,17 @@ export const register: Register = (on, options) => {
   })
 
   on('prompt.attachment', async ($, e, next) => {
+    if (hidden()) return next(e)
     void settleBackground($, e.text)
     return next(e)
   })
+}
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e, next) => {
-    if (e.surface !== 'terminal' && e.surface !== 'desktop') return next(e)
-    if (e.surface === 'terminal' && e.props.placement === 'inline') {
-      noDock = true
-      void $.ui.close({ id: PANE }).catch(() => undefined)
-      const { Box: Empty } = $.ui.resolve(e)
-      return <Empty />
-    }
+/** The tree, drawn for one render of its pane: `els` is that render's table (through `holdButtons`), `t` the tree as read at its start. */
+async function drawTree($: EngineInterface, e: RenderInput<'Pane', 'terminal' | 'desktop'>, els: Elements['terminal'] | Elements['desktop'], t: FileTree): Promise<RenderElement> {
+  // (A block, so the drawing keeps the indent it had inside the render hook.)
+  {
     const unicode = glyphSetting === 'plain' || (glyphSetting === 'auto' && (noNerd || e.surface === 'desktop'))
-    const t = await get($)
-    // One table for the whole render, its Buttons keeping their press handles across
-    // redraws, so a click made just before one still lands.
-    const els = holdButtons($.ui.resolve(e), e)
     const { Box, Text, Button, Input, Client } = els
     const terminal = e.surface === 'terminal'
     const width = Math.max(24, e.props.bodyColumns)
@@ -1727,5 +1843,5 @@ export const register: Register = (on, options) => {
         ) : null}
       </Box>
     )
-  })
+  }
 }
