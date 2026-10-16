@@ -125,6 +125,10 @@ From upstream [`bf8de32`](https://github.com/data-goblin/claude-code-filetree/co
   to them. A press on a row selects it and opens a folder, a second press opens a
   file; arrow keys stay the terminal's. The terminal draws exactly as before.
   Changed files say so in their first line.
+- Another mod can draw the tree in a tab of its own pane (0.5.6): `attach(on, options,
+  pane)` in `hooks/register.tsx` registers the tree's hooks for that pane, the tree
+  reading nothing until it first draws there. syns' dashboard copies `hooks/` for its
+  Files tab.
 - Not brought over: the demo GIFs in `media/` (this README links upstream's), the
   repository's own marketplace, its pre-commit hook and its platforms CI.
 - This README: the fork notice, install from awesome-claude, and this section.

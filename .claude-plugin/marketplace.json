@@ -37,7 +37,7 @@
     {
       "name": "filetree",
       "source": "./plugins/filetree",
-      "version": "0.5.5",
+      "version": "0.5.6",
       "description": "An IDE-style file tree that shows what Claude reads, writes and commits, with git status and lines changed. Fork of data-goblin/claude-code-filetree (MIT)",
       "author": { "name": "Kurt Buhler" },
       "homepage": "https://github.com/data-goblin/claude-code-filetree",
