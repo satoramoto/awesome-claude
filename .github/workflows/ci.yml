@@ -49,7 +49,7 @@ jobs:
           exit $status
 
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.296
+        run: npm install -g @anthropic-ai/claude-code@2.1.302
       - name: Validate each mod
         run: |
           for dir in plugins/*/; do

@@ -239,6 +239,17 @@ export const BLANK = '⠀'
 /** A tile's padding above and below its lines, and the room between its lines: enough to breathe. */
 const TILE_PAD_Y = 0.6
 const TILE_ROW_GAP = 0.2
+/** The bar under the active tab on the app surfaces, in rows of size (about 2px), and the hairline under the tabs (about 1px). */
+const TAB_MARK = 0.12
+const HAIRLINE = 0.06
+/**
+ * A container's corner radius on the app surfaces, in pixels (a section's band, a
+ * list's surface, a tile): the Claude Code pack's card radius (zen's `linear`
+ * materials, `radiusCard`).
+ */
+const RADIUS_PX = 6
+/** An accent's stripe along a container's top edge, in pixels: as thick as the active tab's bar. */
+const ACCENT_PX = 2
 
 /**
  * The desktop's fold arrow: full-size triangles, since text can't be sized.
@@ -350,6 +361,9 @@ export type RightPart = { part: RenderElement | string; drop?: number; cells?: n
 
 /** One key hint: the key as the person types it, and what it does. */
 export type Hint = { key: string; label: string }
+
+/** One of a pane's tabs (`k.tabs`): its id (what `onSelect` is called with), its label, and an optional hotkey (a digit). */
+export type Tab = { id: string; label: string; hotkey?: string }
 
 const isRightPart = (x: RenderElement | string | RightPart): x is RightPart => typeof x === 'object' && x !== null && 'part' in x && !('type' in x)
 
@@ -657,7 +671,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
    *
    * - `capped`: anything thin (bars, gauges). SVG end caps drawn at an exact pixel
    *   size, so they stay crisp; the middle takes no height and stretches to the caps.
-   * - Nothing else: `rounded` boxes (bands, tiles) are square-cornered fills.
+   * - `card`: containers (a section's band, a list's surface, a tile). Their fill is
+   *   a ground placed behind the content (`position: absolute`, all four offsets 0):
+   *   an edge row of two SVG quarter discs (RADIUS_PX square) and a stretched middle
+   *   at the top and at the bottom, a plain fill between. An accent is the top edge's
+   *   first ACCENT_PX, the corners' share of it drawn in the same SVGs.
+   * - Nothing else: `rounded` boxes (pills) are square-cornered fills.
    *
    * What doesn't work, so nobody tries again: a `round` border in `transparent` to
    * round a fill (the desktop doesn't know `transparent` as a border colour and draws
@@ -728,10 +747,70 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   }
 
   /**
-   * A filled box, a row or more tall: a band or a tile. Square-cornered and with no
-   * border on the app surfaces, as the design has no outlines and the desktop has no
-   * transparent border to round a fill with (see "Rounding on the desktop" above).
-   * In the terminal, the box without fill.
+   * One corner of a card's ground, RADIUS_PX square: a quarter disc in `fill`, and
+   * on a top corner with an `accent`, the disc's top ACCENT_PX in the accent. The
+   * two parts meet without overlapping, so a see-through fill isn't painted twice.
+   */
+  const corner = (fill: string, at: 'top-left' | 'top-right' | 'bottom-left' | 'bottom-right', accent?: string): RenderElement | null => {
+    if (!Svg) return null
+    const r = RADIUS_PX
+    const s = Math.min(ACCENT_PX, r)
+    // Drawn as the top-left (centre r,r), then mirrored into place.
+    const x = r - Math.sqrt(r * r - (r - s) * (r - s))
+    const top = at.startsWith('top') && accent
+    const paths = top
+      ? `<path d="M0 ${r}A${r} ${r} 0 0 1 ${x} ${s}H${r}V${r}Z" fill="${fill}"/><path d="M${x} ${s}A${r} ${r} 0 0 1 ${r} 0V${s}Z" fill="${accent}"/>`
+      : `<path d="M0 ${r}A${r} ${r} 0 0 1 ${r} 0V${r}Z" fill="${fill}"/>`
+    const flip = `scale(${at.endsWith('right') ? -1 : 1} ${at.startsWith('bottom') ? -1 : 1})`
+    const move = `translate(${at.endsWith('right') ? r : 0} ${at.startsWith('bottom') ? r : 0})`
+    const source =
+      `<svg xmlns="http://www.w3.org/2000/svg" width="${r}" height="${r}" viewBox="0 0 ${r} ${r}">` +
+      `<g transform="${move} ${flip}">${paths}</g></svg>`
+    return (
+      <Box flexShrink={0}>
+        <Svg source={source} alt="rounded corner" width={r} height={r} />
+      </Box>
+    )
+  }
+
+  /** A card's top or bottom edge, RADIUS_PX tall: a corner, the stretched middle (the accent's stripe over the fill, on top), a corner. */
+  const cardEdge = (key: string, fill: string, side: 'top' | 'bottom', accent?: string): RenderElement => (
+    <Box key={key} flexDirection="row" height={RADIUS_PX / ROW_PX} flexShrink={0} alignItems="stretch">
+      {corner(fill, `${side}-left`, accent)}
+      <Box flexGrow={1} flexDirection="column">
+        {side === 'top' && accent ? <Box key="accent" height={ACCENT_PX / ROW_PX} flexShrink={0} backgroundColor={accent} /> : null}
+        <Box key="fill" flexGrow={1} backgroundColor={fill} />
+      </Box>
+      {corner(fill, `${side}-right`, accent)}
+    </Box>
+  )
+
+  /**
+   * A container with rounded corners on the app surfaces: `props` and `children`
+   * laid out as a Box, over a ground in `fill` whose corners are rounded
+   * (RADIUS_PX), with an optional `accent` (one of ACCENT) as a thin stripe along
+   * its top edge. The ground sits behind the content, so the content keeps its
+   * own size, padding and centring. In the terminal, the box without fill or
+   * accent. See "Rounding on the desktop" above.
+   */
+  const card = (fill: string, accent: string | undefined, props: Record<string, unknown>, children: RenderElement | (RenderElement | null)[] | null) =>
+    terminal ? (
+      <Box {...props}>{children}</Box>
+    ) : (
+      <Box {...props}>
+        <Box key="card-ground" position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column">
+          {cardEdge('card-top', fill, 'top', accent)}
+          <Box key="card-fill" flexGrow={1} backgroundColor={fill} />
+          {cardEdge('card-bottom', fill, 'bottom')}
+        </Box>
+        {children}
+      </Box>
+    )
+
+  /**
+   * A filled box with square corners and no border: a pill's chip. Containers
+   * (bands, lists, tiles) are `card`s, rounded. In the terminal, the box
+   * without fill.
    */
   const rounded = (color: string, props: Record<string, unknown>, children: RenderElement | (RenderElement | null)[] | null) =>
     terminal ? (
@@ -744,7 +823,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
 
   /**
    * A tile: one item of a list that has several lines (a branch and its PR), in its
-   * own rounded fill a step lighter than the pane, so items read as units. A
+   * own fill a step lighter than the pane, its corners rounded (`card`), so items read as units. A
    * `selected` tile takes a blue-tinted fill: picked, without an outline; half
    * as tinted while the pane isn't `focused` (the kit's `focused` by default).
    * On the terminal, a blank row above and no fill, selected or not: a terminal
@@ -756,12 +835,264 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         {children}
       </Box>
     ) : (
-      rounded(
+      card(
         opts.selected ? ((opts.focused ?? paneFocused) ? FILL.selected : FILL.selectedBlurred) : FILL.tile,
+        undefined,
         { key, flexDirection: 'column', paddingX: SPACE.item, paddingY: TILE_PAD_Y, rowGap: TILE_ROW_GAP, width: '100%' },
         children,
       )
     )
+
+  /**
+   * A list item: one item of a `collapsibleList`, read in two lines, as an
+   * app's PR or thread list draws them:
+   *
+   *   [lead]  title ……………………………… right  [fold]
+   *   [mark]  subtitle  meta…  [end mark]
+   *           what the fold holds, while `open`
+   *
+   * - `lead`: a status kind, an icon key (in `leadColor`, muted by default) or an
+   *   element (a short text badge such as `P1`). It sits in a slot of fixed width
+   *   and height, centred on the title's line, so an SVG icon and a glyph or
+   *   badge take the same room and every item's title starts on one column,
+   *   whether it has a lead or not.
+   * - `title`: one line, cut with an ellipsis; `bold` for the one that leads, `dim`
+   *   for one waiting its turn.
+   * - `right`: figures (strings, dim) and controls (a ⋮ Button) on the title's
+   *   line, centred on it, at the right edge.
+   * - `subtitle`: the second line, dim; `subtitleWrap` lets it wrap on the
+   *   desktop rather than cut (the terminal breaks it between words into two
+   *   lines, the second cut). `subtitleLead` takes the lead's slot on that line (a ✓ before a
+   *   decision); `strong` draws the subtitle in the text's own colour, bold where
+   *   the surface has it (a decision called out rather than a detail).
+   *   `meta` follows it on the line (strings dim, elements such as a Link as
+   *   they are), `mark` ends it in a fixed slot centred on the line (a CI mark).
+   * - `children`: lines under the subtitle, starting under the title, shown while
+   *   `open` (or always, without `onToggle`). `onToggle` draws the fold arrow
+   *   last on the title's line, as a section's header does.
+   *
+   * No box, fill, padding or rule of its own: the `collapsibleList` it sits in
+   * pads it and draws the hairline between items.
+   * On the terminal: the lead in a 2-cell column, the title and right cluster as
+   * an `item`, the subtitle and children each a line under the title.
+   */
+  const listItem = (
+    key: string,
+    e: {
+      title: string
+      lead?: StatusKind | string | RenderElement | null
+      leadColor?: string
+      bold?: boolean
+      dim?: boolean
+      right?: (RenderElement | string | null | false)[]
+      subtitle?: string
+      subtitleWrap?: boolean
+      subtitleLead?: StatusKind | string | RenderElement | null
+      strong?: boolean
+      meta?: (RenderElement | string | null | false)[]
+      mark?: StatusKind | RenderElement | null
+      open?: boolean
+      onToggle?: () => void
+      children?: (RenderElement | null)[]
+    },
+  ): RenderElement => {
+    const glyph = (x: StatusKind | string | RenderElement | null | undefined, color?: string) =>
+      x == null ? null : typeof x === 'string' ? (x in STATUS ? status(x as StatusKind) : icon(x, color ?? MUTED)) : x
+    const shown = !e.onToggle || Boolean(e.open)
+    const kids = shown ? (e.children ?? []).filter((c): c is RenderElement => c != null) : []
+    const arrow = e.onToggle
+      ? Button
+        ? <Button key={`${key}-fold`} plain dimColor label={terminal ? (e.open ? FOLD.open : FOLD.closed) : fold(!e.open)} onPress={() => e.onToggle?.()} />
+        : <Text key={`${key}-fold`} dimColor>{terminal ? (e.open ? FOLD.open : FOLD.closed) : fold(!e.open)}</Text>
+      : null
+    const right = [...(e.right ?? []).filter((x): x is RenderElement | string => Boolean(x)), ...(arrow ? [arrow] : [])]
+    const meta = (e.meta ?? []).filter((x): x is RenderElement | string => Boolean(x))
+    const mark = e.mark == null ? null : typeof e.mark === 'string' ? status(e.mark as StatusKind) : e.mark
+    const subLook = e.strong ? { bold: true } : tone('mid')
+    if (terminal) {
+      const under = (k2: string, el: RenderElement) => (
+        <Box key={k2} paddingLeft={GUTTER} flexDirection="row" minWidth={0}>
+          {el}
+        </Box>
+      )
+      const subLead = glyph(e.subtitleLead)
+      const lead = glyph(e.lead, e.leadColor)
+      // Terminal text never wraps: a wrapping subtitle breaks between words into two lines (as `note({ lines: 2 })`), the second cut.
+      const subRoom = Math.max(1, Math.floor(body) - GUTTER - (subLead ? 1 + CELLS.pair : 0))
+      const [first, rest] = e.subtitle && e.subtitleWrap ? breakLine(e.subtitle, subRoom) : [e.subtitle ?? '', '']
+      return (
+        <Box key={key} flexDirection="column" minWidth={0}>
+          {/* Without a lead, the title takes the lead column's indent, so it lines up with the subtitle under it. */}
+          {item(`${key}-title`, { lead: lead ?? undefined, text: e.title, bold: e.bold, dim: e.dim, right, ...(lead ? {} : { indent: GUTTER }) })}
+          {e.subtitle || meta.length || mark
+            ? under(
+                `${key}-sub`,
+                <Box flexDirection="row" gap={CELLS.pair} minWidth={0}>
+                  {subLead ? <Box flexShrink={0}>{subLead}</Box> : null}
+                  {first ? (
+                    <Box flexShrink={1} minWidth={0}>
+                      <Text wrap="truncate" {...subLook}>
+                        {first}
+                      </Text>
+                    </Box>
+                  ) : null}
+                  {meta.map((m, i) => (typeof m === 'string' ? <Text key={`m${i}`} {...tone('mid')}>{m}</Text> : m))}
+                  {mark}
+                </Box>,
+              )
+            : null}
+          {rest
+            ? under(
+                `${key}-sub2`,
+                <Box flexShrink={1} minWidth={0} paddingLeft={subLead ? 1 + CELLS.pair : 0}>
+                  <Text wrap="truncate" {...subLook}>
+                    {rest}
+                  </Text>
+                </Box>,
+              )
+            : null}
+          {kids.map((c, i) => under(`${key}-more-${i}`, c))}
+        </Box>
+      )
+    }
+    // The lead's slot: a fixed width (a two-letter badge and its room) and one text line tall; each
+    // line is its own row, centred, so a slot's centre is its line's whatever that line's height.
+    const SLOT = 2 + SPACE.pair
+    const slot = (k2: string, x: RenderElement | null) => (
+      <Box key={k2} width={SLOT} height={1} flexShrink={0} flexDirection="row" alignItems="center">
+        {x}
+      </Box>
+    )
+    return (
+      <Box key={key} flexDirection="column" width="100%" minWidth={0} rowGap={TILE_ROW_GAP * 2}>
+        <Box key="title" flexDirection="row" alignItems="center" width="100%" minWidth={0} gap={0}>
+          {slot('lead', glyph(e.lead, e.leadColor))}
+          <Box flexShrink={1} flexGrow={1} width={0} minWidth={0}>
+            <Text wrap="truncate" bold={e.bold} {...(e.dim ? tone('mid') : {})}>
+              {e.title}
+            </Text>
+          </Box>
+          {right.length ? (
+            <Box flexDirection="row" alignItems="center" gap={space.item} flexShrink={0} marginLeft={space.item}>
+              {right.map((x, i) => (typeof x === 'string' ? <Text key={`r${i}`} {...tone('mid')}>{x}</Text> : x))}
+            </Box>
+          ) : null}
+        </Box>
+        {e.subtitle || meta.length || mark ? (
+          <Box key="sub" flexDirection="row" alignItems={e.subtitleWrap ? 'flex-start' : 'center'} width="100%" minWidth={0}>
+            {slot('sub-lead', glyph(e.subtitleLead))}
+            <Box flexDirection="row" alignItems="center" gap={SPACE.pair} flexShrink={1} flexGrow={1} width={0} minWidth={0}>
+              {e.subtitle ? (
+                <Box flexShrink={1} minWidth={0}>
+                  <Text wrap={e.subtitleWrap ? 'wrap' : 'truncate'} {...subLook}>
+                    {e.subtitle}
+                  </Text>
+                </Box>
+              ) : null}
+              {meta.map((m, i) =>
+                typeof m === 'string' ? (
+                  <Text key={`m${i}`} {...tone('mid')}>
+                    {m}
+                  </Text>
+                ) : (
+                  m
+                ),
+              )}
+              {mark ? (
+                <Box key="mark" width={2} height={1} flexShrink={0} flexDirection="row" alignItems="center">
+                  {mark}
+                </Box>
+              ) : null}
+            </Box>
+          </Box>
+        ) : null}
+        {kids.length ? (
+          <Box key="more" flexDirection="column" paddingLeft={SLOT} minWidth={0} rowGap={TILE_ROW_GAP * 2}>
+            {kids}
+          </Box>
+        ) : null}
+      </Box>
+    )
+  }
+
+  /**
+   * A collapsible list: a section whose body is a list of items (`listItem`s, or a
+   * `note` when there are none), drawn as one surface. The header (icon, title,
+   * figures, the fold arrow last) and the items share one quiet fill (FILL.tile),
+   * a hairline (TRACK, HAIRLINE tall, as the tabs' rule) under the header and
+   * between items, each item padded alike. No band on the pane with tiles under
+   * it: one thing, one fill. On the app surfaces the surface's corners are rounded
+   * (`card`), its title one step up the type scale (`heading`), and an `accent`
+   * draws a thin stripe along its top edge.
+   *
+   * Folded, only the header shows. `section` stays for bodies that aren't a list
+   * (readings, bars, props); this is a list's section.
+   * On the terminal it's a `section` with the items stacked under it, no rules:
+   * the two-line rhythm and the indent separate them.
+   */
+  const collapsibleList = (s: {
+    id: string
+    title: string
+    icon?: string
+    right?: RenderElement | null
+    collapsed?: boolean
+    onToggle?: () => void
+    loading?: boolean
+    /** A colour from ACCENT, drawn as a thin stripe along the surface's top edge on the app surfaces; the terminal draws none. */
+    accent?: string
+    items: (RenderElement | null | false)[]
+  }) => {
+    const items = s.items.filter((x): x is RenderElement => Boolean(x))
+    if (terminal) {
+      return section({ id: s.id, title: s.title, icon: s.icon, right: s.right, collapsed: s.collapsed, onToggle: s.onToggle, loading: s.loading, children: items })
+    }
+    const right = s.right ?? (s.loading ? summary([], { loading: true }) : null)
+    const arrow = fold(Boolean(s.collapsed))
+    const toggle =
+      s.onToggle && Button ? (
+        <Button key={`toggle-${s.id}`} plain dimColor label={arrow} onPress={() => s.onToggle?.()} />
+      ) : (
+        <Text dimColor>{arrow}</Text>
+      )
+    const rule = (key: string) => <Box key={key} height={HAIRLINE} flexShrink={0} backgroundColor={TRACK} />
+    const header = (
+      <Box key="head" flexDirection="row" justifyContent="space-between" alignItems="center" gap={SPACE.item} paddingX={INSET} height={BAND_ROWS} flexShrink={0} overflow="hidden">
+        <Box flexDirection="row" alignItems="center" flexShrink={0}>
+          {s.icon ? (
+            <Box width={2} flexShrink={0} flexDirection="row" alignItems="center">
+              {icon(s.icon, MUTED)}
+            </Box>
+          ) : null}
+          <Text wrap="truncate" bold size="heading">
+            {s.title}
+          </Text>
+        </Box>
+        <Box flexDirection="row" alignItems="center" justifyContent="flex-end" gap={SPACE.item} minWidth={0} flexShrink={1}>
+          {right ? (
+            <Box flexDirection="row" minWidth={0} flexShrink={1} overflow="hidden">
+              {right}
+            </Box>
+          ) : null}
+          <Box minWidth={1.6} flexShrink={0} flexDirection="row" justifyContent="flex-end">
+            {toggle}
+          </Box>
+        </Box>
+      </Box>
+    )
+    const body = s.collapsed
+      ? []
+      : items.flatMap((x, i) => [
+          rule(`rule-${i}`),
+          <Box key={`item-${i}`} flexDirection="column" width="100%" minWidth={0} paddingX={INSET} paddingY={TILE_PAD_Y}>
+            {x}
+          </Box>,
+        ])
+    return (
+      <Box key={`list-${s.id}`} flexDirection="column" marginTop={1}>
+        {card(FILL.tile, s.accent, { flexDirection: 'column', width: '100%', minWidth: 0 }, [header, ...body])}
+      </Box>
+    )
+  }
 
   /**
    * A thin bar: parts left to right out of `max`, the rest as track. On the
@@ -1085,9 +1416,12 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
    * A section as a properties inspector draws one (Premiere's Effect Controls):
    * a collapsible header row (icon, title, figures, then the fold arrow last at
    * the right end) and its properties indented under it, the terminal's under the
-   * title. The arrow (a Button, key `toggle-<id>`) folds it. No panel, outline or tint: rows and indentation do
-   * the grouping. Collapsible when given `onToggle` (the mod keeps which are
-   * folded in its state); folded, only the header row shows.
+   * title. The arrow (a Button, key `toggle-<id>`) folds it. On the app surfaces
+   * the header is a band with rounded corners (`card`), its title one step up the
+   * type scale (`heading`), and an `accent` draws a thin stripe along the band's
+   * top edge; the body has no fill or outline, rows and indentation group it.
+   * Collapsible when given `onToggle` (the mod keeps which are folded in its
+   * state); folded, only the header row shows.
    */
   const section = (s: {
     id: string
@@ -1113,6 +1447,8 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
      * the narrow floor, so an open section doesn't say it twice.
      */
     restated?: boolean
+    /** A colour from ACCENT, drawn as a thin stripe along the band's top edge on the app surfaces; the terminal draws none. */
+    accent?: string
     children: RenderElement | (RenderElement | null)[] | null
   }) => {
     if (s.loading && !s.right) s = { ...s, right: summary([], { loading: true }) }
@@ -1222,8 +1558,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     // One standard row above each section, and no other margin: sections sit one row apart.
     return (
       <Box key={`section-${s.id}`} flexDirection="column" marginTop={1}>
-        {rounded(
+        {card(
           FILL.head,
+          s.accent,
           {
             flexDirection: 'row',
             justifyContent: 'space-between',
@@ -1240,7 +1577,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
                   {icon(s.icon, MUTED)}
                 </Box>
               ) : null}
-              <Text wrap="truncate" bold>
+              <Text wrap="truncate" bold size="heading">
                 {s.title}
               </Text>
             </Box>,
@@ -1506,8 +1843,9 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
         {row}
       </Box>
     ) : (
-      rounded(
+      card(
         FILL.head,
+        undefined,
         { flexDirection: 'row', flexWrap: 'nowrap', justifyContent: justify, alignItems: 'center', columnGap: SPACE.item, paddingX: INSET, height: BAND_ROWS, flexShrink: 0, marginTop: SPACE.block, overflow: 'hidden' },
         row,
       )
@@ -1861,6 +2199,69 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
   )
 
   /**
+   * A pane's tabs: one row of plain buttons, the `active` one marked; a press
+   * calls `onSelect` with that tab's id. The caller holds which tab is active (in
+   * its own state, so it survives redraws) and draws that tab's body under the
+   * row; the kit holds nothing. Draw it with the table `holdButtons` returned (each
+   * tab's Button is keyed `<key>-<id>`), so a press made just before a redraw
+   * still lands.
+   *
+   * On the terminal it reads as a section header does: the labels `space.group`
+   * apart, the active one bold and the rest dim, then a dim rule out to the edge,
+   * and a blank row under it. It spans the pane, not the measure: it belongs to
+   * the pane, above every section. A tab's `hotkey` (a digit) presses it and
+   * shows before its label (`1: Overview`).
+   *
+   * On the app surfaces, a band as tall as a header, its labels on the band's
+   * inset: the active one plain, the rest dim (the desktop draws a Button's label
+   * alone, so weight can't mark it), a short bar in the light grey under the
+   * active one, and a hairline in the track's grey under them all.
+   */
+  const tabs = (key: string, list: Tab[], active: string, onSelect: (id: string) => void): RenderElement => {
+    const button = (t: Tab) => {
+      const on = t.id === active
+      const hot = t.hotkey ? { hotkey: t.hotkey } : {}
+      if (!Button) return <Text key={`${key}-${t.id}`} {...(on ? (terminal ? R.title : {}) : tone('mid'))}>{t.label}</Text>
+      // The terminal draws a Button's child in its label's place, so the active label can be bold there.
+      if (on && terminal) {
+        return (
+          <Button key={`${key}-${t.id}`} plain label={t.label} {...hot} onPress={() => onSelect(t.id)}>
+            <Text {...R.title}>{t.label}</Text>
+          </Button>
+        )
+      }
+      return <Button key={`${key}-${t.id}`} plain label={t.label} {...(on ? {} : { dimColor: true })} {...hot} onPress={() => onSelect(t.id)} />
+    }
+    if (terminal) {
+      return (
+        <Box key={key} flexDirection="row" width={Math.max(1, Math.floor(columns))} paddingRight={RIGHT} marginBottom={1} gap={CELLS.item} overflow="hidden">
+          <Box key="labels" flexDirection="row" flexShrink={0} gap={CELLS.group}>
+            {list.map(button)}
+          </Box>
+          <Box key="rule" flexGrow={1} flexShrink={1} width={0} minWidth={0} height={1} overflow="hidden">
+            <Text dimColor>{METER.rail.repeat(Math.max(1, Math.floor(columns)))}</Text>
+          </Box>
+        </Box>
+      )
+    }
+    return (
+      <Box key={key} flexDirection="column" width="100%" flexShrink={0}>
+        <Box key="labels" flexDirection="row" gap={SPACE.group} paddingX={INSET} overflow="hidden">
+          {list.map(t => (
+            <Box key={t.id} flexDirection="column" flexShrink={0}>
+              <Box height={BAND_ROWS} flexDirection="row" alignItems="center">
+                {button(t)}
+              </Box>
+              <Box height={TAB_MARK} {...(t.id === active ? { backgroundColor: GRAY.light } : {})} />
+            </Box>
+          ))}
+        </Box>
+        <Box key="line" height={HAIRLINE} backgroundColor={TRACK} />
+      </Box>
+    )
+  }
+
+  /**
    * A key-hint footer: `key what` pairs (keys plain, what they do dim), ` · `
    * apart, on one line `width` cells wide (a section body's by default). Pairs
    * that don't fit are dropped from the end and the line ends in a dim `…`, so
@@ -1975,8 +2376,11 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     pinned,
     share,
     tile,
+    listItem,
+    collapsibleList,
     bar,
     capped,
+    card,
     rounded,
     scale,
     axis,
@@ -2004,6 +2408,7 @@ export const kit = (els: Els, surface: RenderSurface, columns = 40, opts: KitOpt
     note,
     action,
     actions,
+    tabs,
     hints,
     spark,
     /** Whether the pane has the keyboard, as the kit was told (unknown counts as yes). */
