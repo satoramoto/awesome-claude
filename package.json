@@ -10,7 +10,7 @@
     "storybook": "storybook dev --port ${PORT:-6006} --no-open --ci"
   },
   "devDependencies": {
-    "@satoramoto/zen": "github:satoramoto/zen#52c8463ee2304c8fc5e6975fe6923b1d39f3f572",
+    "@satoramoto/zen": "github:satoramoto/zen#f1c0b3ff4e738489ecc1a6660cb1f2b551969560",
     "@storybook/addon-essentials": "8.3.6",
     "@storybook/html": "8.3.6",
     "@storybook/html-vite": "8.3.6",

@@ -372,16 +372,24 @@ test('on the desktop the kit draws no outline: bands and tiles are fills with no
   const boxes = all(tree).filter(d => d.type === 'Box')
   // A `transparent` border draws in the text's colour there, so the kit asks for no border at all.
   expect(boxes.filter(b => b.props?.borderStyle !== undefined || b.props?.borderColor !== undefined)).toEqual([])
-  const bands = boxes.filter(b => b.props?.backgroundColor === FILL.head)
+  // Bands and tiles are cards: a container over an absolute ground (rounded edges round a fill).
+  const keyOf = (d: Drawn) => String(d.key ?? d.props?.key ?? '')
+  const cardFill = (b: Drawn) => {
+    const ground = kids(b).find(d => keyOf(d) === 'card-ground')
+    return ground && kids(ground).find(d => keyOf(d) === 'card-fill')?.props?.backgroundColor
+  }
+  const bands = boxes.filter(b => cardFill(b) === FILL.head)
   // Five sections and the perf footer.
   expect(bands.length).toBe(6)
   for (const b of bands) {
     expect(b.props?.height).toBe(BAND_ROWS)
     expect(b.props?.paddingY).toBeUndefined()
   }
-  const tiles = boxes.filter(b => b.props?.backgroundColor === FILL.tile || b.props?.backgroundColor === FILL.selected)
-  // The two tiles (and the selected item row, which shares the selected tint).
-  expect(tiles.length).toBe(3)
+  const tiles = boxes.filter(b => cardFill(b) === FILL.tile || cardFill(b) === FILL.selected)
+  // The two tiles.
+  expect(tiles.length).toBe(2)
+  // The selected item row shares the selected tint as a plain fill.
+  expect(boxes.filter(b => b.props?.backgroundColor === FILL.selected && keyOf(b) !== 'card-fill' && keyOf(b) !== 'fill').length).toBe(1)
   // Spacing is plain finite numbers (or percentages), never negative: what the desktop accepts.
   for (const b of boxes)
     for (const p of SPACING) {

@@ -513,7 +513,12 @@ test('on the desktop every header band is as tall, whatever its row holds, and n
     expect(await ui.find({ key: 'stop-app' })).toBeDefined()
     expect(await ui.find({ key: 'start-storybook' })).toBeDefined()
     expect(await ui.find({ key: 'adopt-storybook-wt' })).toBeDefined()
-    const bands = (await ui.findAll({ type: 'Box' })).filter(b => b.props.backgroundColor === FILL.head)
+    // A band is a card: a container over an absolute ground (rounded edges round a fill).
+    const cardFill = (b: Drawn) => {
+      const ground = kidsOf(b).find(d => keyOf(d) === 'card-ground')
+      return ground && kidsOf(ground).find(d => keyOf(d) === 'card-fill')?.props?.backgroundColor
+    }
+    const bands = (await ui.findAll({ type: 'Box' })).filter(b => cardFill(b as Drawn) === FILL.head)
     expect(bands, `one band a row at ${columns}`).toHaveLength(3)
     for (const b of bands) {
       expect(b.props.height, `band height at ${columns}`).toBe(BAND_ROWS)

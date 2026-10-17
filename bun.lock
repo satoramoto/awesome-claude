@@ -5,7 +5,7 @@
     "": {
       "name": "awesome-claude",
       "devDependencies": {
-        "@satoramoto/zen": "github:satoramoto/zen#52c8463ee2304c8fc5e6975fe6923b1d39f3f572",
+        "@satoramoto/zen": "github:satoramoto/zen#f1c0b3ff4e738489ecc1a6660cb1f2b551969560",
         "@storybook/addon-essentials": "8.3.6",
         "@storybook/html": "8.3.6",
         "@storybook/html-vite": "8.3.6",
@@ -120,7 +120,7 @@
 
     "@rollup/rollup-win32-x64-msvc": ["@rollup/rollup-win32-x64-msvc@4.64.3", "", { "os": "win32", "cpu": "x64" }, "sha512-qTv4bG+eKJKifzxNJevMUh8L6CjJrz9/Kn1IbP2F5bo0tBzNIR7HMg4vni6XmDzcKUl00lHHY+J5ZgjbGiujOQ=="],
 
-    "@satoramoto/zen": ["@satoramoto/zen@github:satoramoto/zen#52c8463", { "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "satoramoto-zen-52c8463"],
+    "@satoramoto/zen": ["@satoramoto/zen@github:satoramoto/zen#f1c0b3f", { "peerDependencies": { "react": "^19.0.0", "react-dom": "^19.0.0" } }, "satoramoto-zen-f1c0b3f"],
 
     "@storybook/addon-actions": ["@storybook/addon-actions@8.3.6", "", { "dependencies": { "@storybook/global": "^5.0.0", "@types/uuid": "^9.0.1", "dequal": "^2.0.2", "polished": "^4.2.2", "uuid": "^9.0.0" }, "peerDependencies": { "storybook": "^8.3.6" } }, "sha512-nOqgl0WoZK2KwjaABaXMoIgrIHOQl9inOzJvqQau0HOtsvnXGXYfJXYnpjZenoZDoZXKbUDl0U2haDFx2a2fJw=="],
 
